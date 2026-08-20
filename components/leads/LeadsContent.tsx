@@ -1,0 +1,131 @@
+"use client";
+
+import { LeadsSummary, LeadsMoMPoint, LeadsByGroup, FormatLeadsRevenue, AdrByFormat, LostLeadReason, OwnerLeadStats } from "@/lib/bigquery/queries/leads";
+import StatTile from "@/components/ui/StatTile";
+import Card from "@/components/ui/Card";
+import Table, { TableColumn } from "@/components/ui/Table";
+import SingleMetricBarChart, { BarDatum } from "@/components/charts/SingleMetricBarChart";
+import GroupedBarChart from "@/components/charts/GroupedBarChart";
+import { formatIndianCurrency, formatPercent } from "@/lib/format/currency";
+import { TARGET_VS_ACHIEVED_COLOR } from "@/lib/design/tokens";
+
+const FISCAL_MONTH_NAMES: Record<number, string> = {
+  1: "Apr", 2: "May", 3: "Jun", 4: "Jul", 5: "Aug", 6: "Sep",
+  7: "Oct", 8: "Nov", 9: "Dec", 10: "Jan", 11: "Feb", 12: "Mar",
+};
+
+const RANKING_COLOR = "var(--series-1)";
+
+export default function LeadsContent({
+  summary,
+  mom,
+  byProperty,
+  bySource,
+  formatLeadsRevenue,
+  adrByFormat,
+  lostReasons,
+  bookingPace,
+  byOwner,
+}: {
+  summary: LeadsSummary;
+  mom: LeadsMoMPoint[];
+  byProperty: LeadsByGroup[];
+  bySource: LeadsByGroup[];
+  formatLeadsRevenue: FormatLeadsRevenue[];
+  adrByFormat: AdrByFormat[];
+  lostReasons: LostLeadReason[];
+  bookingPace: number | null;
+  byOwner: OwnerLeadStats[];
+}) {
+  const momData = [...mom]
+    .sort((a, b) => a.monthNumber - b.monthNumber)
+    .map((m) => ({ month: FISCAL_MONTH_NAMES[m.monthNumber] ?? m.monthNumber, total: m.totalLeads, closed: m.closedLeads }));
+
+  const propertyData: BarDatum[] = byProperty.map((r) => ({ name: r.key, value: r.count, color: RANKING_COLOR }));
+  const sourceData: BarDatum[] = bySource.slice(0, 8).map((r) => ({ name: r.key, value: r.count, color: RANKING_COLOR }));
+  const formatLeadsData: BarDatum[] = formatLeadsRevenue.map((r) => ({ name: r.format, value: r.leads, color: RANKING_COLOR }));
+  const formatRevenueData: BarDatum[] = formatLeadsRevenue.map((r) => ({ name: r.format, value: r.revenue, color: RANKING_COLOR }));
+  const adrByFormatData: BarDatum[] = adrByFormat.map((r) => ({ name: r.format, value: r.adr ?? 0, color: RANKING_COLOR }));
+
+  const lostColumns: TableColumn<LostLeadReason>[] = [
+    { key: "stage", header: "Reason", render: (r) => r.stage },
+    { key: "count", header: "Leads", align: "right", render: (r) => r.count.toLocaleString("en-IN") },
+  ];
+
+  const ownerColumns: TableColumn<OwnerLeadStats>[] = [
+    { key: "owner", header: "Owner", render: (r) => r.owner },
+    { key: "revenue", header: "Revenue", align: "right", render: (r) => formatIndianCurrency(r.revenue) },
+    { key: "total", header: "Total leads", align: "right", render: (r) => r.totalLeads.toLocaleString("en-IN") },
+    { key: "closed", header: "Closed leads", align: "right", render: (r) => r.closedLeads.toLocaleString("en-IN") },
+    { key: "closedPct", header: "Closed %", align: "right", render: (r) => (r.closedPct !== null ? formatPercent(r.closedPct) : "—") },
+    { key: "exotel", header: "Exotel leads", align: "right", render: (r) => r.exotelLeads.toLocaleString("en-IN") },
+    { key: "exotelClosed", header: "Exotel closed", align: "right", render: (r) => r.exotelClosed.toLocaleString("en-IN") },
+    { key: "reference", header: "Reference", align: "right", render: (r) => r.referenceLeads.toLocaleString("en-IN") },
+    { key: "existing", header: "Existing leads", align: "right", render: (r) => r.existingLeads.toLocaleString("en-IN") },
+    { key: "adr", header: "ADR", align: "right", render: (r) => (r.adr !== null ? `₹${Math.round(r.adr).toLocaleString("en-IN")}` : "—") },
+  ];
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">Lead Tracker</h2>
+        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          <StatTile label="Total leads" value={summary.totalLeads.toLocaleString("en-IN")} />
+          <StatTile label="Closed leads" value={summary.closedLeads.toLocaleString("en-IN")} />
+          <StatTile
+            label="Conversion rate"
+            value={summary.conversionRate !== null ? formatPercent(summary.conversionRate) : "—"}
+          />
+          <StatTile label="Revenue" value={formatIndianCurrency(summary.revenue)} />
+          <StatTile label="B2C leads" value={summary.b2cLeads.toLocaleString("en-IN")} sub="Source = Exotel" />
+          <StatTile label="B2C leads closed" value={summary.b2cLeadsClosed.toLocaleString("en-IN")} />
+          <StatTile label="Existing leads closed" value={summary.existingClosedLeads.toLocaleString("en-IN")} />
+          <StatTile label="Reference leads closed" value={summary.referenceClosedLeads.toLocaleString("en-IN")} />
+          <StatTile label="Booking pace" value={bookingPace !== null ? bookingPace.toFixed(1) : "—"} />
+        </div>
+      </div>
+
+      <Card title="Leads MoM (total vs closed)">
+        <GroupedBarChart
+          data={momData}
+          xKey="month"
+          series={[
+            { key: "total", color: TARGET_VS_ACHIEVED_COLOR.target },
+            { key: "closed", color: TARGET_VS_ACHIEVED_COLOR.achieved },
+          ]}
+          valueFormatter={(v) => v.toLocaleString("en-IN")}
+        />
+      </Card>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card title="Leads by property">
+          <SingleMetricBarChart data={propertyData} valueFormatter={(v) => v.toLocaleString("en-IN")} />
+        </Card>
+        <Card title="Leads by source (top 8)">
+          <SingleMetricBarChart data={sourceData} valueFormatter={(v) => v.toLocaleString("en-IN")} />
+        </Card>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card title="Leads by format">
+          <SingleMetricBarChart data={formatLeadsData} valueFormatter={(v) => v.toLocaleString("en-IN")} />
+        </Card>
+        <Card title="Revenue by format">
+          <SingleMetricBarChart data={formatRevenueData} valueFormatter={(v) => formatIndianCurrency(v)} />
+        </Card>
+      </div>
+
+      <Card title="ADR by format (closed leads)">
+        <SingleMetricBarChart data={adrByFormatData} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} />
+      </Card>
+
+      <Card title="Lost leads reasons">
+        <Table columns={lostColumns} rows={lostReasons} rowKey={(r) => r.stage} />
+      </Card>
+
+      <Card title={`By owner (${byOwner.length})`}>
+        <Table columns={ownerColumns} rows={byOwner} rowKey={(r) => r.owner} />
+      </Card>
+    </div>
+  );
+}
