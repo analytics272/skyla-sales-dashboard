@@ -2,23 +2,22 @@
 
 // Global Property / FY / Quarter / Month filters (PRD §5), synced to the URL so
 // they survive refresh, are shareable, and persist across tab navigation without
-// needing a separate store. Property and Month are multi-select; FY and Quarter
-// are single-select (Trends/Brand/Targets already show all 3 FYs side-by-side
-// as separate series, so FY there isn't a restrictive filter to begin with).
+// needing a separate store. Property, FY, and Month are all multi-select;
+// Quarter is single-select (a convenience shortcut for its 3 months).
 import { createContext, useContext, useMemo, useCallback, ReactNode, Suspense } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { currentFYLabel } from "@/lib/reference/financialYear";
 
 export interface FiltersState {
   properties: string[]; // empty = all active properties
-  fy: string;
+  fys: string[]; // empty = default to the current FY
   quarter?: 1 | 2 | 3 | 4;
   months: number[]; // empty = whole FY, no narrowing
 }
 
 interface FiltersContextValue extends FiltersState {
   setProperties: (properties: string[]) => void;
-  setFy: (fy: string) => void;
+  setFys: (fys: string[]) => void;
   setQuarter: (quarter?: 1 | 2 | 3 | 4) => void;
   setMonths: (months: number[]) => void;
   toggleMonth: (month: number) => void;
@@ -37,7 +36,11 @@ function FiltersProviderInner({ children }: { children: ReactNode }) {
     return raw ? raw.split(",").filter(Boolean) : [];
   }, [searchParams]);
 
-  const fy = searchParams.get("fy") ?? currentFYLabel();
+  const fys = useMemo(() => {
+    const raw = searchParams.get("fy");
+    return raw ? raw.split(",").filter(Boolean) : [];
+  }, [searchParams]);
+
   const quarterRaw = searchParams.get("quarter");
   const quarter = quarterRaw ? (Number(quarterRaw) as 1 | 2 | 3 | 4) : undefined;
 
@@ -60,11 +63,11 @@ function FiltersProviderInner({ children }: { children: ReactNode }) {
 
   const value: FiltersContextValue = {
     properties,
-    fy,
+    fys: fys.length > 0 ? fys : [currentFYLabel()],
     quarter,
     months,
     setProperties: (p) => updateParams({ property: p.length ? p.join(",") : undefined }),
-    setFy: (v) => updateParams({ fy: v }),
+    setFys: (v) => updateParams({ fy: v.length ? v.join(",") : undefined }),
     // Changing quarter drops a stale month selection from a different quarter.
     setQuarter: (q) => updateParams({ quarter: q ? String(q) : undefined, months: undefined }),
     setMonths: (m) => updateParams({ months: m.length ? m.join(",") : undefined, quarter: undefined }),

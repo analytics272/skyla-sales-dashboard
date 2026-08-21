@@ -10,17 +10,18 @@ import {
   getLeadsByOwner,
 } from "@/lib/bigquery/queries/leads";
 import { parseKpiFilter, SearchParams } from "@/lib/filters/parseSearchParams";
+import { latestSelectedFy } from "@/lib/reference/financialYear";
 import LeadsContent from "@/components/leads/LeadsContent";
 
 export default async function LeadsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const sp = await searchParams;
   const filter = parseKpiFilter(sp);
-  const leadsFilter = { properties: filter.properties, fy: filter.fy, quarter: filter.quarter, months: filter.months };
+  const leadsFilter = { properties: filter.properties, fys: filter.fys, quarter: filter.quarter, months: filter.months };
 
   const [summary, mom, byProperty, bySource, formatLeadsRevenue, adrByFormat, lostReasons, bookingPace, byOwner] =
     await Promise.all([
       getLeadsSummary(leadsFilter),
-      getLeadsMoM(filter.fy),
+      getLeadsMoM(latestSelectedFy(filter)),
       getLeadsByProperty(leadsFilter),
       getLeadsBySource(leadsFilter),
       getFormatLeadsRevenue(leadsFilter),

@@ -2,6 +2,7 @@
 
 import { useState, FormEvent, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Image from "next/image";
 
 function LoginForm() {
   const router = useRouter();
@@ -40,7 +41,8 @@ function LoginForm() {
     <div className="flex min-h-screen items-center justify-center bg-zinc-50 px-4 dark:bg-black">
       <div className="w-full max-w-sm rounded-xl border border-zinc-200 bg-white p-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
         <div className="mb-8 text-center">
-          <h1 className="text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+          <Image src="/skyla-icon.png" alt="Skyla Collective" width={932} height={899} className="mx-auto h-14 w-auto" priority />
+          <h1 className="mt-3 text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
             Skyla Collective
           </h1>
           <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">Sales Dashboard</p>

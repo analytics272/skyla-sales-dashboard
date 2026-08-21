@@ -43,9 +43,9 @@ export default async function BookingPage({ searchParams }: { searchParams: Prom
     getExpatStats(filter),
     getCancellationStats(filter),
     getCancellationLeadTime(filter),
-    getB2bByCompany({ properties: filter.properties, fy: filter.fy }),
-    getB2bContractRanking(filter.fy),
-    getB2bTopAdrContracts(filter.fy),
+    getB2bByCompany({ properties: filter.properties, fys: filter.fys }),
+    getB2bContractRanking(filter.fys),
+    getB2bTopAdrContracts(filter.fys),
     getCorporateAccountRetention(),
   ]);
 

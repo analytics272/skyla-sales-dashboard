@@ -86,6 +86,12 @@ export default function BookingContent({
     { key: "nights", header: "Nights", align: "right", render: (r) => r.nights.toLocaleString("en-IN") },
   ];
 
+  const retentionData: BarDatum[] = b2bRetention.map((r) => ({
+    name: `${r.fromFy} → ${r.toFy}`,
+    value: r.retentionPct !== null ? r.retentionPct * 100 : 0,
+    color: "var(--series-1)",
+  }));
+
   return (
     <div className="space-y-6">
       <div>
@@ -151,24 +157,12 @@ export default function BookingContent({
       </Card>
 
       <div>
-        <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Additional Occupancy</h3>
-        <div className="mt-2 rounded-lg border border-dashed border-zinc-300 bg-white p-4 text-sm text-zinc-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-400">
-          Not available — PRD §3.6: no supporting column found for Additional Occupancy Bookings/Revenue across the 7
-          in-scope tables. Excluded from v1 rather than fabricated; revisit if a new data source is confirmed.
-        </div>
-      </div>
-
-      <div>
         <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">B2B Contracts</h3>
-        <div className="mt-2 grid gap-3 sm:grid-cols-2">
-          {b2bRetention.map((r) => (
-            <StatTile
-              key={`${r.fromFy}-${r.toFy}`}
-              label={`Corporate retention, ${r.fromFy} → ${r.toFy}`}
-              value={r.retentionPct !== null ? formatPercent(r.retentionPct) : "—"}
-              sub={`${r.retainedCompanies} of ${r.companiesInFromFy} contract companies retained`}
-            />
-          ))}
+
+        <div className="mt-2">
+          <Card title="Corporate account retention">
+            <SingleMetricBarChart data={retentionData} valueFormatter={(v) => `${v.toFixed(0)}%`} />
+          </Card>
         </div>
 
         <div className="mt-3">

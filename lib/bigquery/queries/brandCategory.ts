@@ -1,7 +1,7 @@
 // PRD §6.4 — Brand & Business Category.
 import { runQuery, table } from "../client";
 import { KpiFilter, resolveFilter, buildScopeClause } from "./filters";
-import { getAvailableRoomNightsByProperty, rangesForFyAndMonths } from "./propertyWindows";
+import { getAvailableRoomNightsByProperty, rangesForFysAndMonths } from "./propertyWindows";
 import { bookingCategorySqlExpr, BookingCategory } from "@/lib/reference/bookingSourceMap";
 import { fyLabelSqlExpr } from "@/lib/reference/financialYear";
 import { Brand, brandOf } from "@/lib/reference/propertyReference";
@@ -25,7 +25,7 @@ export async function getBrandOccupancy(filter: KpiFilter): Promise<BrandOccupan
       WHERE ${where}
       GROUP BY property
     `, params),
-    getAvailableRoomNightsByProperty(resolved.properties, rangesForFyAndMonths(resolved.fy, resolved.months)),
+    getAvailableRoomNightsByProperty(resolved.properties, rangesForFysAndMonths(resolved.fys, resolved.months)),
   ]);
 
   const byBrand = new Map<Brand, { sold: number; available: number }>();

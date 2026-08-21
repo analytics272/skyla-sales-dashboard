@@ -2,6 +2,16 @@ import { runQuery, table } from "../client";
 import { ALL_PROPERTY_CODES, roomCountOf } from "@/lib/reference/propertyReference";
 import { DateRange, fyBounds, fyMonthBounds } from "@/lib/reference/financialYear";
 
+/** Builds the DateRange[] (one per FY x month combination) for getAvailableRoomNights(By Property) from a resolved fys+months pair. Mirrors resolveMonthRanges() but avoids importing ResolvedFilter here to keep this module filter-shape-agnostic. */
+export function rangesForFysAndMonths(fys: string[], months: number[]): DateRange[] {
+  const ranges: DateRange[] = [];
+  for (const fy of fys) {
+    if (months.length === 0) ranges.push(fyBounds(fy));
+    else for (const m of months) ranges.push(fyMonthBounds(fy, m));
+  }
+  return ranges;
+}
+
 export interface PropertyWindow {
   property: string;
   minStay: string | null; // ISO date
@@ -108,11 +118,4 @@ export async function getAvailableRoomNightsByProperty(
 export async function getAvailableRoomNights(properties: string[], ranges: DateRange[] | null): Promise<number> {
   const byProperty = await getAvailableRoomNightsByProperty(properties, ranges);
   return Object.values(byProperty).reduce((sum, n) => sum + n, 0);
-}
-
-/** Builds the DateRange[] for getAvailableRoomNights(By Property) from a resolved fy+months pair. Mirrors resolveMonthRanges() but avoids importing ResolvedFilter here to keep this module filter-shape-agnostic. */
-export function rangesForFyAndMonths(fy: string | null, months: number[]): DateRange[] | null {
-  if (!fy) return null;
-  if (months.length === 0) return [fyBounds(fy)];
-  return months.map((m) => fyMonthBounds(fy, m));
 }

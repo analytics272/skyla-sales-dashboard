@@ -1,8 +1,8 @@
 import { getGoogleRatingTrend, getOtaRatingTrend } from "../lib/bigquery/queries/reviews";
 
 async function main() {
-  const googleTrend = await getGoogleRatingTrend({ fy: "FY 25-26" });
-  const otaTrend = await getOtaRatingTrend({ fy: "FY 25-26" });
+  const googleTrend = await getGoogleRatingTrend({ fys: ["FY 25-26"] });
+  const otaTrend = await getOtaRatingTrend({ fys: ["FY 25-26"] });
 
   console.log("Google trend FY values (should be only FY 25-26):", [...new Set(googleTrend.map((p) => p.fy))]);
   console.log("Google trend points:", googleTrend.length);

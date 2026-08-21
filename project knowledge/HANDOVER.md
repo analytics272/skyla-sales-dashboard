@@ -1,7 +1,7 @@
-# HANDOVER — Skyla Analytics (Pipeline status + Sales Dashboard PRD)
+# HANDOVER — Skyla Analytics (Pipeline status + Sales Dashboard PRD + Build)
 
 **Project:** skyla-analytics / BigQuery dataset `Skyla_Sales_Automation`
-**This doc supersedes the previous HANDOVER.md** — Part A carries forward the prior pipeline session in condensed form (with updated statuses), Part B documents this session's dashboard-PRD work in full. Upload this file to Project Knowledge in place of the old one.
+**This doc supersedes the previous HANDOVER.md** — Part A carries forward the prior pipeline session in condensed form, Part B documents the PRD-writing session, **Part C (new) documents the actual dashboard build** — implemented, tested against live data, and ready to deploy. Upload this file to Project Knowledge in place of the old one.
 
 ---
 
@@ -128,9 +128,157 @@ This file was delivered to the user as a download — **not yet handed to Claude
 - `Skyla_Sales_Dashboard_PRD.md` (the PRD itself)
 - This updated `HANDOVER.md`
 
-## Open items, in priority order
+## Open items from Part B (status as of Part C — see below)
 
-1. **Supply the missing OTA commission rates** — BH4/LP Booking.com rate, Travex rate (§B.4) — needed before OTA net-revenue KPIs are fully accurate. Currently placeholdered at 0%.
-2. **Hand `Skyla_Sales_Dashboard_PRD.md` to Claude Code** to begin actual implementation.
-3. Confirm/adjust the inferred business definitions before they ship: Expats (`Country != 'India'`), Repeat Booking (contact-based matching), and whether `lead_tracker`'s "Total Leads" should be row-count (current PRD default, matches legacy formula) or a deduped lead count (a single lead can produce multiple rows for different stay segments).
-4. No pipeline items remain open from Part A — all resolved or explicitly accepted as-is this session.
+1. ~~Supply the missing OTA commission rates~~ — **Resolved in Part C**: BH4 Booking.com 15%, Travex 20% flat. The generic `"OTA"` source label is still unresolved (0%, no rate ever supplied) — the only item from this list still open.
+2. ~~Hand `Skyla_Sales_Dashboard_PRD.md` to Claude Code~~ — **Done, see Part C.**
+3. Expats / Repeat Booking definitions — **still the original PRD assumptions, unchanged.** Not revisited during the build; flag if the business wants a different definition.
+4. No pipeline items remain open from Part A.
+
+---
+
+# PART C — Dashboard build (this session, full detail)
+
+## C.1 Session goal
+
+Implement `Skyla_Sales_Dashboard_PRD.md` end to end: Next.js + BigQuery data
+layer, shared-login auth gate, responsive UI shell, and every KPI in the §6
+catalog wired to live data — then, on request, restructure the tabs and add
+several KPIs to match the team's existing Looker Studio dashboard more
+closely. Deployment target is Vercel; **not pushed to GitHub or deployed
+during this session** (explicitly out of scope — user handles that step).
+
+## C.2 Stack
+
+Next.js 16 (App Router, Server Components fetch BigQuery directly — no
+separate API layer needed), `@google-cloud/bigquery`, Recharts, Tailwind,
+`jose` (session JWT) + `bcryptjs` (password hash) for the auth gate. Full
+rationale and file layout: see the repo's own `AGENTS.md`/project structure,
+or ask for it again — not duplicated here.
+
+## C.3 Real-data findings during implementation (none were in the PRD)
+
+These surfaced only once real BigQuery data was queried — each one is now
+handled in code and documented in `Skyla_Dashboard_KPI_Logic_Reference.md`:
+
+- **BH4 and LP have zero rows in `sales_booking`/`sales_booking_cancelled`**,
+  despite BH4 being listed Active. Confirmed by enumerating every distinct
+  `Property` value across both tables — only KDP/HTC/JHS/GB appear. This is a
+  pipeline gap (BH4 has real data in `b2b_bills`/`lead_tracker`/`rating_sheet`,
+  just not the two booking tables), not a dashboard defect. **Decision:
+  build it anyway** — BH4/LP show zero/blank stay-based KPIs until the eZee
+  sync backfills; unaffected tabs (B2B, Leads, Reviews) show BH4's real data.
+- **GB's actual active window starts 2024-04-02**, not "mid-2026" as
+  originally documented — real StayDate data contradicted the reference doc.
+  Available Room Nights now uses each property's empirical `MIN/MAX(StayDate)`
+  instead of a hardcoded date, for all properties.
+- **Room→RoomType join only matched 37% of real rows** — the reference
+  sheet's `Room` values carry a room-number prefix (`"107-Studio Supreme"`)
+  that most real `sales_booking.Room` values don't have. Fixed via
+  number-prefix normalization (37% → 99.997% match rate, verified no
+  duplicate-row fan-out from the join). GB needed a separate fix since its
+  room *number* — not just the text — decides Room vs Lite vs Go.
+- **`lead_tracker` has two Property codes outside the 6-property reference
+  table**: `KOND` (1,017 rows) and `JH44` (729 rows). User-confirmed remap:
+  `KOND → KDP` (Kondapur), `JH44 → JHS` (Jubilee Hills).
+- **`b2b_bills`'s own `Financial_Year` column uses a different FY convention**
+  than the standard Apr–Mar rule (a `2024-03-31` row is labeled `FY 24-25`,
+  not `FY 23-24`). Trusted as-is rather than recomputed, same principle as
+  `leadership_targets`.
+- **`rating_sheet`/`ota` hold review history back to 2013/2016** — over a
+  decade before `sales_booking` starts. The Reviews tab's rating trend is
+  scoped to the selected FY (not "one line per FY" like Trends) specifically
+  because of this — an unscoped version produced a 15-series chart spanning
+  `FY 13-14` to `FY 26-27`.
+- A handful of small query bugs were caught by cross-checking totals between
+  independent queries and fixed: NULL `ReservationNo` rows double-counting
+  bookings, `"Go-MMT"` vs `"go-mmt"` showing as duplicate OTA rows, and a
+  BigQuery `HAVING`-clause case-insensitive alias collision.
+
+## C.4 Decisions made this session
+
+| Decision | Answer |
+|---|---|
+| BH4/LP zero booking rows | Known pipeline gap — build it anyway |
+| GB Available Room Nights window | Use empirical `MIN/MAX(StayDate)`, not a hardcoded date |
+| `lead_tracker` KOND/JH44/null Property | Remap KOND→KDP, JH44→JHS; null shown as literal `"null"` |
+| Room→RoomType mismatch | Normalize by stripping the room-number prefix; GB reconstructs its key from `RoomNo` |
+| Quarter filter alignment | Fiscal, matching the Apr–Mar FY (Q1=Apr-Jun … Q4=Jan-Mar) |
+| Booking.com/BH4 commission | 15% |
+| Travex commission | 20%, flat across all properties |
+| Generic "OTA" label commission | Left at 0% (unresolved, matches original PRD placeholder) |
+| Shared login credentials | `Skyla_Sales` / user-supplied password, stored as env vars (bcrypt hash for the password) |
+| Multi-select scope | Property and Month are multi-select; FY and Quarter stay single-select |
+
+## C.5 Dashboard structure — restructured mid-build to match the existing Looker Studio dashboard
+
+The PRD's original catalog was delivered first as 7 tabs (Overview, Guest
+Detail, Trends, Brand & Category, Targets, Leads, OTA+Reviews combined). The
+user then shared screenshots of the team's existing Looker Studio dashboard
+and asked for the structure to match it more closely. **Final structure is 8
+tabs**, left-sidebar nav (teal, matching the Looker branding) instead of the
+original top-tab-bar:
+
+**Revenue Details · Booking Details · Trends · Brand · Targets · Lead Tracker
+· OTA Breakdown · Reviews**
+
+B2B Contracts (ranking, top ADR, retention) folded into Booking Details rather
+than a standalone tab, matching the Looker layout. OTA and Reviews split back
+apart into two tabs (they'd been combined for scope reasons early in the
+build). Full KPI-to-tab mapping is in `Skyla_Dashboard_KPI_Logic_Reference.md`.
+
+**KPIs added** during the restructure, beyond the original PRD catalog:
+Revenue per Guest, B2C Leads / B2C Leads Closed, an explicit Expat Nights
+tile, a Leads-by-Owner table, a monthly "Revenue Targets with Roll Over"
+3-line chart (Dept Target / Target w/ Roll Over / Achieved), and an OTA
+Breakdown grand-total row. **Additional Occupancy Bookings/Revenue** was
+requested again here — still not implemented, same reason as the original
+PRD exclusion (no supporting data column); shown as an explicit "not
+available" placeholder rather than a fabricated number.
+
+## C.6 Multi-select Month filter — architecture note
+
+Originally Month was single-select. Reworked to multi-select on request,
+which required changing date-scoping across all 9 query files: a `BETWEEN`
+date range breaks for a non-contiguous selection (e.g. "Apr + Dec" would wrongly
+include May–Nov under a range). Now filters as
+`FY label = @fy AND EXTRACT(MONTH FROM date) IN UNNEST(@months)` everywhere.
+Verified directly against BigQuery post-rework (Apr+Dec FY25-26 → exactly
+₹3.75 Cr / 6,627 nights, matching a direct two-month query, not the ₹15.4 Cr
+a range would have wrongly produced).
+
+## C.7 Deployment status
+
+- **Not deployed, not pushed to GitHub** — explicitly held back per user
+  instruction. Local git repo is initialized and staged; user runs the commit
+  and push themselves.
+- `.env.local` and the BigQuery service account key are gitignored; confirmed
+  excluded from the staged commit before handing off push instructions.
+- **Found and documented a real Vercel-specific gotcha**: the bcrypt password
+  hash contains `$` characters, which Next.js's local `.env` file loader
+  (`@next/env`, uses dotenv-expand) interprets as variable interpolation and
+  silently mangles into an empty string — login failed locally until this was
+  found and the `$` characters were backslash-escaped in `.env.local`. That
+  escaping is **only correct for the local `.env` file** — Vercel's dashboard
+  stores env vars as literal strings with no such parsing, so the *unescaped*
+  raw hash (real `$`, no backslashes) is what belongs there. Pasting the
+  escaped local value into Vercel produces the "works locally, invalid in
+  production" symptom — this exact mix-up happened once already and was
+  corrected.
+
+## C.8 Deliverables produced this session
+
+- The full dashboard application (all files under `app/`, `components/`,
+  `lib/`, plus `middleware`→`proxy.ts` per Next.js 16's rename).
+- `Skyla_Dashboard_KPI_Logic_Reference.md` — every KPI/chart across all 8
+  tabs with its exact formula and data source, for anyone auditing the
+  numbers without reading the code.
+- This updated `HANDOVER.md`.
+
+## Open items, current
+
+1. **Generic "OTA" source label commission rate** — still 0%, never supplied. Only remaining gap from the original OTA commission table.
+2. **Expats / Repeat Booking definitions** — still PRD-documented assumptions, never revisited with the business.
+3. **BH4/LP booking-table pipeline gap** (§C.3) — a pipeline issue, not a dashboard one; will self-resolve once the eZee sync backfills BH4/LP into `sales_booking`.
+4. **Deployment** — repo is git-initialized and staged locally; user still needs to commit, create the GitHub repo, push, and connect Vercel (instructions already handed off in-session). Remember the `SHARED_PASSWORD_HASH` unescaping note in §C.7 when setting Vercel env vars.
+5. **Additional Occupancy Bookings/Revenue** — still no supporting data column found; would need a new source (not one of the 7 in-scope tables) to ever populate this KPI.

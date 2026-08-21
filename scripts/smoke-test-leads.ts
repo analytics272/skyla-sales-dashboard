@@ -14,7 +14,7 @@ async function main() {
   console.log(await getLeadsSummary({}));
 
   console.log("--- Leads Summary, FY 25-26 ---");
-  console.log(await getLeadsSummary({ fy: "FY 25-26" }));
+  console.log(await getLeadsSummary({ fys: ["FY 25-26"] }));
 
   console.log("--- Leads MoM, FY 25-26 ---");
   console.log(await getLeadsMoM("FY 25-26"));

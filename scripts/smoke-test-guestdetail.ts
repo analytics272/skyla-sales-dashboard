@@ -12,7 +12,7 @@ import {
 } from "../lib/bigquery/queries/guestDetail";
 
 async function main() {
-  const filter = { fy: "FY 25-26" };
+  const filter = { fys: ["FY 25-26"] };
 
   console.log("--- Booking Stats ---");
   console.log(await getBookingStats(filter));

@@ -10,12 +10,12 @@ export interface B2bContractRanking {
   nights: number;
 }
 
-export async function getB2bContractRanking(fy?: string): Promise<B2bContractRanking[]> {
+export async function getB2bContractRanking(fys?: string[]): Promise<B2bContractRanking[]> {
   const params: Record<string, unknown> = {};
   let fyClause = "";
-  if (fy) {
-    params.fy = fy;
-    fyClause = " AND Financial_Year = @fy";
+  if (fys && fys.length > 0) {
+    params.fys = fys;
+    fyClause = " AND Financial_Year IN UNNEST(@fys)";
   }
 
   return runQuery<B2bContractRanking>(`
@@ -38,12 +38,12 @@ export interface B2bTopAdrContract {
 }
 
 /** Ranked by AVG(ADR), filtered to meaningful volume (Nights > 0) per PRD. */
-export async function getB2bTopAdrContracts(fy?: string): Promise<B2bTopAdrContract[]> {
+export async function getB2bTopAdrContracts(fys?: string[]): Promise<B2bTopAdrContract[]> {
   const params: Record<string, unknown> = {};
   let fyClause = "";
-  if (fy) {
-    params.fy = fy;
-    fyClause = " AND Financial_Year = @fy";
+  if (fys && fys.length > 0) {
+    params.fys = fys;
+    fyClause = " AND Financial_Year IN UNNEST(@fys)";
   }
 
   // total_nights (not "nights"): BigQuery resolves HAVING identifiers

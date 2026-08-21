@@ -10,7 +10,7 @@ async function main() {
   console.log(await getGoogleReviewStats({}));
 
   console.log("--- Google Reviews, FY 25-26 ---");
-  console.log(await getGoogleReviewStats({ fy: "FY 25-26" }));
+  console.log(await getGoogleReviewStats({ fys: ["FY 25-26"] }));
 
   console.log("--- Google Reviews, KDP only ---");
   console.log(await getGoogleReviewStats({ properties: ["KDP"] }));

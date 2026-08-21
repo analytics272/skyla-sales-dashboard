@@ -3,7 +3,7 @@
 // doesn't apply here. Month_Number is already FY-relative (Apr=1 ... Mar=12),
 // matching fiscal quarters directly: Q1=1-3, Q2=4-6, Q3=7-9, Q4=10-12.
 import { runQuery, table } from "../client";
-import { currentFYLabel, DateFilter, resolveSelectedMonths } from "@/lib/reference/financialYear";
+import { currentFYLabel, DateFilter, resolveSelectedFYs, resolveSelectedMonths } from "@/lib/reference/financialYear";
 import { safeDivide } from "@/lib/format/currency";
 
 export type TargetsFilter = DateFilter;
@@ -13,9 +13,9 @@ function fiscalMonthNumber(calendarMonth: number): number {
 }
 
 function whereForFilter(filter: TargetsFilter): { clause: string; params: Record<string, unknown> } {
-  const fy = filter.fy ?? currentFYLabel();
-  const params: Record<string, unknown> = { fy };
-  const conditions = ["Financial_Year = @fy"];
+  const fys = resolveSelectedFYs(filter);
+  const params: Record<string, unknown> = { fys };
+  const conditions = ["Financial_Year IN UNNEST(@fys)"];
 
   const months = resolveSelectedMonths(filter);
   if (months.length > 0) {

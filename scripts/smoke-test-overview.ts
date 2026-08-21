@@ -4,7 +4,7 @@ import { formatIndianCurrency, formatPercent } from "../lib/format/currency";
 
 async function main() {
   console.log("=== All active properties, FY 25-26 ===");
-  const r1 = await getOverviewKpis({ fy: "FY 25-26" });
+  const r1 = await getOverviewKpis({ fys: ["FY 25-26"] });
   console.log({
     roomRevenue: formatIndianCurrency(r1.roomRevenue),
     extrasRevenue: formatIndianCurrency(r1.extrasRevenue),
@@ -18,7 +18,7 @@ async function main() {
   });
 
   console.log("\n=== Single property KDP, FY 25-26, Q2 ===");
-  const r2 = await getOverviewKpis({ fy: "FY 25-26", quarter: 2, properties: ["KDP"] });
+  const r2 = await getOverviewKpis({ fys: ["FY 25-26"], quarter: 2, properties: ["KDP"] });
   console.log({
     roomRevenue: formatIndianCurrency(r2.roomRevenue),
     soldRoomNights: r2.soldRoomNights,
@@ -27,7 +27,7 @@ async function main() {
   });
 
   console.log("\n=== BH4 only (known pipeline gap — expect zeros), FY 25-26 ===");
-  const r3 = await getOverviewKpis({ fy: "FY 25-26", properties: ["BH4"] });
+  const r3 = await getOverviewKpis({ fys: ["FY 25-26"], properties: ["BH4"] });
   console.log({
     roomRevenue: r3.roomRevenue,
     soldRoomNights: r3.soldRoomNights,
@@ -36,7 +36,7 @@ async function main() {
   });
 
   console.log("\n=== Single month: FY 25-26, August (calendar month 8) ===");
-  const r4 = await getOverviewKpis({ fy: "FY 25-26", months: [8] });
+  const r4 = await getOverviewKpis({ fys: ["FY 25-26"], months: [8] });
   console.log({
     roomRevenue: formatIndianCurrency(r4.roomRevenue),
     soldRoomNights: r4.soldRoomNights,

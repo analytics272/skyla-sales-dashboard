@@ -1,7 +1,7 @@
 // PRD §6.2 — Guest & Revenue Detail.
 import { runQuery, table } from "../client";
 import { KpiFilter, resolveFilter, buildScopeClause, ResolvedFilter } from "./filters";
-import { getAvailableRoomNights, rangesForFyAndMonths } from "./propertyWindows";
+import { getAvailableRoomNights, rangesForFysAndMonths } from "./propertyWindows";
 import { bookingCategorySqlExpr, BookingCategory } from "@/lib/reference/bookingSourceMap";
 import { fyLabelSqlExpr } from "@/lib/reference/financialYear";
 import { roomTypeMappingSqlUnnest, roomTypeJoinCondition } from "@/lib/reference/roomTypeMapping";
@@ -73,7 +73,7 @@ export interface RoomNightsGap {
 
 export async function getRoomNightsGap(filter: KpiFilter): Promise<RoomNightsGap> {
   const resolved = resolveFilter(filter);
-  const available = await getAvailableRoomNights(resolved.properties, rangesForFyAndMonths(resolved.fy, resolved.months));
+  const available = await getAvailableRoomNights(resolved.properties, rangesForFysAndMonths(resolved.fys, resolved.months));
 
   const { clause: where, params } = buildScopeClause("Property", "CAST(StayDate AS DATE)", resolved, "");
   const soldRows = await runQuery<{ n: number }>(`
@@ -84,8 +84,8 @@ export async function getRoomNightsGap(filter: KpiFilter): Promise<RoomNightsGap
   const unsoldRoomNights = Math.max(0, available - sold);
 
   const today = new Date().toISOString().slice(0, 10);
-  const ranges = rangesForFyAndMonths(resolved.fy, resolved.months);
-  const scopeEnd = ranges ? ranges.reduce((max, r) => (r.end > max ? r.end : max), ranges[0].end) : undefined;
+  const ranges = rangesForFysAndMonths(resolved.fys, resolved.months);
+  const scopeEnd = ranges.reduce((max, r) => (r.end > max ? r.end : max), ranges[0].end);
   let remainingRoomNights = 0;
   if (!scopeEnd || scopeEnd >= today) {
     const forwardRange = { start: today, end: scopeEnd ?? "2999-12-31" };
@@ -338,14 +338,10 @@ export interface B2bCompanyStats {
   adr: number | null;
 }
 
-export async function getB2bByCompany(filter: Pick<KpiFilter, "properties" | "fy">): Promise<B2bCompanyStats[]> {
+export async function getB2bByCompany(filter: Pick<KpiFilter, "properties" | "fys">): Promise<B2bCompanyStats[]> {
   const resolved: ResolvedFilter = resolveFilter(filter);
-  const params: Record<string, unknown> = { properties: resolved.properties };
-  let fyClause = "";
-  if (filter.fy) {
-    params.fy = filter.fy;
-    fyClause = " AND Financial_Year = @fy";
-  }
+  const params: Record<string, unknown> = { properties: resolved.properties, fys: resolved.fys };
+  const fyClause = " AND Financial_Year IN UNNEST(@fys)";
 
   return runQuery<B2bCompanyStats>(`
     SELECT

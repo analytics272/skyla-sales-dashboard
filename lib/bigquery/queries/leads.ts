@@ -11,7 +11,7 @@
 // codes outside the 6-property reference table. KOND -> KDP (Kondapur), JH44 ->
 // JHS (Jubilee Hills). NULL Property displays as the literal "null" bucket.
 import { runQuery, table } from "../client";
-import { currentFYLabel, fyLabelSqlExpr, resolveSelectedMonths, DateFilter } from "@/lib/reference/financialYear";
+import { currentFYLabel, fyLabelSqlExpr, resolveSelectedFYs, resolveSelectedMonths, DateFilter } from "@/lib/reference/financialYear";
 import { safeDivide } from "@/lib/format/currency";
 
 const BASELINE_FILTER = "Name IS NOT NULL AND TRIM(Name) != ''";
@@ -33,14 +33,13 @@ function whereForFilter(filter: LeadsFilter): { clause: string; params: Record<s
   const conditions = [BASELINE_FILTER];
   const params: Record<string, unknown> = {};
 
-  if (filter.fy) {
-    params.fy = filter.fy;
-    conditions.push(`${fyLabelSqlExpr("date")} = @fy`);
-    const months = resolveSelectedMonths(filter);
-    if (months.length > 0) {
-      params.months = months;
-      conditions.push("EXTRACT(MONTH FROM date) IN UNNEST(@months)");
-    }
+  const fys = resolveSelectedFYs(filter);
+  params.fys = fys;
+  conditions.push(`${fyLabelSqlExpr("date")} IN UNNEST(@fys)`);
+  const months = resolveSelectedMonths(filter);
+  if (months.length > 0) {
+    params.months = months;
+    conditions.push("EXTRACT(MONTH FROM date) IN UNNEST(@months)");
   }
   if (filter.properties && filter.properties.length > 0) {
     params.properties = filter.properties;

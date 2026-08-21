@@ -4,9 +4,9 @@
 export const FY_START_MONTH = 4; // April
 
 export interface DateFilter {
-  fy?: string; // "FY 25-26"
+  fys?: string[]; // ["FY 25-26", ...] — multi-select; [] or undefined = default to the current FY
   quarter?: 1 | 2 | 3 | 4; // fiscal quarter (convenience shortcut for its 3 months)
-  months?: number[]; // calendar months, 1-12, multi-select — narrows within `fy`
+  months?: number[]; // calendar months, 1-12, multi-select — narrows within each selected FY
 }
 
 export interface DateRange {
@@ -91,17 +91,15 @@ export function fyMonthBounds(fy: string, calendarMonth: number): DateRange {
   };
 }
 
-/** Resolves the global Property/FY/Quarter/Month filter into a concrete date range. Returns null = all-time (no FY selected). Collapses a multi-month selection to its overall span — use resolveMonthRanges() when the months may be non-contiguous and need per-month clamping (e.g. Available Room Nights). */
-export function resolveDateRange(filter: DateFilter): DateRange | null {
-  if (!filter.fy) return null;
-  const months = resolveSelectedMonths(filter);
-  if (months.length > 0) {
-    const ranges = months.map((m) => fyMonthBounds(filter.fy!, m));
-    const start = ranges.reduce((min, r) => (r.start < min ? r.start : min), ranges[0].start);
-    const end = ranges.reduce((max, r) => (r.end > max ? r.end : max), ranges[0].end);
-    return { start, end };
-  }
-  return fyBounds(filter.fy);
+/** FYs selected by the filter — always at least one (defaults to the current FY when none are explicitly selected, same as the old single-select behavior). */
+export function resolveSelectedFYs(filter: DateFilter): string[] {
+  if (filter.fys && filter.fys.length > 0) return [...new Set(filter.fys)];
+  return [currentFYLabel()];
+}
+
+/** The most recent of the selected FYs — for charts that are inherently single-FY (a 12-month x-axis) even though the global filter now allows selecting several. */
+export function latestSelectedFy(filter: DateFilter): string {
+  return [...resolveSelectedFYs(filter)].sort().at(-1)!;
 }
 
 /** Calendar months (1-12) selected by the filter; [] means "whole FY, no narrowing". Explicit `months` wins over `quarter` if both are set. */
@@ -112,17 +110,21 @@ export function resolveSelectedMonths(filter: DateFilter): number[] {
 }
 
 /**
- * One DateRange per selected month (or a single whole-FY range if unscoped) —
- * unlike resolveDateRange(), non-contiguous month selections stay as separate
- * ranges instead of collapsing to their outer span. Needed anywhere a "sum
- * across selected months" calculation depends on which specific days are
- * included (Available Room Nights).
+ * One DateRange per (selected FY × selected month) combination — never
+ * collapsed to an outer span, since neither the FY set nor the month set is
+ * guaranteed contiguous (e.g. FY24-25 + FY26-27 skips FY25-26; Apr + Dec skips
+ * May-Nov). Needed anywhere a "sum across the selection" calculation depends
+ * on which specific days are included (Available Room Nights).
  */
-export function resolveMonthRanges(filter: DateFilter): DateRange[] | null {
-  if (!filter.fy) return null;
+export function resolveMonthRanges(filter: DateFilter): DateRange[] {
+  const fys = resolveSelectedFYs(filter);
   const months = resolveSelectedMonths(filter);
-  if (months.length === 0) return [fyBounds(filter.fy)];
-  return months.map((m) => fyMonthBounds(filter.fy!, m));
+  const ranges: DateRange[] = [];
+  for (const fy of fys) {
+    if (months.length === 0) ranges.push(fyBounds(fy));
+    else for (const m of months) ranges.push(fyMonthBounds(fy, m));
+  }
+  return ranges;
 }
 
 // --- SQL expression builders (dateExpr must already evaluate to a DATE) ---

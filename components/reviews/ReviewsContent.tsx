@@ -6,17 +6,25 @@ import Card from "@/components/ui/Card";
 import SingleMetricBarChart, { BarDatum } from "@/components/charts/SingleMetricBarChart";
 import { FISCAL_MONTH_ORDER, MONTH_ABBR } from "@/lib/charts/pivotByFiscalMonth";
 
-// One FY's worth of months (the tab's FY filter scopes this, same as every
-// other section here) — a simple ranking bar, not a multi-year comparison.
+// Fiscal months for the selected FY(s) — summed across FYs when more than one
+// is selected (blended, same aggregation convention as every other multi-select
+// filter here), not a multi-year comparison with separate lines.
 function RatingTrendCard({ title, trend }: { title: string; trend: RatingTrendPoint[] }) {
+  const totalCount = trend.reduce((s, p) => s + p.count, 0);
   const data: BarDatum[] = FISCAL_MONTH_ORDER.map((month) => ({
     name: MONTH_ABBR[month],
-    value: trend.find((p) => p.monthNumber === month)?.count ?? 0,
+    value: trend.filter((p) => p.monthNumber === month).reduce((s, p) => s + p.count, 0),
     color: "var(--series-1)",
   }));
   return (
     <Card title={title}>
-      <SingleMetricBarChart data={data} valueFormatter={(v) => v.toLocaleString("en-IN")} />
+      {totalCount === 0 ? (
+        <p className="py-8 text-center text-sm text-zinc-400 dark:text-zinc-600">
+          No reviews for this period.
+        </p>
+      ) : (
+        <SingleMetricBarChart data={data} valueFormatter={(v) => v.toLocaleString("en-IN")} />
+      )}
     </Card>
   );
 }

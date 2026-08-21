@@ -16,30 +16,28 @@ export default function OtaContent({ otaBreakdown }: { otaBreakdown: OtaBreakdow
     { key: "adrAfter", header: "After Commission ADR", align: "right", render: (r) => (r.adrAfterCommission !== null ? `₹${Math.round(r.adrAfterCommission).toLocaleString("en-IN")}` : "—") },
   ];
 
-  const grandTotal = {
-    nights: otaBreakdown.reduce((s, r) => s + r.nights, 0),
-    totalRevenue: otaBreakdown.reduce((s, r) => s + r.totalRevenue, 0),
-    netRevenue: otaBreakdown.reduce((s, r) => s + r.netRevenue, 0),
+  const totalNights = otaBreakdown.reduce((s, r) => s + r.nights, 0);
+  const totalRevenue = otaBreakdown.reduce((s, r) => s + r.totalRevenue, 0);
+  const netRevenue = otaBreakdown.reduce((s, r) => s + r.netRevenue, 0);
+
+  // Same shape as a data row, so it renders through the identical column
+  // definitions above — guarantees the totals line up under their headers.
+  const grandTotalRow: OtaBreakdownRow = {
+    otaName: "Grand total",
+    nights: totalNights,
+    totalRevenue,
+    avgCommissionPct: totalRevenue > 0 ? (1 - netRevenue / totalRevenue) * 100 : 0,
+    netRevenue,
+    adrBeforeCommission: totalNights > 0 ? totalRevenue / totalNights : null,
+    adrAfterCommission: totalNights > 0 ? netRevenue / totalNights : null,
   };
-  const blendedCommission = grandTotal.totalRevenue > 0 ? (1 - grandTotal.netRevenue / grandTotal.totalRevenue) * 100 : 0;
-  const blendedAdrBefore = grandTotal.nights > 0 ? grandTotal.totalRevenue / grandTotal.nights : null;
-  const blendedAdrAfter = grandTotal.nights > 0 ? grandTotal.netRevenue / grandTotal.nights : null;
 
   return (
     <div className="space-y-6">
       <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">OTA Breakdown</h2>
 
       <Card title="Commission, revenue &amp; ADR by OTA site">
-        <Table columns={otaColumns} rows={otaBreakdown} rowKey={(r) => r.otaName} />
-        <div className="mt-2 flex flex-wrap justify-end gap-x-6 gap-y-1 border-t border-zinc-200 pt-2 text-xs font-semibold text-zinc-700 dark:border-zinc-800 dark:text-zinc-200">
-          <span>Grand total</span>
-          <span>{blendedCommission.toFixed(1)}%</span>
-          <span>{grandTotal.nights.toLocaleString("en-IN")} nights</span>
-          <span>{formatIndianCurrency(grandTotal.totalRevenue)}</span>
-          <span>{formatIndianCurrency(grandTotal.netRevenue)}</span>
-          <span>{blendedAdrBefore !== null ? `₹${Math.round(blendedAdrBefore).toLocaleString("en-IN")}` : "—"}</span>
-          <span>{blendedAdrAfter !== null ? `₹${Math.round(blendedAdrAfter).toLocaleString("en-IN")}` : "—"}</span>
-        </div>
+        <Table columns={otaColumns} rows={otaBreakdown} rowKey={(r) => r.otaName} footerRow={grandTotalRow} />
       </Card>
     </div>
   );

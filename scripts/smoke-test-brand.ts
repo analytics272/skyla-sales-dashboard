@@ -2,7 +2,7 @@ import { getBrandOccupancy, getCategoryRevenueByFy } from "../lib/bigquery/queri
 
 async function main() {
   console.log("--- Brand Occupancy, FY 25-26 ---");
-  console.log(await getBrandOccupancy({ fy: "FY 25-26" }));
+  console.log(await getBrandOccupancy({ fys: ["FY 25-26"] }));
 
   console.log("--- Category Revenue by FY ---");
   console.log(await getCategoryRevenueByFy({}));

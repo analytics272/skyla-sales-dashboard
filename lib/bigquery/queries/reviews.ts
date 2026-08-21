@@ -8,7 +8,7 @@
 // undefined means "no property filter" (everything, FO included) rather than
 // "all active hotel properties" — only an explicit property selection narrows it.
 import { runQuery, table } from "../client";
-import { fyLabelSqlExpr, DateFilter, resolveSelectedMonths } from "@/lib/reference/financialYear";
+import { fyLabelSqlExpr, DateFilter, resolveSelectedFYs, resolveSelectedMonths } from "@/lib/reference/financialYear";
 
 export interface ReviewsFilter extends DateFilter {
   properties?: string[];
@@ -24,14 +24,13 @@ function scopeClause(
   const conditions: string[] = [];
   const params: Record<string, unknown> = {};
 
-  if (filter.fy) {
-    params.fy = filter.fy;
-    conditions.push(`${fyLabelSqlExpr(dateExprAsDate)} = @fy`);
-    const months = resolveSelectedMonths(filter);
-    if (months.length > 0) {
-      params.months = months;
-      conditions.push(`EXTRACT(MONTH FROM ${dateExprAsDate}) IN UNNEST(@months)`);
-    }
+  const fys = resolveSelectedFYs(filter);
+  params.fys = fys;
+  conditions.push(`${fyLabelSqlExpr(dateExprAsDate)} IN UNNEST(@fys)`);
+  const months = resolveSelectedMonths(filter);
+  if (months.length > 0) {
+    params.months = months;
+    conditions.push(`EXTRACT(MONTH FROM ${dateExprAsDate}) IN UNNEST(@months)`);
   }
   if (filter.properties && filter.properties.length > 0) {
     params.properties = filter.properties;
