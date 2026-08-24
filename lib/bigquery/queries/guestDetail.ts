@@ -1,6 +1,6 @@
 // PRD §6.2 — Guest & Revenue Detail.
 import { runQuery, table } from "../client";
-import { KpiFilter, resolveFilter, buildScopeClause, ResolvedFilter } from "./filters";
+import { KpiFilter, resolveFilter, buildScopeClause } from "./filters";
 import { getAvailableRoomNights, rangesForFysAndMonths } from "./propertyWindows";
 import { bookingCategorySqlExpr, BookingCategory } from "@/lib/reference/bookingSourceMap";
 import { fyLabelSqlExpr } from "@/lib/reference/financialYear";
@@ -321,38 +321,3 @@ export async function getCancellationLeadTime(filter: KpiFilter): Promise<Cancel
   return { avgLeadTimeDays: r.avg_days, sampledCancellations: r.n };
 }
 
-// --- B2B: Nights/Revenue/ADR by Company (b2b_bills) ---
-// Uses the sheet's own Financial_Year column, not a recomputed one: sample data
-// showed Check_In=2024-03-31 labeled "FY 24-25" in the sheet, which would compute
-// to "FY 23-24" under the standard Apr-Mar rule — the sheet's own convention for
-// this table differs from sales_booking's, so it's trusted as-is (same principle
-// as leadership_targets §2.3: sheet-authoritative columns aren't re-derived).
-// "FY 99-00" is a junk placeholder for the 9,869 blank-Property rows — excluded.
-// b2b_bills has no per-row date to filter by calendar month, so this only
-// honors Property + FY, not the Month multi-select.
-
-export interface B2bCompanyStats {
-  company: string; // Bills_due_from — see b2bContracts.ts header comment
-  nights: number;
-  roomRevenue: number; // Room_Revenue — tax-exclusive
-  adr: number | null;
-}
-
-export async function getB2bByCompany(filter: Pick<KpiFilter, "properties" | "fys">): Promise<B2bCompanyStats[]> {
-  const resolved: ResolvedFilter = resolveFilter(filter);
-  const params: Record<string, unknown> = { properties: resolved.properties, fys: resolved.fys };
-  const fyClause = " AND Financial_Year IN UNNEST(@fys)";
-
-  return runQuery<B2bCompanyStats>(`
-    SELECT
-      Bills_due_from AS company,
-      SUM(Nights) AS nights,
-      SUM(Room_Revenue) AS roomRevenue,
-      SAFE_DIVIDE(SUM(Room_Revenue), NULLIF(SUM(Nights), 0)) AS adr
-    FROM ${table("b2b_bills")}
-    WHERE Property IN UNNEST(@properties) AND Bills_due_from IS NOT NULL
-      AND Financial_Year != 'FY 99-00'${fyClause}
-    GROUP BY company
-    ORDER BY roomRevenue DESC
-  `, params);
-}

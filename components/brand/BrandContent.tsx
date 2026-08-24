@@ -4,6 +4,7 @@ import { BrandOccupancy, CategoryRevenueByFy } from "@/lib/bigquery/queries/bran
 import Card from "@/components/ui/Card";
 import SingleMetricBarChart, { BarDatum } from "@/components/charts/SingleMetricBarChart";
 import GroupedBarChart from "@/components/charts/GroupedBarChart";
+import FyComparisonStrip from "@/components/charts/FyComparisonStrip";
 import { formatIndianCurrency } from "@/lib/format/currency";
 import { CATEGORY_COLOR, CATEGORY_ORDER, BRAND_COLOR, BRAND_ORDER } from "@/lib/design/tokens";
 
@@ -30,6 +31,11 @@ export default function BrandContent({
     return row;
   });
 
+  const revenueFyTotals = fyOrder.map((fy) => ({
+    fy,
+    value: categoryRevenueByFy.filter((r) => r.fy === fy).reduce((s, r) => s + r.revenue, 0),
+  }));
+
   return (
     <div className="space-y-6">
       <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">Brand</h2>
@@ -39,6 +45,7 @@ export default function BrandContent({
       </Card>
 
       <Card title="Revenue by business category, by FY">
+        <FyComparisonStrip points={revenueFyTotals} valueFormatter={(v) => formatIndianCurrency(v)} />
         <GroupedBarChart
           data={revenueByFyData}
           xKey="fy"

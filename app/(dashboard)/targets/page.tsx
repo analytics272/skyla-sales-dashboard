@@ -27,6 +27,7 @@ export default async function TargetsPage({ searchParams }: { searchParams: Prom
 
   return (
     <TargetsContent
+      fy={fy}
       categoryAchievement={categoryAchievement}
       revenueAchievement={revenueAchievement}
       monthlyRevenueTargets={monthlyRevenueTargets}

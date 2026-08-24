@@ -7,6 +7,7 @@ import GroupedBarChart from "@/components/charts/GroupedBarChart";
 import MultiSeriesLineChart from "@/components/charts/MultiSeriesLineChart";
 import { formatIndianCurrency, formatPercent } from "@/lib/format/currency";
 import { TARGET_VS_ACHIEVED_COLOR, REVENUE_ROLLOVER_COLOR } from "@/lib/design/tokens";
+import { calendarMonthFromFiscal, isFutureFiscalMonth } from "@/lib/reference/financialYear";
 
 const TA_SERIES = [
   { key: "target", color: TARGET_VS_ACHIEVED_COLOR.target },
@@ -20,12 +21,14 @@ const ROLLOVER_SERIES = [
 ];
 
 export default function TargetsContent({
+  fy,
   categoryAchievement,
   revenueAchievement,
   monthlyRevenueTargets,
   adrTargetVsAchieved,
   occupancyTargetVsAchieved,
 }: {
+  fy: string;
   categoryAchievement: CategoryAchievement[];
   revenueAchievement: RevenueAchievement;
   monthlyRevenueTargets: MonthlyRevenueTarget[];
@@ -38,23 +41,29 @@ export default function TargetsContent({
     achieved: c.achieved,
   }));
 
+  // "Achieved" is a real fact only for months that have started — future
+  // months null it out so the line stops there instead of flat-lining at 0
+  // (as if "achieved nothing" were already a settled outcome). Target/plan
+  // series aren't touched — they're meant to project across the whole FY.
+  const future = (monthNumber: number) => isFutureFiscalMonth(fy, calendarMonthFromFiscal(monthNumber));
+
   const adrData = adrTargetVsAchieved.map((r) => ({
     month: r.month,
     target: r.targetAdr,
-    achieved: r.achievedAdr,
+    achieved: future(r.monthNumber) ? null : r.achievedAdr,
   }));
 
   const occupancyData = occupancyTargetVsAchieved.map((r) => ({
     month: r.month,
     target: r.targetOccupancyPct * 100,
-    achieved: r.achievedOccupancyPct * 100,
+    achieved: future(r.monthNumber) ? null : r.achievedOccupancyPct * 100,
   }));
 
   const rolloverData = monthlyRevenueTargets.map((r) => ({
     month: r.month,
     deptTarget: r.deptTarget,
     targetWithRollOver: r.targetWithRollOver,
-    achieved: r.achievedRevenue,
+    achieved: future(r.monthNumber) ? null : r.achievedRevenue,
   }));
 
   return (

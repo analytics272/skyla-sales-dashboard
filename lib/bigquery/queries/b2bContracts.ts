@@ -6,28 +6,31 @@
 // row). b2b_bills is itself PMS/finance-system billing data (invoice
 // numbers, GST numbers, payment dates) — its own Room_Revenue/Nights columns
 // are used as-is; only the company grouping key changed. Same
-// Financial_Year-column trust and 'FY 99-00' junk-row exclusion as
-// guestDetail.ts's getB2bByCompany — see that file's comment for why the
-// sheet's own column is used instead of a recomputed FY.
+// Financial_Year-column trust and 'FY 99-00' junk-row exclusion used
+// throughout this file: the sheet's own Financial_Year column is trusted
+// instead of a recomputed one (sample data showed a Check_In date that would
+// compute to a different FY than the sheet's own label — the sheet's own
+// convention for this table is authoritative).
+//
+// This is the single B2B-by-company view (nights, revenue, ADR, contract
+// status, contribution %) — there used to be a second, separate "Nights /
+// Revenue / ADR by Company" table (guestDetail.ts's getB2bByCompany) showing
+// the same underlying numbers with different columns; merged into this one
+// to avoid two redundant company tables on the same dashboard tab.
 import { runQuery, table } from "../client";
+import { safeDivide } from "@/lib/format/currency";
 
 export interface B2bContractRanking {
   company: string; // Bills_due_from
   contractStatus: string | null;
   roomRevenue: number; // Room_Revenue — tax-exclusive (col_21 was inclusive-of-tax; see PRD tax-exclusive requirement)
   nights: number;
+  adr: number | null;
   /** Share of total Contract_Status='Contract' revenue this company represents. Null for non-contract rows — they aren't part of that pool. */
   contributionPct: number | null;
 }
 
-export async function getB2bContractRanking(properties: string[], fys?: string[]): Promise<B2bContractRanking[]> {
-  const params: Record<string, unknown> = { properties };
-  let fyClause = "";
-  if (fys && fys.length > 0) {
-    params.fys = fys;
-    fyClause = " AND Financial_Year IN UNNEST(@fys)";
-  }
-
+export async function getB2bContractRanking(properties: string[], fys: string[]): Promise<B2bContractRanking[]> {
   const rows = await runQuery<{ company: string; contractStatus: string | null; roomRevenue: number | null; nights: number }>(`
     SELECT
       Bills_due_from AS company,
@@ -35,10 +38,11 @@ export async function getB2bContractRanking(properties: string[], fys?: string[]
       SUM(Room_Revenue) AS roomRevenue,
       SUM(Nights) AS nights
     FROM ${table("b2b_bills")}
-    WHERE Bills_due_from IS NOT NULL AND Financial_Year != 'FY 99-00' AND Property IN UNNEST(@properties)${fyClause}
+    WHERE Bills_due_from IS NOT NULL AND Financial_Year != 'FY 99-00'
+      AND Property IN UNNEST(@properties) AND Financial_Year IN UNNEST(@fys)
     GROUP BY company
     ORDER BY roomRevenue DESC
-  `, params);
+  `, { properties, fys });
 
   const contractTotal = rows
     .filter((r) => r.contractStatus === "Contract")
@@ -48,6 +52,7 @@ export async function getB2bContractRanking(properties: string[], fys?: string[]
     company: r.company,
     contractStatus: r.contractStatus,
     roomRevenue: r.roomRevenue ?? 0,
+    adr: safeDivide(r.roomRevenue ?? 0, r.nights),
     nights: r.nights,
     contributionPct: r.contractStatus === "Contract" && contractTotal > 0 ? (r.roomRevenue ?? 0) / contractTotal : null,
   }));
@@ -75,14 +80,7 @@ export interface B2bTopAdrContract {
 }
 
 /** Ranked by AVG(ADR), filtered to meaningful volume (Nights > 0) per PRD. */
-export async function getB2bTopAdrContracts(properties: string[], fys?: string[]): Promise<B2bTopAdrContract[]> {
-  const params: Record<string, unknown> = { properties };
-  let fyClause = "";
-  if (fys && fys.length > 0) {
-    params.fys = fys;
-    fyClause = " AND Financial_Year IN UNNEST(@fys)";
-  }
-
+export async function getB2bTopAdrContracts(properties: string[], fys: string[]): Promise<B2bTopAdrContract[]> {
   // total_nights (not "nights"): BigQuery resolves HAVING identifiers
   // case-insensitively against SELECT aliases first, so an alias merely
   // differing in case from the source column (nights vs Nights) gets matched to
@@ -90,11 +88,12 @@ export async function getB2bTopAdrContracts(properties: string[], fys?: string[]
   const rows = await runQuery<{ company: string; avgAdr: number; total_nights: number }>(`
     SELECT Bills_due_from AS company, AVG(ADR) AS avgAdr, SUM(Nights) AS total_nights
     FROM ${table("b2b_bills")}
-    WHERE Bills_due_from IS NOT NULL AND Financial_Year != 'FY 99-00' AND Property IN UNNEST(@properties)${fyClause}
+    WHERE Bills_due_from IS NOT NULL AND Financial_Year != 'FY 99-00'
+      AND Property IN UNNEST(@properties) AND Financial_Year IN UNNEST(@fys)
     GROUP BY company
     HAVING total_nights > 0
     ORDER BY avgAdr DESC
-  `, params);
+  `, { properties, fys });
   return rows.map((r) => ({ company: r.company, avgAdr: r.avgAdr, nights: r.total_nights }));
 }
 

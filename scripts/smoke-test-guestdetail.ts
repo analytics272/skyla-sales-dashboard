@@ -8,8 +8,9 @@ import {
   getExpatStats,
   getCancellationStats,
   getCancellationLeadTime,
-  getB2bByCompany,
 } from "../lib/bigquery/queries/guestDetail";
+import { getB2bContractRanking } from "../lib/bigquery/queries/b2bContracts";
+import { ACTIVE_PROPERTY_CODES } from "../lib/reference/propertyReference";
 
 async function main() {
   const filter = { fys: ["FY 25-26"] };
@@ -42,7 +43,7 @@ async function main() {
   console.log(await getCancellationLeadTime(filter));
 
   console.log("--- B2B by Company (top 10) ---");
-  console.log((await getB2bByCompany(filter)).slice(0, 10));
+  console.log((await getB2bContractRanking(ACTIVE_PROPERTY_CODES, filter.fys)).slice(0, 10));
 }
 
 main().catch((e) => {

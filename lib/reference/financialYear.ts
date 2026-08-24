@@ -81,6 +81,16 @@ export function fiscalQuarterBounds(fy: string, quarter: 1 | 2 | 3 | 4): DateRan
   };
 }
 
+/** Fiscal month number (1-12, Apr=1...Mar=12, as used by leadership_targets.Month_Number) -> calendar month (1-12). */
+export function calendarMonthFromFiscal(fiscalMonth: number): number {
+  return fiscalMonth <= 9 ? fiscalMonth + 3 : fiscalMonth - 9;
+}
+
+/** True once a fiscal month's start date is still ahead of today — hasn't happened yet, nothing to plot as "actual". */
+export function isFutureFiscalMonth(fy: string, calendarMonth: number, today: Date = new Date()): boolean {
+  return fyMonthBounds(fy, calendarMonth).start > today.toISOString().slice(0, 10);
+}
+
 /** Bounds for a single calendar month within a given FY (month determines which side of the FY boundary it falls on). */
 export function fyMonthBounds(fy: string, calendarMonth: number): DateRange {
   const startYear = parseFyLabel(fy);

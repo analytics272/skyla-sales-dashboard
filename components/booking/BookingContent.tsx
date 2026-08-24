@@ -2,7 +2,7 @@
 
 import {
   BookingStats, RoomNightsGap, RepeatBookingShare, RoomFormatStats, RoomFormatByFy,
-  ExpatStats, CancellationStats, CancellationLeadTime, B2bCompanyStats,
+  ExpatStats, CancellationStats, CancellationLeadTime,
 } from "@/lib/bigquery/queries/guestDetail";
 import type { B2bContractRanking, B2bTopAdrContract, RetentionPoint, B2bContractSummary } from "@/lib/bigquery/queries/b2bContracts";
 import StatTile from "@/components/ui/StatTile";
@@ -10,8 +10,9 @@ import Card from "@/components/ui/Card";
 import Table, { TableColumn } from "@/components/ui/Table";
 import SingleMetricBarChart, { BarDatum } from "@/components/charts/SingleMetricBarChart";
 import GroupedBarChart from "@/components/charts/GroupedBarChart";
+import FyComparisonStrip from "@/components/charts/FyComparisonStrip";
 import { formatIndianCurrency, formatPercent } from "@/lib/format/currency";
-import { ROOM_TYPE_COLOR, ROOM_TYPE_ORDER } from "@/lib/design/tokens";
+import { ROOM_TYPE_COLOR, ROOM_TYPE_ORDER, FY_COLOR } from "@/lib/design/tokens";
 
 export default function BookingContent({
   bookingStats,
@@ -22,7 +23,6 @@ export default function BookingContent({
   expatStats,
   cancellationStats,
   cancellationLeadTime,
-  b2bByCompany,
   b2bRanking,
   b2bContractSummary,
   b2bTopAdr,
@@ -36,7 +36,6 @@ export default function BookingContent({
   expatStats: ExpatStats;
   cancellationStats: CancellationStats;
   cancellationLeadTime: CancellationLeadTime;
-  b2bByCompany: B2bCompanyStats[];
   b2bRanking: B2bContractRanking[];
   b2bContractSummary: B2bContractSummary;
   b2bTopAdr: B2bTopAdrContract[];
@@ -58,28 +57,32 @@ export default function BookingContent({
     return { name: rt, value: (row?.nightsSharePct ?? 0) * 100, color: ROOM_TYPE_COLOR[rt] ?? "var(--chart-baseline)" };
   });
 
+  // Room type on the x-axis, one bar per FY within each cluster — reads as
+  // "how did this room type do year over year", and caps clusters at however
+  // many FYs are selected (usually 1-3) instead of a 7-room-type cluster
+  // repeated per FY. Replaces an earlier stacked-bar version per user
+  // feedback (2026-08-24): stacking makes cross-FY comparison harder, not
+  // easier, since only the top segment of each stack has a readable baseline.
   const fyOrder = [...new Set(roomFormatByFy.map((r) => r.fy))].sort();
   const formatsInFyData = ROOM_TYPE_ORDER.filter((rt) => roomFormatByFy.some((r) => r.roomType === rt));
-  const revenueByFormatByFy = fyOrder.map((fy) => {
-    const row: Record<string, unknown> = { fy };
-    for (const rt of formatsInFyData) {
-      row[rt] = roomFormatByFy.find((r) => r.fy === fy && r.roomType === rt)?.revenue ?? 0;
+  const revenueByFormatByFy = formatsInFyData.map((rt) => {
+    const row: Record<string, unknown> = { roomType: rt };
+    for (const fy of fyOrder) {
+      row[fy] = roomFormatByFy.find((r) => r.fy === fy && r.roomType === rt)?.revenue ?? 0;
     }
     return row;
   });
-
-  const b2bColumns: TableColumn<B2bCompanyStats>[] = [
-    { key: "company", header: "Company", render: (r) => r.company },
-    { key: "nights", header: "Nights", align: "right", render: (r) => r.nights.toLocaleString("en-IN") },
-    { key: "revenue", header: "Room revenue", align: "right", render: (r) => formatIndianCurrency(r.roomRevenue) },
-    { key: "adr", header: "ADR", align: "right", render: (r) => (r.adr !== null ? `₹${Math.round(r.adr).toLocaleString("en-IN")}` : "—") },
-  ];
+  const roomFormatFyTotals = fyOrder.map((fy) => ({
+    fy,
+    value: roomFormatByFy.filter((r) => r.fy === fy).reduce((s, r) => s + r.revenue, 0),
+  }));
 
   const rankingColumns: TableColumn<B2bContractRanking>[] = [
     { key: "company", header: "Company", render: (r) => r.company },
     { key: "status", header: "Contract status", render: (r) => r.contractStatus ?? "—" },
     { key: "nights", header: "Nights", align: "right", render: (r) => r.nights.toLocaleString("en-IN") },
     { key: "revenue", header: "Room revenue", align: "right", render: (r) => formatIndianCurrency(r.roomRevenue) },
+    { key: "adr", header: "ADR", align: "right", render: (r) => (r.adr !== null ? `₹${Math.round(r.adr).toLocaleString("en-IN")}` : "—") },
     { key: "contribution", header: "Contribution %", align: "right", render: (r) => (r.contributionPct !== null ? formatPercent(r.contributionPct, 0) : "—") },
   ];
 
@@ -150,13 +153,13 @@ export default function BookingContent({
       </div>
 
       <Card title="Revenue by room format, by FY">
+        <FyComparisonStrip points={roomFormatFyTotals} valueFormatter={(v) => formatIndianCurrency(v)} />
         <GroupedBarChart
           data={revenueByFormatByFy}
-          xKey="fy"
-          series={formatsInFyData.map((rt) => ({ key: rt, color: ROOM_TYPE_COLOR[rt] }))}
+          xKey="roomType"
+          series={fyOrder.map((fy) => ({ key: fy, color: FY_COLOR[fy] ?? "var(--chart-baseline)" }))}
           valueFormatter={(v) => formatIndianCurrency(v)}
           height={320}
-          stacked
         />
       </Card>
 
@@ -182,12 +185,6 @@ export default function BookingContent({
         <div className="mt-3">
           <Card title="Top ADR contracts (min. 1 night)">
             <Table columns={adrColumns} rows={b2bTopAdr.slice(0, 15)} rowKey={(r) => r.company} />
-          </Card>
-        </div>
-
-        <div className="mt-3">
-          <Card title={`Nights / Revenue / ADR by Company (${b2bByCompany.length} companies)`}>
-            <Table columns={b2bColumns} rows={b2bByCompany.slice(0, 15)} rowKey={(r) => r.company} />
           </Card>
         </div>
       </div>
