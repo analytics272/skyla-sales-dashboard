@@ -59,13 +59,13 @@ export default function LeadsContent({
   const ownerColumns: TableColumn<OwnerLeadStats>[] = [
     { key: "owner", header: "Owner", render: (r) => r.owner },
     { key: "revenue", header: "Revenue", align: "right", render: (r) => formatIndianCurrency(r.revenue) },
-    { key: "total", header: "Total leads", align: "right", render: (r) => r.totalLeads.toLocaleString("en-IN") },
-    { key: "closed", header: "Closed leads", align: "right", render: (r) => r.closedLeads.toLocaleString("en-IN") },
+    { key: "total", header: "Total Leads", align: "right", render: (r) => r.totalLeads.toLocaleString("en-IN") },
+    { key: "closed", header: "Closed Leads", align: "right", render: (r) => r.closedLeads.toLocaleString("en-IN") },
     { key: "closedPct", header: "Closed %", align: "right", render: (r) => (r.closedPct !== null ? formatPercent(r.closedPct) : "—") },
-    { key: "exotel", header: "Exotel leads", align: "right", render: (r) => r.exotelLeads.toLocaleString("en-IN") },
-    { key: "exotelClosed", header: "Exotel closed", align: "right", render: (r) => r.exotelClosed.toLocaleString("en-IN") },
+    { key: "exotel", header: "Exotel Leads", align: "right", render: (r) => r.exotelLeads.toLocaleString("en-IN") },
+    { key: "exotelClosed", header: "Exotel Closed", align: "right", render: (r) => r.exotelClosed.toLocaleString("en-IN") },
     { key: "reference", header: "Reference", align: "right", render: (r) => r.referenceLeads.toLocaleString("en-IN") },
-    { key: "existing", header: "Existing leads", align: "right", render: (r) => r.existingLeads.toLocaleString("en-IN") },
+    { key: "existing", header: "Existing Leads", align: "right", render: (r) => r.existingLeads.toLocaleString("en-IN") },
     { key: "adr", header: "ADR", align: "right", render: (r) => (r.adr !== null ? `₹${Math.round(r.adr).toLocaleString("en-IN")}` : "—") },
   ];
 
@@ -74,33 +74,33 @@ export default function LeadsContent({
       <div>
         <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">Lead Tracker</h2>
         <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-          <StatTile label="Total leads" value={summary.totalLeads.toLocaleString("en-IN")} />
-          <StatTile label="Closed leads" value={summary.closedLeads.toLocaleString("en-IN")} />
+          <StatTile label="Total Leads" value={summary.totalLeads.toLocaleString("en-IN")} />
+          <StatTile label="Closed Leads" value={summary.closedLeads.toLocaleString("en-IN")} />
           <StatTile
-            label="Conversion rate"
+            label="Conversion Rate"
             value={summary.conversionRate !== null ? formatPercent(summary.conversionRate) : "—"}
           />
           <StatTile label="Revenue" value={formatIndianCurrency(summary.revenue)} />
           <StatTile
-            label="B2C leads"
+            label="B2C Leads"
             value={summary.b2cLeads.toLocaleString("en-IN")}
             sub={`${summary.b2cLeadsClosed.toLocaleString("en-IN")} closed → ${b2cAchievedPct}% achieved`}
           />
           <StatTile
-            label="Existing leads"
+            label="Existing Leads"
             value={existingTotal.toLocaleString("en-IN")}
             sub={`${summary.existingClosedLeads.toLocaleString("en-IN")} closed → ${existingAchievedPct}% achieved`}
           />
           <StatTile
-            label="Reference leads"
+            label="Reference Leads"
             value={referenceTotal.toLocaleString("en-IN")}
             sub={`${summary.referenceClosedLeads.toLocaleString("en-IN")} closed → ${referenceAchievedPct}% achieved`}
           />
-          <StatTile label="Booking pace" value={bookingPace !== null ? bookingPace.toFixed(1) : "—"} />
+          <StatTile label="Booking Pace" value={bookingPace !== null ? bookingPace.toFixed(1) : "—"} />
         </div>
       </div>
 
-      <Card title="Leads MoM (total vs closed)">
+      <Card title="Leads MoM (Total Vs Closed)">
         <div className="space-y-6">
           {momByFy.map(({ fy, data }) => (
             <div key={fy}>
@@ -123,31 +123,31 @@ export default function LeadsContent({
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card title="Leads by property">
+        <Card title="Leads By Property">
           <SingleMetricBarChart data={propertyData} valueFormatter={(v) => v.toLocaleString("en-IN")} />
         </Card>
-        <Card title="Leads by source (top 8)">
+        <Card title="Leads By Source (Top 8)">
           <SingleMetricBarChart data={sourceData} valueFormatter={(v) => v.toLocaleString("en-IN")} />
         </Card>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">
-        <Card title="Leads by format">
+        <Card title="Leads By Format">
           <SingleMetricBarChart data={formatLeadsData} valueFormatter={(v) => v.toLocaleString("en-IN")} />
         </Card>
-        <Card title="Revenue by format">
+        <Card title="Revenue By Format">
           <SingleMetricBarChart data={formatRevenueData} valueFormatter={(v) => formatIndianCurrency(v)} />
         </Card>
-        <Card title="ADR by format (closed leads)">
+        <Card title="ADR By Format (Closed Leads)">
           <SingleMetricBarChart data={adrByFormatData} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} />
         </Card>
       </div>
 
-      <Card title="Lost leads reasons">
+      <Card title="Lost Leads Reasons">
         <Table columns={lostColumns} rows={lostReasons} rowKey={(r) => r.stage} />
       </Card>
 
-      <Card title={`By owner (${byOwner.length})`}>
+      <Card title={`By Owner (${byOwner.length})`}>
         <Table columns={ownerColumns} rows={byOwner} rowKey={(r) => r.owner} />
       </Card>
     </div>

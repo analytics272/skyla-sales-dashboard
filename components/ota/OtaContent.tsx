@@ -23,7 +23,7 @@ export default function OtaContent({ otaBreakdown }: { otaBreakdown: OtaBreakdow
   // Same shape as a data row, so it renders through the identical column
   // definitions above — guarantees the totals line up under their headers.
   const grandTotalRow: OtaBreakdownRow = {
-    otaName: "Grand total",
+    otaName: "Grand Total",
     nights: totalNights,
     totalRevenue,
     avgCommissionPct: totalRevenue > 0 ? (1 - netRevenue / totalRevenue) * 100 : 0,
@@ -36,7 +36,7 @@ export default function OtaContent({ otaBreakdown }: { otaBreakdown: OtaBreakdow
     <div className="space-y-6">
       <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">OTA Breakdown</h2>
 
-      <Card title="Commission, revenue &amp; ADR by OTA site">
+      <Card title="Commission, Revenue & ADR By OTA Site">
         <Table columns={otaColumns} rows={otaBreakdown} rowKey={(r) => r.otaName} footerRow={grandTotalRow} />
       </Card>
     </div>

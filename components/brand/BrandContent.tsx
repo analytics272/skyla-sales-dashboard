@@ -40,11 +40,11 @@ export default function BrandContent({
     <div className="space-y-6">
       <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">Brand</h2>
 
-      <Card title="Occupancy by brand (Skyla / Aptly / Hyber)">
+      <Card title="Occupancy By Brand">
         <SingleMetricBarChart data={brandData} valueFormatter={(v) => `${v.toFixed(0)}%`} />
       </Card>
 
-      <Card title="Revenue by business category, by FY">
+      <Card title="Revenue By Business Category & FY">
         <FyComparisonStrip points={revenueFyTotals} valueFormatter={(v) => formatIndianCurrency(v)} />
         <GroupedBarChart
           data={revenueByFyData}

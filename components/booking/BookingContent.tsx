@@ -79,9 +79,9 @@ export default function BookingContent({
 
   const rankingColumns: TableColumn<B2bContractRanking>[] = [
     { key: "company", header: "Company", render: (r) => r.company },
-    { key: "status", header: "Contract status", render: (r) => r.contractStatus ?? "—" },
+    { key: "status", header: "Contract Status", render: (r) => r.contractStatus ?? "—" },
     { key: "nights", header: "Nights", align: "right", render: (r) => r.nights.toLocaleString("en-IN") },
-    { key: "revenue", header: "Room revenue", align: "right", render: (r) => formatIndianCurrency(r.roomRevenue) },
+    { key: "revenue", header: "Room Revenue", align: "right", render: (r) => formatIndianCurrency(r.roomRevenue) },
     { key: "adr", header: "ADR", align: "right", render: (r) => (r.adr !== null ? `₹${Math.round(r.adr).toLocaleString("en-IN")}` : "—") },
     { key: "contribution", header: "Contribution %", align: "right", render: (r) => (r.contributionPct !== null ? formatPercent(r.contributionPct, 0) : "—") },
   ];
@@ -103,15 +103,15 @@ export default function BookingContent({
       <div>
         <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">Booking Details</h2>
         <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-          <StatTile label="Total bookings" value={bookingStats.totalBookings.toLocaleString("en-IN")} />
-          <StatTile label="Guests served" value={bookingStats.guestsServed.toLocaleString("en-IN")} />
+          <StatTile label="Total Bookings" value={bookingStats.totalBookings.toLocaleString("en-IN")} />
+          <StatTile label="Guests Served" value={bookingStats.guestsServed.toLocaleString("en-IN")} />
           <StatTile label="ALOS" value={bookingStats.alos !== null ? `${bookingStats.alos.toFixed(1)} nights` : "—"} />
           <StatTile
-            label="Revenue per guest"
+            label="Revenue Per Guest"
             value={bookingStats.revenuePerGuest !== null ? `₹${Math.round(bookingStats.revenuePerGuest).toLocaleString("en-IN")}` : "—"}
           />
           <StatTile
-            label="Repeat bookings"
+            label="Repeat Bookings"
             value={repeatBookingShare.repeatBookings.toLocaleString("en-IN")}
             sub={repeatBookingShare.sharePct !== null ? `${formatPercent(repeatBookingShare.sharePct)} of ${repeatBookingShare.totalBookings.toLocaleString("en-IN")}` : undefined}
           />
@@ -124,10 +124,10 @@ export default function BookingContent({
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatTile label="Unsold room nights" value={roomNightsGap.unsoldRoomNights.toLocaleString("en-IN")} />
-        <StatTile label="Remaining room nights" value={roomNightsGap.remainingRoomNights.toLocaleString("en-IN")} sub="from today forward" />
+        <StatTile label="Unsold Room Nights" value={roomNightsGap.unsoldRoomNights.toLocaleString("en-IN")} />
+        <StatTile label="Remaining Room Nights" value={roomNightsGap.remainingRoomNights.toLocaleString("en-IN")} sub="from today forward" />
         <StatTile
-          label="Avg cancellation lead time"
+          label="Avg Cancellation Lead Time"
           value={cancellationLeadTime.avgLeadTimeDays !== null ? `${cancellationLeadTime.avgLeadTimeDays.toFixed(1)} days` : "—"}
           sub={`n=${cancellationLeadTime.sampledCancellations.toLocaleString("en-IN")}`}
         />
@@ -136,23 +136,23 @@ export default function BookingContent({
       <div>
         <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Expats</h3>
         <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <StatTile label="Expat bookings" value={expatStats.bookings.toLocaleString("en-IN")} />
-          <StatTile label="Expat revenue" value={formatIndianCurrency(expatStats.revenue)} />
-          <StatTile label="Expat nights" value={expatStats.nights.toLocaleString("en-IN")} />
+          <StatTile label="Expat Bookings" value={expatStats.bookings.toLocaleString("en-IN")} />
+          <StatTile label="Expat Revenue" value={formatIndianCurrency(expatStats.revenue)} />
+          <StatTile label="Expat Nights" value={expatStats.nights.toLocaleString("en-IN")} />
           <StatTile label="Expat ALOS" value={expatStats.alos !== null ? `${expatStats.alos.toFixed(1)} nights` : "—"} />
         </div>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card title="ADR by room format">
+        <Card title="ADR By Room Format">
           <SingleMetricBarChart data={adrByFormat} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} />
         </Card>
-        <Card title="Nights share by room format">
+        <Card title="Nights Share By Room Format">
           <SingleMetricBarChart data={nightsShareByFormat} valueFormatter={(v) => `${v.toFixed(0)}%`} />
         </Card>
       </div>
 
-      <Card title="Revenue by room format, by FY">
+      <Card title="Revenue By Room Format & FY">
         <FyComparisonStrip points={roomFormatFyTotals} valueFormatter={(v) => formatIndianCurrency(v)} />
         <GroupedBarChart
           data={revenueByFormatByFy}
@@ -167,23 +167,23 @@ export default function BookingContent({
         <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">B2B Contracts</h3>
 
         <div className="mt-2">
-          <Card title="Corporate account retention">
+          <Card title="Corporate Account Retention">
             <SingleMetricBarChart data={retentionData} valueFormatter={(v) => `${v.toFixed(0)}%`} />
           </Card>
         </div>
 
         <div className="mt-3">
-          <Card title={`Contract status & ranking (${b2bRanking.length} companies)`}>
+          <Card title={`Contract Status & Ranking (${b2bRanking.length} Companies)`}>
             <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-2">
-              <StatTile label="Contract revenue achieved" value={formatIndianCurrency(b2bContractSummary.totalContractRevenue)} sub="Contract_Status = Contract only, not total company revenue" />
-              <StatTile label="Companies under contract" value={b2bContractSummary.contractCompanyCount.toLocaleString("en-IN")} />
+              <StatTile label="Contract Revenue Achieved" value={formatIndianCurrency(b2bContractSummary.totalContractRevenue)} sub="Contract_Status = Contract only, not total company revenue" />
+              <StatTile label="Companies Under Contract" value={b2bContractSummary.contractCompanyCount.toLocaleString("en-IN")} />
             </div>
             <Table columns={rankingColumns} rows={b2bRanking.slice(0, 20)} rowKey={(r) => r.company} />
           </Card>
         </div>
 
         <div className="mt-3">
-          <Card title="Top ADR contracts (min. 1 night)">
+          <Card title="Top ADR Contracts (Min. 1 Night)">
             <Table columns={adrColumns} rows={b2bTopAdr.slice(0, 15)} rowKey={(r) => r.company} />
           </Card>
         </div>

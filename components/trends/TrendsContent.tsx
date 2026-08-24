@@ -50,7 +50,7 @@ export default function TrendsContent({
     <div className="space-y-6">
       <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">Trends</h2>
 
-      <Card title="Occupancy trend (by FY)">
+      <Card title="Occupancy Trend (By FY)">
         <FyComparisonStrip points={occupancyFyPoints} valueFormatter={(v) => `${v.toFixed(0)}%`} />
         <MultiSeriesLineChart
           data={occupancyData}
@@ -62,17 +62,17 @@ export default function TrendsContent({
         />
       </Card>
 
-      <Card title="RevPAR trend (by FY)">
+      <Card title="RevPAR Trend (By FY)">
         <FyComparisonStrip points={revParFyPoints} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} />
         <MultiSeriesLineChart data={revParData} xKey="monthLabel" series={fySeries} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} />
       </Card>
 
-      <Card title="Month-wise ADR (by FY)">
+      <Card title="Month-Wise ADR (By FY)">
         <FyComparisonStrip points={adrFyPoints} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} />
         <MultiSeriesLineChart data={adrData} xKey="monthLabel" series={fySeries} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} />
       </Card>
 
-      <Card title="Business category ADR, by FY">
+      <Card title="Business Category ADR (By FY)">
         <GroupedBarChart
           data={categoryAdrByFy}
           xKey="fy"

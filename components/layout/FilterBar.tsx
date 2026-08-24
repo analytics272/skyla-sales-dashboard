@@ -71,7 +71,7 @@ export default function FilterBar() {
           onClick={resetAll}
           className="rounded-full border border-teal-700 px-3 py-1.5 text-xs font-medium text-teal-700 shadow-sm transition-colors hover:bg-teal-50 dark:border-teal-400 dark:text-teal-300 dark:hover:bg-teal-900/30"
         >
-          Reset filters
+          Reset Filters
         </button>
       </div>
     </div>

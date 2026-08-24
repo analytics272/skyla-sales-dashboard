@@ -47,22 +47,22 @@ export default function ReviewsContent({
       <div>
         <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Google Reviews</h3>
         <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <StatTile label="Overall avg rating" value={googleStats.avgRating !== null ? googleStats.avgRating.toFixed(2) : "—"} />
-          <StatTile label="Total reviews" value={googleStats.totalReviews.toLocaleString("en-IN")} />
+          <StatTile label="Overall Avg Rating" value={googleStats.avgRating !== null ? googleStats.avgRating.toFixed(2) : "—"} />
+          <StatTile label="Total Reviews" value={googleStats.totalReviews.toLocaleString("en-IN")} />
         </div>
         <div className="mt-3">
-          <RatingTrendCard title="Rating count trend" trend={googleTrend} />
+          <RatingTrendCard title="Rating Count Trend" trend={googleTrend} />
         </div>
       </div>
 
       <div>
         <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">OTA Reviews</h3>
         <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <StatTile label="Overall avg rating" value={otaStats.avgRating !== null ? otaStats.avgRating.toFixed(2) : "—"} />
-          <StatTile label="Total reviews" value={otaStats.totalReviews.toLocaleString("en-IN")} />
+          <StatTile label="Overall Avg Rating" value={otaStats.avgRating !== null ? otaStats.avgRating.toFixed(2) : "—"} />
+          <StatTile label="Total Reviews" value={otaStats.totalReviews.toLocaleString("en-IN")} />
         </div>
         <div className="mt-3">
-          <RatingTrendCard title="Rating count trend" trend={otaTrend} />
+          <RatingTrendCard title="Rating Count Trend" trend={otaTrend} />
         </div>
       </div>
     </div>

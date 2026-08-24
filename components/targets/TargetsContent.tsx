@@ -56,11 +56,11 @@ export default function TargetsContent({
 
   const propertyColumns: TableColumn<PropertyTargetComparison>[] = [
     { key: "property", header: "Property", render: (r) => r.property },
-    { key: "targetRevenue", header: "Target revenue", align: "right", render: (r) => formatIndianCurrency(r.targetRevenue) },
-    { key: "achievedRevenue", header: "Achieved revenue", align: "right", render: (r) => formatIndianCurrency(r.achievedRevenue) },
+    { key: "targetRevenue", header: "Target Revenue", align: "right", render: (r) => formatIndianCurrency(r.targetRevenue) },
+    { key: "achievedRevenue", header: "Achieved Revenue", align: "right", render: (r) => formatIndianCurrency(r.achievedRevenue) },
     { key: "achievedPct", header: "Achievement %", align: "right", render: (r) => (r.achievedPct !== null ? formatPercent(r.achievedPct, 0) : "—") },
-    { key: "targetOcc", header: "Target occ %", align: "right", render: (r) => (r.targetOccPct !== null ? formatPercent(r.targetOccPct, 0) : "—") },
-    { key: "achievedOcc", header: "Achieved occ %", align: "right", render: (r) => (r.achievedOccPct !== null ? formatPercent(r.achievedOccPct, 0) : "—") },
+    { key: "targetOcc", header: "Target Occ %", align: "right", render: (r) => (r.targetOccPct !== null ? formatPercent(r.targetOccPct, 0) : "—") },
+    { key: "achievedOcc", header: "Achieved Occ %", align: "right", render: (r) => (r.achievedOccPct !== null ? formatPercent(r.achievedOccPct, 0) : "—") },
     { key: "targetArr", header: "Target ARR", align: "right", render: (r) => (r.targetArr !== null ? `₹${Math.round(r.targetArr).toLocaleString("en-IN")}` : "—") },
     { key: "achievedArr", header: "Achieved ARR", align: "right", render: (r) => (r.achievedArr !== null ? `₹${Math.round(r.achievedArr).toLocaleString("en-IN")}` : "—") },
   ];
@@ -83,11 +83,11 @@ export default function TargetsContent({
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">Targets vs Achieved</h2>
+        <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">Targets Vs Achieved</h2>
         <p className="text-xs text-zinc-400 dark:text-zinc-500">Company-wide — this tab isn&apos;t scoped by the Property filter (leadership targets aren&apos;t tracked per property).</p>
         <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-2">
           <StatTile
-            label="Revenue achievement"
+            label="Revenue Achievement"
             value={revenueAchievement.achievedPct !== null ? formatPercent(revenueAchievement.achievedPct) : "—"}
             sub={`${formatIndianCurrency(revenueAchievement.achieved)} of ${formatIndianCurrency(revenueAchievement.target)}`}
           />
@@ -95,14 +95,11 @@ export default function TargetsContent({
         </div>
       </div>
 
-      <Card title={`Revenue targets by property (${PROPERTY_TARGETS_FY}, fixed plan)`}>
-        <p className="mb-3 text-xs text-zinc-400 dark:text-zinc-500">
-          Targets are fixed planning figures for {PROPERTY_TARGETS_FY} (won&apos;t change with the FY filter — this data only exists for {PROPERTY_TARGETS_FY}). Achieved figures are live from BigQuery, scoped to the selected Property/Month filters.
-        </p>
+      <Card title={`Revenue Targets By Property (${PROPERTY_TARGETS_FY})`}>
         <Table columns={propertyColumns} rows={propertyTargetComparison} rowKey={(r) => r.property} footerRow={propertyTotals} />
       </Card>
 
-      <Card title="B2B / B2C / OTA achievement (target vs achieved)">
+      <Card title="B2B / B2C / OTA Achievement (Target Vs Achieved)">
         <GroupedBarChart data={categoryData} xKey="category" series={TA_SERIES} valueFormatter={(v) => formatIndianCurrency(v)} />
         <div className="mt-3 grid grid-cols-3 gap-3 text-center">
           {categoryAchievement.map((c) => (
@@ -116,7 +113,7 @@ export default function TargetsContent({
         </div>
       </Card>
 
-      <Card title="Revenue targets with roll over (monthly)">
+      <Card title="Revenue Targets With Roll Over (Monthly)">
         <div className="space-y-6">
           {monthlyRevenueTargetsByFy.map(({ fy, data }) => (
             <div key={fy}>
@@ -138,7 +135,7 @@ export default function TargetsContent({
         </div>
       </Card>
 
-      <Card title="ADR: target vs achieved (monthly)">
+      <Card title="ADR: Target Vs Achieved (Monthly)">
         <div className="space-y-6">
           {adrTargetVsAchievedByFy.map(({ fy, data }) => (
             <div key={fy}>
@@ -155,7 +152,7 @@ export default function TargetsContent({
         </div>
       </Card>
 
-      <Card title="Occupancy: target vs achieved (monthly)">
+      <Card title="Occupancy: Target Vs Achieved (Monthly)">
         <div className="space-y-6">
           {occupancyTargetVsAchievedByFy.map(({ fy, data }) => (
             <div key={fy}>
