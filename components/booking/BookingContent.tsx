@@ -4,7 +4,7 @@ import {
   BookingStats, RoomNightsGap, RepeatBookingShare, RoomFormatStats, RoomFormatByFy,
   ExpatStats, CancellationStats, CancellationLeadTime, B2bCompanyStats,
 } from "@/lib/bigquery/queries/guestDetail";
-import { B2bContractRanking, B2bTopAdrContract, RetentionPoint, summarizeB2bContracts } from "@/lib/bigquery/queries/b2bContracts";
+import type { B2bContractRanking, B2bTopAdrContract, RetentionPoint, B2bContractSummary } from "@/lib/bigquery/queries/b2bContracts";
 import StatTile from "@/components/ui/StatTile";
 import Card from "@/components/ui/Card";
 import Table, { TableColumn } from "@/components/ui/Table";
@@ -24,6 +24,7 @@ export default function BookingContent({
   cancellationLeadTime,
   b2bByCompany,
   b2bRanking,
+  b2bContractSummary,
   b2bTopAdr,
   b2bRetention,
 }: {
@@ -37,6 +38,7 @@ export default function BookingContent({
   cancellationLeadTime: CancellationLeadTime;
   b2bByCompany: B2bCompanyStats[];
   b2bRanking: B2bContractRanking[];
+  b2bContractSummary: B2bContractSummary;
   b2bTopAdr: B2bTopAdrContract[];
   b2bRetention: RetentionPoint[];
 }) {
@@ -72,8 +74,6 @@ export default function BookingContent({
     { key: "revenue", header: "Room revenue", align: "right", render: (r) => formatIndianCurrency(r.roomRevenue) },
     { key: "adr", header: "ADR", align: "right", render: (r) => (r.adr !== null ? `₹${Math.round(r.adr).toLocaleString("en-IN")}` : "—") },
   ];
-
-  const contractSummary = summarizeB2bContracts(b2bRanking);
 
   const rankingColumns: TableColumn<B2bContractRanking>[] = [
     { key: "company", header: "Company", render: (r) => r.company },
@@ -172,8 +172,8 @@ export default function BookingContent({
         <div className="mt-3">
           <Card title={`Contract status & ranking (${b2bRanking.length} companies)`}>
             <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-2">
-              <StatTile label="Contract revenue achieved" value={formatIndianCurrency(contractSummary.totalContractRevenue)} sub="Contract_Status = Contract only, not total company revenue" />
-              <StatTile label="Companies under contract" value={contractSummary.contractCompanyCount.toLocaleString("en-IN")} />
+              <StatTile label="Contract revenue achieved" value={formatIndianCurrency(b2bContractSummary.totalContractRevenue)} sub="Contract_Status = Contract only, not total company revenue" />
+              <StatTile label="Companies under contract" value={b2bContractSummary.contractCompanyCount.toLocaleString("en-IN")} />
             </div>
             <Table columns={rankingColumns} rows={b2bRanking.slice(0, 20)} rowKey={(r) => r.company} />
           </Card>

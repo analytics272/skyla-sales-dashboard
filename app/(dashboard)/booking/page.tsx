@@ -13,6 +13,7 @@ import {
   getB2bContractRanking,
   getB2bTopAdrContracts,
   getCorporateAccountRetention,
+  summarizeB2bContracts,
 } from "@/lib/bigquery/queries/b2bContracts";
 import { parseKpiFilter, SearchParams } from "@/lib/filters/parseSearchParams";
 import { resolveFilter } from "@/lib/bigquery/queries/filters";
@@ -63,6 +64,7 @@ export default async function BookingPage({ searchParams }: { searchParams: Prom
       cancellationLeadTime={cancellationLeadTime}
       b2bByCompany={b2bByCompany}
       b2bRanking={b2bRanking}
+      b2bContractSummary={summarizeB2bContracts(b2bRanking)}
       b2bTopAdr={b2bTopAdr}
       b2bRetention={b2bRetention}
     />
