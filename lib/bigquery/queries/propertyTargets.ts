@@ -20,6 +20,17 @@ export interface PropertyTargetComparison {
   achievedArr: number | null;
 }
 
+export interface PropertyTargetComparisonResult {
+  rows: PropertyTargetComparison[];
+  /**
+   * Computed from the true underlying totals (summed sold/available nights
+   * and revenue across every included property), not by averaging each
+   * property's own Occ%/ARR ratio — averaging ratios across properties with
+   * very different room counts would misrepresent the combined figure.
+   */
+  total: PropertyTargetComparison;
+}
+
 interface AchievedRow {
   property: string;
   revenue: number | null;
@@ -32,8 +43,12 @@ interface AchievedRow {
  * ignored — these fixed targets only exist for FY 26-27, so this section
  * always compares against FY 26-27 regardless of what FY is selected
  * elsewhere on the page (same convention as the real-time "pace" cards).
+ * `properties` fully respects the global Property filter, unlike the rest of
+ * the Targets tab (leadership_targets has no Property column to filter by —
+ * a genuine data constraint) — this section's target side comes from the
+ * fixed per-property reference data instead, so it can be, and is, scoped.
  */
-export async function getPropertyTargetComparison(properties: string[], months: number[]): Promise<PropertyTargetComparison[]> {
+export async function getPropertyTargetComparison(properties: string[], months: number[]): Promise<PropertyTargetComparisonResult> {
   const scopedMonths = months.length > 0 ? months : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
   const [achievedRows, availableByProperty] = await Promise.all([
@@ -48,7 +63,14 @@ export async function getPropertyTargetComparison(properties: string[], months: 
     getAvailableRoomNightsByProperty(properties, rangesForFysAndMonths([PROPERTY_TARGETS_FY], months)),
   ]);
 
-  return properties.map((code) => {
+  let totalTargetRevenue = 0;
+  let totalAchievedRevenue = 0;
+  let totalTargetSoldNights = 0;
+  let totalTargetAvailable = 0;
+  let totalAchievedNights = 0;
+  let totalAvailable = 0;
+
+  const rows = properties.map((code) => {
     const targets = (PROPERTY_TARGETS_FY27[code] ?? []).filter((t) => scopedMonths.includes(t.calendarMonth));
     const targetRevenue = targets.reduce((s, t) => s + t.revenue, 0);
     const targetSoldNights = targets.reduce((s, t) => s + t.available * t.occPct, 0);
@@ -58,6 +80,13 @@ export async function getPropertyTargetComparison(properties: string[], months: 
     const achievedRevenue = achieved?.revenue ?? 0;
     const achievedNights = achieved?.nights ?? 0;
     const available = availableByProperty[code] ?? 0;
+
+    totalTargetRevenue += targetRevenue;
+    totalAchievedRevenue += achievedRevenue;
+    totalTargetSoldNights += targetSoldNights;
+    totalTargetAvailable += targetAvailable;
+    totalAchievedNights += achievedNights;
+    totalAvailable += available;
 
     return {
       property: code,
@@ -70,4 +99,17 @@ export async function getPropertyTargetComparison(properties: string[], months: 
       achievedArr: safeDivide(achievedRevenue, achievedNights),
     };
   });
+
+  const total: PropertyTargetComparison = {
+    property: "Total",
+    targetRevenue: totalTargetRevenue,
+    achievedRevenue: totalAchievedRevenue,
+    achievedPct: safeDivide(totalAchievedRevenue, totalTargetRevenue),
+    targetOccPct: safeDivide(totalTargetSoldNights, totalTargetAvailable),
+    achievedOccPct: safeDivide(totalAchievedNights, totalAvailable),
+    targetArr: safeDivide(totalTargetRevenue, totalTargetSoldNights),
+    achievedArr: safeDivide(totalAchievedRevenue, totalAchievedNights),
+  };
+
+  return { rows, total };
 }

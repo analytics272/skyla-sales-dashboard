@@ -14,7 +14,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <div className="sticky top-0 z-20 shadow-sm">
               <FilterBar />
             </div>
-            <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">{children}</main>
+            <main className="w-full px-4 py-6 sm:px-6 lg:px-8">{children}</main>
           </div>
         </div>
       </FiltersProvider>

@@ -314,9 +314,15 @@ to ~₹28.45 Cr, the sane relationship.
 headline row (2026-08-24) — the summed annual figure reads as confusing on
 its own even after the fix above; "Revenue achievement"'s sub-label already
 carries "₹achieved of ₹target". The monthly chart (now fixed) is the place to
-see rollover progression. Company-wide caption added to the tab heading —
-`leadership_targets` has no `Property` column, so this whole tab is
-unaffected by the Property filter (a real data constraint, not a bug).
+see rollover progression.
+
+`leadership_targets` has no `Property` column, so **`Revenue Achievement`,
+the B2B/B2C/OTA achievement chart, and the three monthly target-vs-achieved
+charts genuinely cannot be scoped by Property** — this is a real data
+constraint (the source table has no property dimension at all), not a bug. A
+caption saying so was shown on the tab from 2026-08-24 to 2026-08-25 and was
+then removed per user request; the constraint itself is unchanged. §6.1's
+per-property table is the exception — see below.
 
 ### 6.1 Revenue targets by property (new, 2026-08-25)
 
@@ -353,6 +359,15 @@ also intentionally ignore parts of the global filter that don't apply to
 them. BH4 shows 0/null achieved figures for any month — this is the
 already-documented pipeline gap (`propertyReference.ts`: BH4 has zero rows in
 `sales_booking` as of this writing), not a bug in this feature.
+
+**Total row, fixed 2026-08-25**: originally hardcoded Occ%/ARR to `—` in the
+footer row (only Target/Achieved Revenue were summed) — looked like a broken
+blank area. `getPropertyTargetComparison()` now also returns a `total`
+computed from the true underlying sums (sold/available room-nights and
+revenue across every included property), not by averaging each property's
+own ratio — averaging Occ%/ARR ratios across properties with very different
+room counts would misrepresent the combined figure. Verified: selecting a
+single property makes `total` exactly equal that property's own row.
 
 ## 7. Lead Tracker tab
 

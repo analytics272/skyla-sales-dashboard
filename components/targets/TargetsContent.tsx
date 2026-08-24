@@ -1,7 +1,7 @@
 "use client";
 
 import { CategoryAchievement, RevenueAchievement, MonthlyRevenueTarget, MonthlyAdrTarget, MonthlyOccupancyTarget } from "@/lib/bigquery/queries/targets";
-import type { PropertyTargetComparison } from "@/lib/bigquery/queries/propertyTargets";
+import type { PropertyTargetComparison, PropertyTargetComparisonResult } from "@/lib/bigquery/queries/propertyTargets";
 import { PROPERTY_TARGETS_FY } from "@/lib/reference/propertyTargets";
 import StatTile from "@/components/ui/StatTile";
 import Card from "@/components/ui/Card";
@@ -46,7 +46,7 @@ export default function TargetsContent({
   monthlyRevenueTargetsByFy: { fy: string; data: MonthlyRevenueTarget[] }[];
   adrTargetVsAchievedByFy: { fy: string; data: MonthlyAdrTarget[] }[];
   occupancyTargetVsAchievedByFy: { fy: string; data: MonthlyOccupancyTarget[] }[];
-  propertyTargetComparison: PropertyTargetComparison[];
+  propertyTargetComparison: PropertyTargetComparisonResult;
 }) {
   const categoryData = categoryAchievement.map((c) => ({
     category: c.category,
@@ -65,26 +65,10 @@ export default function TargetsContent({
     { key: "achievedArr", header: "Achieved ARR", align: "right", render: (r) => (r.achievedArr !== null ? `₹${Math.round(r.achievedArr).toLocaleString("en-IN")}` : "—") },
   ];
 
-  const propertyTotals = propertyTargetComparison.reduce(
-    (acc, r) => ({
-      property: "Total",
-      targetRevenue: acc.targetRevenue + r.targetRevenue,
-      achievedRevenue: acc.achievedRevenue + r.achievedRevenue,
-      achievedPct: null,
-      targetOccPct: null,
-      achievedOccPct: null,
-      targetArr: null,
-      achievedArr: null,
-    }),
-    { property: "Total", targetRevenue: 0, achievedRevenue: 0, achievedPct: null, targetOccPct: null, achievedOccPct: null, targetArr: null, achievedArr: null } as PropertyTargetComparison
-  );
-  propertyTotals.achievedPct = propertyTotals.targetRevenue > 0 ? propertyTotals.achievedRevenue / propertyTotals.targetRevenue : null;
-
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">Targets Vs Achieved</h2>
-        <p className="text-xs text-zinc-400 dark:text-zinc-500">Company-wide — this tab isn&apos;t scoped by the Property filter (leadership targets aren&apos;t tracked per property).</p>
         <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-2">
           <StatTile
             label="Revenue Achievement"
@@ -96,7 +80,7 @@ export default function TargetsContent({
       </div>
 
       <Card title={`Revenue Targets By Property (${PROPERTY_TARGETS_FY})`}>
-        <Table columns={propertyColumns} rows={propertyTargetComparison} rowKey={(r) => r.property} footerRow={propertyTotals} />
+        <Table columns={propertyColumns} rows={propertyTargetComparison.rows} rowKey={(r) => r.property} footerRow={propertyTargetComparison.total} />
       </Card>
 
       <Card title="B2B / B2C / OTA Achievement (Target Vs Achieved)">
