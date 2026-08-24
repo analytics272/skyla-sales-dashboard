@@ -39,7 +39,7 @@ function formatLastUpdate(d: Date): string {
 const FY_MULTI_OPTIONS = FY_OPTIONS.map((fy) => ({ value: fy, label: fy }));
 
 export default function FilterBar() {
-  const { properties, fys, quarter, months, setProperties, setFys, setQuarter, setMonths } = useFilters();
+  const { properties, fys, quarter, months, setProperties, setFys, setQuarter, setMonths, resetAll } = useFilters();
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-950 sm:px-6">
@@ -65,6 +65,14 @@ export default function FilterBar() {
         </select>
 
         <MultiSelectDropdown label="FY" options={FY_MULTI_OPTIONS} selected={fys} onChange={setFys} />
+
+        <button
+          type="button"
+          onClick={resetAll}
+          className="rounded-full border border-teal-700 px-3 py-1.5 text-xs font-medium text-teal-700 shadow-sm transition-colors hover:bg-teal-50 dark:border-teal-400 dark:text-teal-300 dark:hover:bg-teal-900/30"
+        >
+          Reset filters
+        </button>
       </div>
     </div>
   );

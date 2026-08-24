@@ -4,7 +4,7 @@ import {
   BookingStats, RoomNightsGap, RepeatBookingShare, RoomFormatStats, RoomFormatByFy,
   ExpatStats, CancellationStats, CancellationLeadTime, B2bCompanyStats,
 } from "@/lib/bigquery/queries/guestDetail";
-import { B2bContractRanking, B2bTopAdrContract, RetentionPoint } from "@/lib/bigquery/queries/b2bContracts";
+import { B2bContractRanking, B2bTopAdrContract, RetentionPoint, summarizeB2bContracts } from "@/lib/bigquery/queries/b2bContracts";
 import StatTile from "@/components/ui/StatTile";
 import Card from "@/components/ui/Card";
 import Table, { TableColumn } from "@/components/ui/Table";
@@ -69,15 +69,18 @@ export default function BookingContent({
   const b2bColumns: TableColumn<B2bCompanyStats>[] = [
     { key: "company", header: "Company", render: (r) => r.company },
     { key: "nights", header: "Nights", align: "right", render: (r) => r.nights.toLocaleString("en-IN") },
-    { key: "revenue", header: "Room charges (incl. tax)", align: "right", render: (r) => formatIndianCurrency(r.roomChargesWithTax) },
+    { key: "revenue", header: "Room revenue", align: "right", render: (r) => formatIndianCurrency(r.roomRevenue) },
     { key: "adr", header: "ADR", align: "right", render: (r) => (r.adr !== null ? `₹${Math.round(r.adr).toLocaleString("en-IN")}` : "—") },
   ];
+
+  const contractSummary = summarizeB2bContracts(b2bRanking);
 
   const rankingColumns: TableColumn<B2bContractRanking>[] = [
     { key: "company", header: "Company", render: (r) => r.company },
     { key: "status", header: "Contract status", render: (r) => r.contractStatus ?? "—" },
     { key: "nights", header: "Nights", align: "right", render: (r) => r.nights.toLocaleString("en-IN") },
-    { key: "revenue", header: "Room charges (incl. tax)", align: "right", render: (r) => formatIndianCurrency(r.roomChargesWithTax) },
+    { key: "revenue", header: "Room revenue", align: "right", render: (r) => formatIndianCurrency(r.roomRevenue) },
+    { key: "contribution", header: "Contribution %", align: "right", render: (r) => (r.contributionPct !== null ? formatPercent(r.contributionPct, 0) : "—") },
   ];
 
   const adrColumns: TableColumn<B2bTopAdrContract>[] = [
@@ -153,6 +156,7 @@ export default function BookingContent({
           series={formatsInFyData.map((rt) => ({ key: rt, color: ROOM_TYPE_COLOR[rt] }))}
           valueFormatter={(v) => formatIndianCurrency(v)}
           height={320}
+          stacked
         />
       </Card>
 
@@ -167,6 +171,10 @@ export default function BookingContent({
 
         <div className="mt-3">
           <Card title={`Contract status & ranking (${b2bRanking.length} companies)`}>
+            <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-2">
+              <StatTile label="Contract revenue achieved" value={formatIndianCurrency(contractSummary.totalContractRevenue)} sub="Contract_Status = Contract only, not total company revenue" />
+              <StatTile label="Companies under contract" value={contractSummary.contractCompanyCount.toLocaleString("en-IN")} />
+            </div>
             <Table columns={rankingColumns} rows={b2bRanking.slice(0, 20)} rowKey={(r) => r.company} />
           </Card>
         </div>

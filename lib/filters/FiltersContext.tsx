@@ -22,6 +22,7 @@ interface FiltersContextValue extends FiltersState {
   setMonths: (months: number[]) => void;
   toggleMonth: (month: number) => void;
   clearQuarterAndMonths: () => void;
+  resetAll: () => void;
 }
 
 const FiltersContext = createContext<FiltersContextValue | null>(null);
@@ -76,6 +77,11 @@ function FiltersProviderInner({ children }: { children: ReactNode }) {
       updateParams({ months: next.length ? next.join(",") : undefined, quarter: undefined });
     },
     clearQuarterAndMonths: () => updateParams({ quarter: undefined, months: undefined }),
+    // Back to defaults: all properties, no month/quarter narrowing, and FY
+    // falls back to currentFYLabel() (see `fys` above) rather than being
+    // pinned — so a reset always lands on "this financial year", whichever
+    // one that is at the time, not a stale hardcoded year.
+    resetAll: () => updateParams({ property: undefined, fy: undefined, quarter: undefined, months: undefined }),
   };
 
   return <FiltersContext.Provider value={value}>{children}</FiltersContext.Provider>;

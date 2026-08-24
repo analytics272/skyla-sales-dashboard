@@ -332,9 +332,9 @@ export async function getCancellationLeadTime(filter: KpiFilter): Promise<Cancel
 // honors Property + FY, not the Month multi-select.
 
 export interface B2bCompanyStats {
-  company: string;
+  company: string; // Bills_due_from — see b2bContracts.ts header comment
   nights: number;
-  roomChargesWithTax: number; // col_21
+  roomRevenue: number; // Room_Revenue — tax-exclusive
   adr: number | null;
 }
 
@@ -345,14 +345,14 @@ export async function getB2bByCompany(filter: Pick<KpiFilter, "properties" | "fy
 
   return runQuery<B2bCompanyStats>(`
     SELECT
-      Company AS company,
+      Bills_due_from AS company,
       SUM(Nights) AS nights,
-      SUM(col_21) AS roomChargesWithTax,
-      SAFE_DIVIDE(SUM(col_21), NULLIF(SUM(Nights), 0)) AS adr
+      SUM(Room_Revenue) AS roomRevenue,
+      SAFE_DIVIDE(SUM(Room_Revenue), NULLIF(SUM(Nights), 0)) AS adr
     FROM ${table("b2b_bills")}
-    WHERE Property IN UNNEST(@properties) AND Company IS NOT NULL
+    WHERE Property IN UNNEST(@properties) AND Bills_due_from IS NOT NULL
       AND Financial_Year != 'FY 99-00'${fyClause}
     GROUP BY company
-    ORDER BY roomChargesWithTax DESC
+    ORDER BY roomRevenue DESC
   `, params);
 }

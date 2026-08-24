@@ -6,10 +6,9 @@ export const CATEGORY_COLOR: Record<string, string> = {
   B2B: "var(--series-1)",
   B2C: "var(--series-2)",
   OTA: "var(--series-3)",
-  Website: "var(--series-4)",
 };
 
-export const CATEGORY_ORDER = ["B2B", "B2C", "OTA", "Website"] as const;
+export const CATEGORY_ORDER = ["B2B", "B2C", "OTA"] as const;
 
 export const BRAND_COLOR: Record<string, string> = {
   Skyla: "var(--series-1)",

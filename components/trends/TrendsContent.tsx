@@ -35,7 +35,14 @@ export default function TrendsContent({
       <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">Trends</h2>
 
       <Card title="Occupancy trend (by FY)">
-        <MultiSeriesLineChart data={occupancyData} xKey="monthLabel" series={fySeries} valueFormatter={(v) => `${v.toFixed(0)}%`} />
+        <MultiSeriesLineChart
+          data={occupancyData}
+          xKey="monthLabel"
+          series={fySeries}
+          valueFormatter={(v) => `${v.toFixed(0)}%`}
+          yDomain={[0, 100]}
+          yTicks={[0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100]}
+        />
       </Card>
 
       <Card title="RevPAR trend (by FY)">

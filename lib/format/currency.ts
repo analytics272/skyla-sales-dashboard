@@ -17,3 +17,20 @@ export function safeDivide(numerator: number, denominator: number): number | nul
   if (!denominator) return null;
   return numerator / denominator;
 }
+
+/**
+ * The one YoY comparison format used everywhere on the dashboard (per the
+ * Looker Studio reference): arrow + relative % change + prior-period label +
+ * prior-period absolute value, e.g. "▲ 12% vs FY 25-26 (₹3.2 Cr)".
+ */
+export function formatYoyLine(
+  current: number | null,
+  prior: number | null,
+  pctChange: number | null,
+  priorLabel: string,
+  valueFormatter: (v: number) => string
+): string {
+  if (current === null || prior === null || pctChange === null) return "";
+  const arrow = pctChange >= 0 ? "▲" : "▼";
+  return `${arrow} ${formatPercent(Math.abs(pctChange), 0)} vs ${priorLabel} (${valueFormatter(prior)})`;
+}

@@ -12,12 +12,18 @@ export default function MultiSeriesLineChart({
   series,
   valueFormatter,
   height = 280,
+  yTicks,
+  yDomain,
 }: {
   data: Record<string, unknown>[];
   xKey: string;
   series: { key: string; color: string }[];
   valueFormatter: (v: number) => string;
   height?: number;
+  /** Explicit tick values, e.g. finer steps at the low end and coarser above a threshold. Overrides Recharts' auto ticks. */
+  yTicks?: number[];
+  /** Explicit y-axis domain, e.g. [0, 100] for a percentage scale. */
+  yDomain?: [number, number];
 }) {
   return (
     <ResponsiveContainer width="100%" height={height}>
@@ -35,6 +41,8 @@ export default function MultiSeriesLineChart({
           tickLine={false}
           tickFormatter={valueFormatter}
           width={56}
+          ticks={yTicks}
+          domain={yDomain}
         />
         <Tooltip
           formatter={(value) => valueFormatter(Number(value))}

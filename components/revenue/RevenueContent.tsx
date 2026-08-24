@@ -4,7 +4,7 @@ import { OverviewKpis, PropertyAdr, OccupancyPace, LastMonthCategorySnapshot } f
 import { MonthlyTrendPoint } from "@/lib/bigquery/queries/trends";
 import Card from "@/components/ui/Card";
 import SingleMetricBarChart, { BarDatum } from "@/components/charts/SingleMetricBarChart";
-import { formatIndianCurrency, formatPercent } from "@/lib/format/currency";
+import { formatIndianCurrency, formatPercent, formatYoyLine } from "@/lib/format/currency";
 import { CATEGORY_COLOR, CATEGORY_ORDER } from "@/lib/design/tokens";
 import { FISCAL_MONTH_ORDER, MONTH_ABBR } from "@/lib/charts/pivotByFiscalMonth";
 
@@ -127,33 +127,38 @@ export default function RevenueContent({
           <HeroFigure
             label="Room Revenue"
             value={formatIndianCurrency(overview.roomRevenue)}
-            sub={`${fy} · ${overview.yoy.pctChange !== null ? `${overview.yoy.pctChange >= 0 ? "▲" : "▼"} ${formatPercent(Math.abs(overview.yoy.pctChange), 0)} vs ${overview.yoy.priorFY}` : ""}`}
+            sub={`${fy} · ${formatYoyLine(overview.yoy.currentRevenue, overview.yoy.priorRevenue, overview.yoy.pctChange, overview.yoy.priorFY, formatIndianCurrency)}`}
           />
           <SingleMetricBarChart data={revenueByMonth} valueFormatter={(v) => formatIndianCurrency(v)} height={180} />
         </Card>
 
         <Card>
           <CategorySplitRow items={adrSplit} />
-          <HeroFigure label="ADR" value={overview.adr !== null ? `₹${Math.round(overview.adr).toLocaleString("en-IN")}` : "—"} />
+          <HeroFigure
+            label="ADR"
+            value={overview.adr !== null ? `₹${Math.round(overview.adr).toLocaleString("en-IN")}` : "—"}
+            sub={formatYoyLine(overview.yoy.adr.current, overview.yoy.adr.prior, overview.yoy.adr.pctChange, overview.yoy.priorFY, (v) => `₹${Math.round(v).toLocaleString("en-IN")}`)}
+          />
           <SingleMetricBarChart data={adrByPropertyData} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} height={180} />
         </Card>
 
         <Card>
           <PaceComparison pace={occupancyPace} />
           <CategorySplitRow items={occupancySplit} />
-          <HeroFigure label="Occupancy %" value={overview.occupancyPct !== null ? formatPercent(overview.occupancyPct, 0) : "—"} />
+          <HeroFigure
+            label="Occupancy %"
+            value={overview.occupancyPct !== null ? formatPercent(overview.occupancyPct, 0) : "—"}
+            sub={formatYoyLine(overview.yoy.occupancyPct.current, overview.yoy.occupancyPct.prior, overview.yoy.occupancyPct.pctChange, overview.yoy.priorFY, (v) => formatPercent(v, 0))}
+          />
           <SingleMetricBarChart data={occupancyByMonth} valueFormatter={(v) => `${v.toFixed(0)}%`} height={180} />
         </Card>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-          <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">Extras revenue</p>
-          <p className="mt-1.5 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">{formatIndianCurrency(overview.extrasRevenue)}</p>
-        </div>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
           <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">RevPAR</p>
           <p className="mt-1.5 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">{overview.revPar !== null ? `₹${Math.round(overview.revPar).toLocaleString("en-IN")}` : "—"}</p>
+          <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">{formatYoyLine(overview.yoy.revPar.current, overview.yoy.revPar.prior, overview.yoy.revPar.pctChange, overview.yoy.priorFY, (v) => `₹${Math.round(v).toLocaleString("en-IN")}`)}</p>
         </div>
         <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
           <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">Sold / Available room nights</p>

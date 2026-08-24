@@ -21,7 +21,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   const [summary, mom, byProperty, bySource, formatLeadsRevenue, adrByFormat, lostReasons, bookingPace, byOwner] =
     await Promise.all([
       getLeadsSummary(leadsFilter),
-      getLeadsMoM(latestSelectedFy(filter)),
+      getLeadsMoM(latestSelectedFy(filter), filter.properties),
       getLeadsByProperty(leadsFilter),
       getLeadsBySource(leadsFilter),
       getFormatLeadsRevenue(leadsFilter),

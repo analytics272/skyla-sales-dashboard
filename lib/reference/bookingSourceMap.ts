@@ -3,7 +3,7 @@
 // OTA/B2B pattern fallback, else B2C). Applies to sales_booking.Source,
 // sales_booking_cancelled.Source, and lead_tracker.Source.
 
-export type BookingCategory = "B2B" | "B2C" | "OTA" | "Website";
+export type BookingCategory = "B2B" | "B2C" | "OTA";
 
 export const BOOKING_SOURCE_MAP: Record<string, BookingCategory> = {
   "Relocation (B2B)": "B2B",
@@ -106,7 +106,7 @@ export const BOOKING_SOURCE_MAP: Record<string, BookingCategory> = {
   BPO7390: "B2B",
   OTA: "OTA",
   BPO10092: "B2B",
-  Website: "Website",
+  Website: "B2C",
   "KG Reddy": "B2B",
   "Agoda B2B": "OTA",
   "Clear trip": "OTA",

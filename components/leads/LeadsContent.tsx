@@ -41,6 +41,13 @@ export default function LeadsContent({
     .sort((a, b) => a.monthNumber - b.monthNumber)
     .map((m) => ({ month: FISCAL_MONTH_NAMES[m.monthNumber] ?? m.monthNumber, total: m.totalLeads, closed: m.closedLeads }));
 
+  const existingTotal = bySource.find((s) => s.key === "Existing")?.count ?? 0;
+  const referenceTotal = bySource.find((s) => s.key === "Reference")?.count ?? 0;
+  const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 100) : 0);
+  const b2cAchievedPct = pct(summary.b2cLeadsClosed, summary.b2cLeads);
+  const existingAchievedPct = pct(summary.existingClosedLeads, existingTotal);
+  const referenceAchievedPct = pct(summary.referenceClosedLeads, referenceTotal);
+
   const propertyData: BarDatum[] = byProperty.map((r) => ({ name: r.key, value: r.count, color: RANKING_COLOR }));
   const sourceData: BarDatum[] = bySource.slice(0, 8).map((r) => ({ name: r.key, value: r.count, color: RANKING_COLOR }));
   const formatLeadsData: BarDatum[] = formatLeadsRevenue.map((r) => ({ name: r.format, value: r.leads, color: RANKING_COLOR }));
@@ -77,10 +84,21 @@ export default function LeadsContent({
             value={summary.conversionRate !== null ? formatPercent(summary.conversionRate) : "—"}
           />
           <StatTile label="Revenue" value={formatIndianCurrency(summary.revenue)} />
-          <StatTile label="B2C leads" value={summary.b2cLeads.toLocaleString("en-IN")} sub="Source = Exotel" />
-          <StatTile label="B2C leads closed" value={summary.b2cLeadsClosed.toLocaleString("en-IN")} />
-          <StatTile label="Existing leads closed" value={summary.existingClosedLeads.toLocaleString("en-IN")} />
-          <StatTile label="Reference leads closed" value={summary.referenceClosedLeads.toLocaleString("en-IN")} />
+          <StatTile
+            label="B2C leads"
+            value={summary.b2cLeads.toLocaleString("en-IN")}
+            sub={`${summary.b2cLeadsClosed.toLocaleString("en-IN")} closed → ${b2cAchievedPct}% achieved`}
+          />
+          <StatTile
+            label="Existing leads"
+            value={existingTotal.toLocaleString("en-IN")}
+            sub={`${summary.existingClosedLeads.toLocaleString("en-IN")} closed → ${existingAchievedPct}% achieved`}
+          />
+          <StatTile
+            label="Reference leads"
+            value={referenceTotal.toLocaleString("en-IN")}
+            sub={`${summary.referenceClosedLeads.toLocaleString("en-IN")} closed → ${referenceAchievedPct}% achieved`}
+          />
           <StatTile label="Booking pace" value={bookingPace !== null ? bookingPace.toFixed(1) : "—"} />
         </div>
       </div>
@@ -106,18 +124,17 @@ export default function LeadsContent({
         </Card>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-4 lg:grid-cols-3">
         <Card title="Leads by format">
           <SingleMetricBarChart data={formatLeadsData} valueFormatter={(v) => v.toLocaleString("en-IN")} />
         </Card>
         <Card title="Revenue by format">
           <SingleMetricBarChart data={formatRevenueData} valueFormatter={(v) => formatIndianCurrency(v)} />
         </Card>
+        <Card title="ADR by format (closed leads)">
+          <SingleMetricBarChart data={adrByFormatData} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} />
+        </Card>
       </div>
-
-      <Card title="ADR by format (closed leads)">
-        <SingleMetricBarChart data={adrByFormatData} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} />
-      </Card>
 
       <Card title="Lost leads reasons">
         <Table columns={lostColumns} rows={lostReasons} rowKey={(r) => r.stage} />

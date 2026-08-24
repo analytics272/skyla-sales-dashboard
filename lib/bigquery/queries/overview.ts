@@ -12,12 +12,21 @@ export interface SourceBreakdown {
   revenue: number;
 }
 
+export interface YoyMetric {
+  current: number | null;
+  prior: number | null;
+  pctChange: number | null;
+}
+
 export interface YoyComparison {
   currentFY: string;
   currentRevenue: number;
   priorFY: string;
   priorRevenue: number;
   pctChange: number | null;
+  adr: YoyMetric;
+  occupancyPct: YoyMetric;
+  revPar: YoyMetric;
 }
 
 export interface OverviewKpis {
@@ -57,7 +66,7 @@ export async function getOverviewKpis(filter: KpiFilter): Promise<OverviewKpis> 
     runQuery<AggRow>(`
       SELECT
         SUM(DailyRevenue) AS room_revenue,
-        SUM(DailyOtherRevenueInclusiveTax) AS extras_revenue,
+        SUM(DailyOtherRevenueExclusiveTax) AS extras_revenue,
         COUNT(*) AS sold_room_nights
       FROM ${table("sales_booking")}
       WHERE ${where}
@@ -214,6 +223,10 @@ export async function getLastMonthCategoryBreakdown(properties: string[]): Promi
   return { label: monthLabel(start), items, totalRevenue: items.reduce((s, i) => s + i.revenue, 0) };
 }
 
+function yoyMetric(current: number | null, prior: number | null): YoyMetric {
+  return { current, prior, pctChange: current !== null && prior !== null ? safeDivide(current - prior, prior) : null };
+}
+
 async function getYoyComparison(properties: string[], fy?: string): Promise<YoyComparison> {
   const currentFY = fy ?? currentFYLabel();
   const priorFY = fyLabel(parseFyLabel(currentFY) - 1);
@@ -222,25 +235,40 @@ async function getYoyComparison(properties: string[], fy?: string): Promise<YoyC
   const prior = fyBounds(priorFY);
   const dateExpr = "CAST(StayDate AS DATE)";
 
-  const rows = await runQuery<YoyRow>(`
-    SELECT 'current' AS fy, SUM(DailyRevenue) AS revenue
-    FROM ${table("sales_booking")}
-    WHERE Property IN UNNEST(@properties) AND ${dateExpr} BETWEEN @curStart AND @curEnd
-    UNION ALL
-    SELECT 'prior' AS fy, SUM(DailyRevenue) AS revenue
-    FROM ${table("sales_booking")}
-    WHERE Property IN UNNEST(@properties) AND ${dateExpr} BETWEEN @priorStart AND @priorEnd
-  `, {
-    properties,
-    curStart: current.start,
-    curEnd: current.end,
-    priorStart: prior.start,
-    priorEnd: prior.end,
-  });
+  const [rows, currentAvailable, priorAvailable] = await Promise.all([
+    runQuery<YoyRow & { nights: number }>(`
+      SELECT 'current' AS fy, SUM(DailyRevenue) AS revenue, COUNT(*) AS nights
+      FROM ${table("sales_booking")}
+      WHERE Property IN UNNEST(@properties) AND ${dateExpr} BETWEEN @curStart AND @curEnd
+      UNION ALL
+      SELECT 'prior' AS fy, SUM(DailyRevenue) AS revenue, COUNT(*) AS nights
+      FROM ${table("sales_booking")}
+      WHERE Property IN UNNEST(@properties) AND ${dateExpr} BETWEEN @priorStart AND @priorEnd
+    `, {
+      properties,
+      curStart: current.start,
+      curEnd: current.end,
+      priorStart: prior.start,
+      priorEnd: prior.end,
+    }),
+    getAvailableRoomNights(properties, [current]),
+    getAvailableRoomNights(properties, [prior]),
+  ]);
 
   const currentRevenue = rows.find((r) => r.fy === "current")?.revenue ?? 0;
   const priorRevenue = rows.find((r) => r.fy === "prior")?.revenue ?? 0;
+  const currentNights = rows.find((r) => r.fy === "current")?.nights ?? 0;
+  const priorNights = rows.find((r) => r.fy === "prior")?.nights ?? 0;
   const pctChange = safeDivide(currentRevenue - priorRevenue, priorRevenue);
 
-  return { currentFY, currentRevenue, priorFY, priorRevenue, pctChange };
+  return {
+    currentFY,
+    currentRevenue,
+    priorFY,
+    priorRevenue,
+    pctChange,
+    adr: yoyMetric(safeDivide(currentRevenue, currentNights), safeDivide(priorRevenue, priorNights)),
+    occupancyPct: yoyMetric(safeDivide(currentNights, currentAvailable), safeDivide(priorNights, priorAvailable)),
+    revPar: yoyMetric(safeDivide(currentRevenue, currentAvailable), safeDivide(priorRevenue, priorAvailable)),
+  };
 }

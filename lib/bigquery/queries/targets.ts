@@ -3,7 +3,7 @@
 // doesn't apply here. Month_Number is already FY-relative (Apr=1 ... Mar=12),
 // matching fiscal quarters directly: Q1=1-3, Q2=4-6, Q3=7-9, Q4=10-12.
 import { runQuery, table } from "../client";
-import { currentFYLabel, DateFilter, resolveSelectedFYs, resolveSelectedMonths } from "@/lib/reference/financialYear";
+import { currentFYLabel, DateFilter, resolveSelectedFYs, resolveSelectedMonths, fyLabel, parseFyLabel } from "@/lib/reference/financialYear";
 import { safeDivide } from "@/lib/format/currency";
 
 export type TargetsFilter = DateFilter;
@@ -71,23 +71,6 @@ export interface RevenueAchievement {
   targetWithRollOver: number;
 }
 
-export async function getRevenueAchievement(filter: TargetsFilter): Promise<RevenueAchievement> {
-  const { clause, params } = whereForFilter(filter);
-  const rows = await runQuery<{ target: number | null; achieved: number | null; target_with_roll_over: number | null }>(`
-    SELECT
-      SUM(dept_Total_Target) AS target,
-      SUM(Revenue_Achieved) AS achieved,
-      SUM(Target_With_Roll_Over) AS target_with_roll_over
-    FROM ${table("leadership_targets")}
-    WHERE ${clause}
-  `, params);
-
-  const r = rows[0] ?? { target: 0, achieved: 0, target_with_roll_over: 0 };
-  const target = r.target ?? 0;
-  const achieved = r.achieved ?? 0;
-  return { target, achieved, achievedPct: safeDivide(achieved, target), targetWithRollOver: r.target_with_roll_over ?? 0 };
-}
-
 export interface MonthlyRevenueTarget {
   monthNumber: number;
   month: string;
@@ -96,32 +79,90 @@ export interface MonthlyRevenueTarget {
   achievedRevenue: number;
 }
 
-/** Monthly "Revenue Targets with Roll Over" — dept target vs target-with-rollover vs achieved, matching the legacy dashboard's 3-line view. */
-export async function getMonthlyRevenueTargets(fy?: string): Promise<MonthlyRevenueTarget[]> {
-  const rows = await runQuery<{
-    month_number: number;
-    month: string;
-    dept_target: number | null;
-    target_with_roll_over: number | null;
-    achieved: number | null;
-  }>(`
+interface RawTargetMonthRow {
+  monthNumber: number;
+  month: string;
+  deptTarget: number;
+  achieved: number;
+}
+
+async function getRawMonthlyRows(fy: string): Promise<RawTargetMonthRow[]> {
+  const rows = await runQuery<{ month_number: number; month: string; dept_target: number | null; achieved: number | null }>(`
     SELECT Month_Number AS month_number, Month AS month,
       SUM(dept_Total_Target) AS dept_target,
-      SUM(Target_With_Roll_Over) AS target_with_roll_over,
       SUM(Revenue_Achieved) AS achieved
     FROM ${table("leadership_targets")}
     WHERE Financial_Year = @fy
     GROUP BY month_number, month
     ORDER BY month_number
-  `, { fy: fy ?? currentFYLabel() });
+  `, { fy });
+  return rows.map((r) => ({ monthNumber: r.month_number, month: r.month, deptTarget: r.dept_target ?? 0, achieved: r.achieved ?? 0 }));
+}
 
-  return rows.map((r) => ({
-    monthNumber: r.month_number,
-    month: r.month,
-    deptTarget: r.dept_target ?? 0,
-    targetWithRollOver: r.target_with_roll_over ?? 0,
-    achievedRevenue: r.achieved ?? 0,
-  }));
+/**
+ * The sheet's own Target_With_Roll_Over column is corrupted for every FY's
+ * first month (verified against raw data: April's value comes out as just a
+ * few lakh — nowhere near dept_Total_Target — while every other month exactly
+ * equals `dept_Total_Target[N] + (dept_Total_Target[N-1] - Revenue_Achieved[N-1])`,
+ * a single-month-lag carry of the *previous* month's own shortfall, not a
+ * cumulative chain). So rollover is recomputed here from dept_Total_Target and
+ * Revenue_Achieved directly, seeded from the prior FY's March row when one
+ * exists (0 for the earliest FY in the data, e.g. FY 24-25's April).
+ */
+async function getPriorMarchShortfall(fy: string): Promise<number> {
+  const priorFy = fyLabel(parseFyLabel(fy) - 1);
+  const rows = await runQuery<{ dept_target: number | null; achieved: number | null }>(`
+    SELECT SUM(dept_Total_Target) AS dept_target, SUM(Revenue_Achieved) AS achieved
+    FROM ${table("leadership_targets")}
+    WHERE Financial_Year = @priorFy AND Month_Number = 12
+  `, { priorFy });
+  const r = rows[0];
+  if (!r || r.dept_target === null) return 0;
+  return (r.dept_target ?? 0) - (r.achieved ?? 0);
+}
+
+function computeRollover(rows: RawTargetMonthRow[], seedShortfall: number): MonthlyRevenueTarget[] {
+  const result: MonthlyRevenueTarget[] = [];
+  let carry = seedShortfall;
+  for (const r of rows) {
+    result.push({
+      monthNumber: r.monthNumber,
+      month: r.month,
+      deptTarget: r.deptTarget,
+      targetWithRollOver: r.deptTarget + carry,
+      achievedRevenue: r.achieved,
+    });
+    carry = r.deptTarget - r.achieved;
+  }
+  return result;
+}
+
+/** Monthly "Revenue Targets with Roll Over" — dept target vs target-with-rollover vs achieved, matching the legacy dashboard's 3-line view. */
+export async function getMonthlyRevenueTargets(fy?: string): Promise<MonthlyRevenueTarget[]> {
+  const resolvedFy = fy ?? currentFYLabel();
+  const [rows, seedShortfall] = await Promise.all([getRawMonthlyRows(resolvedFy), getPriorMarchShortfall(resolvedFy)]);
+  return computeRollover(rows, seedShortfall);
+}
+
+export async function getRevenueAchievement(filter: TargetsFilter): Promise<RevenueAchievement> {
+  const fys = resolveSelectedFYs(filter);
+  const months = resolveSelectedMonths(filter);
+  const fiscalMonthNums = months.length > 0 ? months.map(fiscalMonthNumber) : null;
+
+  const perFy = await Promise.all(fys.map((fy) => getMonthlyRevenueTargets(fy)));
+
+  let target = 0;
+  let achieved = 0;
+  let targetWithRollOver = 0;
+  for (const monthRows of perFy) {
+    for (const r of monthRows) {
+      if (fiscalMonthNums && !fiscalMonthNums.includes(r.monthNumber)) continue;
+      target += r.deptTarget;
+      achieved += r.achievedRevenue;
+      targetWithRollOver += r.targetWithRollOver;
+    }
+  }
+  return { target, achieved, achievedPct: safeDivide(achieved, target), targetWithRollOver };
 }
 
 export interface MonthlyAdrTarget {

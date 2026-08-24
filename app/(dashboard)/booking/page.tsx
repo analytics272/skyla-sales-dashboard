@@ -15,11 +15,13 @@ import {
   getCorporateAccountRetention,
 } from "@/lib/bigquery/queries/b2bContracts";
 import { parseKpiFilter, SearchParams } from "@/lib/filters/parseSearchParams";
+import { resolveFilter } from "@/lib/bigquery/queries/filters";
 import BookingContent from "@/components/booking/BookingContent";
 
 export default async function BookingPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const sp = await searchParams;
   const filter = parseKpiFilter(sp);
+  const resolved = resolveFilter(filter);
 
   const [
     bookingStats,
@@ -44,9 +46,9 @@ export default async function BookingPage({ searchParams }: { searchParams: Prom
     getCancellationStats(filter),
     getCancellationLeadTime(filter),
     getB2bByCompany({ properties: filter.properties, fys: filter.fys }),
-    getB2bContractRanking(filter.fys),
-    getB2bTopAdrContracts(filter.fys),
-    getCorporateAccountRetention(),
+    getB2bContractRanking(resolved.properties, filter.fys),
+    getB2bTopAdrContracts(resolved.properties, filter.fys),
+    getCorporateAccountRetention(resolved.properties),
   ]);
 
   return (

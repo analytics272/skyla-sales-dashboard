@@ -49,10 +49,18 @@ function whereForFilter(filter: LeadsFilter): { clause: string; params: Record<s
   return { clause: conditions.join(" AND "), params };
 }
 
+// B2C acquisition channels: Exotel (phone), Business WA (WhatsApp), Website.
+// Existing/Reference/Enquiry mail/etc. are tracked as their own separate
+// stats (existingClosedLeads, referenceClosedLeads) rather than folded in
+// here — every raw lead_tracker.Source value is ultimately a B2C lead (this
+// table has no B2B/OTA source at all), but "B2C leads" specifically means
+// the new-customer-acquisition channels, matching the existing design.
+const B2C_SOURCES_SQL = "Source IN ('Exotel', 'Business WA', 'Website')";
+
 export interface LeadsSummary {
   totalLeads: number;
   closedLeads: number;
-  newLeads: number; // Source = 'Exotel' — same basis as b2cLeads below
+  newLeads: number; // Source IN (Exotel, Business WA, Website) — same basis as b2cLeads below
   b2cLeads: number;
   b2cLeadsClosed: number;
   existingClosedLeads: number;
@@ -75,8 +83,8 @@ export async function getLeadsSummary(filter: LeadsFilter): Promise<LeadsSummary
     SELECT
       COUNT(*) AS total_leads,
       COUNTIF(Stage = 'Closed') AS closed_leads,
-      COUNTIF(Source = 'Exotel') AS new_leads,
-      COUNTIF(Source = 'Exotel' AND Stage = 'Closed') AS b2c_leads_closed,
+      COUNTIF(${B2C_SOURCES_SQL}) AS new_leads,
+      COUNTIF(${B2C_SOURCES_SQL} AND Stage = 'Closed') AS b2c_leads_closed,
       COUNTIF(Source = 'Existing' AND Stage = 'Closed') AS existing_closed_leads,
       COUNTIF(Source = 'Reference' AND Stage = 'Closed') AS reference_closed_leads,
       SUM(${TOTAL_EXPR}) AS revenue
@@ -106,18 +114,25 @@ export interface LeadsMoMPoint {
   closedLeads: number;
 }
 
-export async function getLeadsMoM(fy?: string): Promise<LeadsMoMPoint[]> {
+export async function getLeadsMoM(fy: string | undefined, properties?: string[]): Promise<LeadsMoMPoint[]> {
   const resolvedFy = fy ?? currentFYLabel();
+  const conditions = [BASELINE_FILTER, `${fyLabelSqlExpr("date")} = @fy`, "Month_Number IS NOT NULL"];
+  const params: Record<string, unknown> = { fy: resolvedFy };
+  if (properties && properties.length > 0) {
+    params.properties = properties;
+    conditions.push(`${PROPERTY_DISPLAY_EXPR} IN UNNEST(@properties)`);
+  }
+
   const rows = await runQuery<{ month_number: number; total_leads: number; closed_leads: number }>(`
     SELECT
       Month_Number AS month_number,
       COUNT(*) AS total_leads,
       COUNTIF(Stage = 'Closed') AS closed_leads
     FROM ${table("lead_tracker")}
-    WHERE ${BASELINE_FILTER} AND ${fyLabelSqlExpr("date")} = @fy AND Month_Number IS NOT NULL
+    WHERE ${conditions.join(" AND ")}
     GROUP BY month_number
     ORDER BY month_number
-  `, { fy: resolvedFy });
+  `, params);
 
   return rows.map((r) => ({ monthNumber: r.month_number, totalLeads: r.total_leads, closedLeads: r.closed_leads }));
 }

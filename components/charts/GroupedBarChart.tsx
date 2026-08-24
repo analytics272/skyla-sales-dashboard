@@ -12,12 +12,15 @@ export default function GroupedBarChart({
   series,
   valueFormatter,
   height = 280,
+  stacked = false,
 }: {
   data: Record<string, unknown>[];
   xKey: string;
   series: { key: string; color: string }[];
   valueFormatter: (v: number) => string;
   height?: number;
+  /** Stack series into one bar per x-value instead of clustering them side by side — better for many series (e.g. 7+ room types per FY) where clustering gets unreadable. */
+  stacked?: boolean;
 }) {
   return (
     <ResponsiveContainer width="100%" height={height}>
@@ -52,8 +55,15 @@ export default function GroupedBarChart({
           iconType="circle"
           iconSize={8}
         />
-        {series.map((s) => (
-          <Bar key={s.key} dataKey={s.key} fill={s.color} radius={[4, 4, 0, 0]} maxBarSize={28} />
+        {series.map((s, i) => (
+          <Bar
+            key={s.key}
+            dataKey={s.key}
+            fill={s.color}
+            radius={stacked && i === series.length - 1 ? [4, 4, 0, 0] : stacked ? [0, 0, 0, 0] : [4, 4, 0, 0]}
+            maxBarSize={stacked ? 64 : 28}
+            stackId={stacked ? "stack" : undefined}
+          />
         ))}
       </BarChart>
     </ResponsiveContainer>
