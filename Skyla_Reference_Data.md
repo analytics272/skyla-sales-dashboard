@@ -67,6 +67,14 @@ then the OTA/B2B pattern fallback, else B2C) into BigQuery — either a SQL
 `sales_booking.Source`, `sales_booking_cancelled.Source`, and
 `lead_tracker.Source`.
 
+> **Deviation from the script, 2026-08-24**: the dashboard's own
+> `lib/reference/bookingSourceMap.ts` no longer has a `Website` category —
+> the one source below that mapped to `'Website'` now maps to `'B2C'`
+> instead, per business direction (a near-empty 4th category cluttered every
+> chart that groups by business category). The verbatim script below is left
+> unedited as the historical source-of-truth for what `Mapping.gs` itself
+> does; only our BigQuery port differs.
+
 ```javascript
 /**
  * Mapping.gs

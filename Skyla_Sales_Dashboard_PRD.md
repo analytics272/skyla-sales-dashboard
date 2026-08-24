@@ -7,6 +7,16 @@
 
 All table references below are short for `skyla-analytics.Skyla_Sales_Automation.<table>` unless stated otherwise.
 
+> **Post-launch corrections (2026-08-24)**: several formulas below were found
+> wrong or ambiguous once the built dashboard was tested against real data —
+> notably the B2B Contracts formulas (§6.9, §2.2), Extras Revenue (§6.1), the
+> B2B/B2C/OTA/Website category (Website removed, §3.1/§6.1/§6.4), and Targets
+> rollover math (§6.5). This PRD is left as the original spec for historical
+> context; the current, corrected formula for every KPI lives in
+> **`Skyla_Dashboard_KPI_Logic_Reference.md`, §0 Revision History** (full
+> before/after + rationale) and its per-tab sections (current truth). Inline
+> pointers are added at each affected line below.
+
 ---
 
 ## 1. Purpose
@@ -57,6 +67,11 @@ Column translation (BigQuery lost these sub-headers on import from a merged-head
 | `Bills_Total` | Final bill total | `≈ col_21 + col_22 − col_23 ± col_24` |
 
 `Contract_Status` values: blank (9,869), `Contract` (9,837), `No Contract` (5,076). `Company` is the field to use for B2B contract-level KPIs (top ADR contracts, retention).
+
+> **Correction 2026-08-24**: group by `Bills_due_from` instead, not `Company`
+> (per business direction — see KPI reference §0). `col_21` ("Room Charges
+> With Tax") is no longer used for revenue figures; `Room_Revenue` (tax-exclusive)
+> is used instead.
 
 ### 2.3 `leadership_targets`
 
@@ -173,13 +188,13 @@ Formulas are written as BigQuery-flavored expressions. All are additionally slic
 | KPI | Formula |
 |---|---|
 | Room Revenue | `SUM(DailyRevenue)` — format to Cr/L/K per the legacy CASE logic (≥1Cr → "X.XX Cr", ≥1L → "X.XX L", ≥1K → "X.XX K") |
-| Extras Revenue | `SUM(DailyOtherRevenueInclusiveTax)` (see §2.1 caveat — F&B + GST only, confirmed) |
+| Extras Revenue | ~~`SUM(DailyOtherRevenueInclusiveTax)`~~ → `SUM(DailyOtherRevenueExclusiveTax)`, corrected 2026-08-24 for tax-exclusive consistency (see §2.1 caveat — F&B + GST only, confirmed). Card removed from the dashboard entirely, same date. |
 | ADR | `SUM(DailyRevenue) / COUNT(StayDate rows WHERE effectiveNights > 0)` i.e. sold room-nights |
 | Occupancy % | `Sold Room Nights / Available Room Nights` (§3.3, active-period-scoped) |
 | RevPAR | `SUM(DailyRevenue) / Available Room Nights` |
 | Sold Room Nights | `COUNT(StayDate rows)` in `sales_booking` |
 | Available Room Nights | `room_count(Property) × days in period`, active-window-scoped |
-| Nights/Revenue by Source (B2B/B2C/OTA/Website) | group by category from §3.1 |
+| Nights/Revenue by Source (B2B/B2C/OTA) | group by category from §3.1 (`Website` folded into B2C, corrected 2026-08-24) |
 | YoY Revenue comparison | current FY room revenue vs prior FY, `▲/▼` + `%` per legacy formula |
 
 ### 6.2 Guest & Revenue Detail
@@ -194,7 +209,7 @@ Formulas are written as BigQuery-flavored expressions. All are additionally slic
 | Repeat Booking Share | §3.6 definition, as % of total bookings |
 | ADR & Occ% by Room Format | join room-type mapping (§3.4), group by Room Type |
 | Revenue by Room Format & FY | same join, grouped by FY |
-| B2B: Nights/Revenue/ADR by Company | from `b2b_bills`, grouped by `Company` |
+| B2B: Nights/Revenue/ADR by Company | from `b2b_bills`, grouped by ~~`Company`~~ → `Bills_due_from` (corrected 2026-08-24). Merged into the Contract Status & Ranking table same date — no longer a separate table. |
 | Expats Bookings/Revenue/Nights/ALOS | §3.6 definition, same formulas as above scoped to expat bookings |
 | Cancellations % | `sales_booking_cancelled` bookings / (active + cancelled) bookings, by `ReservationNo` count |
 | Lead Time for Cancellations | `CancelDate − ReservationDate` (or `− ArrivalDate`, pick one and be consistent — recommend `ArrivalDate − CancelDate` = how far ahead of the stay it was cancelled) |
@@ -213,7 +228,7 @@ Formulas are written as BigQuery-flavored expressions. All are additionally slic
 | KPI | Formula |
 |---|---|
 | Brand Occupancy % | Occupancy % (§6.1) grouped by Brand (§3.3: Skyla/Aptly/Hyber) |
-| B2B/B2C/OTA Revenue by FY | `SUM(DailyRevenue)` filtered to category (§3.1), grouped by FY |
+| B2B/B2C/OTA Revenue by FY | `SUM(DailyRevenue)` filtered to category (§3.1 — `Website` folded into B2C, corrected 2026-08-24), grouped by FY |
 
 ### 6.5 Targets vs Achieved (`leadership_targets`)
 
@@ -221,7 +236,7 @@ Formulas are written as BigQuery-flavored expressions. All are additionally slic
 |---|---|
 | B2B/B2C/OTA Achievement % | `SUM(B2B_Achieved)/SUM(B2B_Target)` (same pattern for B2C, OTA) |
 | Total Room Revenue Achievement % | `SUM(Revenue_Achieved)/SUM(dept_Total_Target)` |
-| Revenue Targets with Roll Over | `SUM(dept_Total_Target)`, `SUM(Target_With_Roll_Over)`, `SUM(Revenue_Achieved)` — formatted /10,000,000 (Cr) |
+| Revenue Targets with Roll Over | `SUM(dept_Total_Target)`, ~~`SUM(Target_With_Roll_Over)`~~, `SUM(Revenue_Achieved)` — formatted /10,000,000 (Cr). **`Target_With_Roll_Over` is corrupted for every FY's first month** (confirmed 2026-08-24) — rollover is now recomputed in-app; see KPI reference §0/§6 for the exact formula and the future-month compounding bug it also fixed. The "Target with roll-over" and "Achieved" headline stat tiles were removed the same date (the monthly chart carries this now). |
 | ADR Target vs Achieved | `AVG(Target_ADR)` vs `AVG(Achieved_ADR)`, monthly x-axis |
 | Occupancy Target vs Achieved | `AVG(Target_Occupancy_Percent)` vs `AVG(Achieved_Occupancy_Percent)` |
 | Revenue Targets by Business Category | Achievement % per category, same pattern as row 1 |
@@ -232,12 +247,12 @@ Formulas are written as BigQuery-flavored expressions. All are additionally slic
 |---|---|
 | Total Leads | `COUNT(*)` (post-filter) |
 | Closed Leads | `COUNTIF(Stage = 'Closed')` |
-| New Leads | `COUNTIF(Source = 'Exotel')` |
+| New / B2C Leads | ~~`COUNTIF(Source = 'Exotel')`~~ → `COUNTIF(Source IN ('Exotel', 'Business WA', 'Website'))`, broadened 2026-08-24 — WhatsApp and website inquiries are B2C acquisition channels too |
 | Existing Leads (Closed) | `COUNTIF(Source = 'Existing' AND Stage = 'Closed')` |
 | Reference Leads (Closed) | `COUNTIF(Source = 'Reference' AND Stage = 'Closed')` |
 | Revenue | `SUM(SAFE_CAST(REPLACE(Total, ',', '') AS FLOAT64))` |
 | Conversion Rate | `Closed Leads / Total Leads` |
-| Leads MoM | Total vs Closed, monthly x-axis (`Month`/`Month_Number`) |
+| Leads MoM | Total vs Closed, monthly x-axis (`Month`/`Month_Number`). **Now respects the Property filter** (previously ignored it — corrected 2026-08-24, `lead_tracker` has a `Property` column). |
 | Leads by Property | group by `Property` |
 | Leads by Source | group by `Source` |
 | Format-wise Leads & Revenue | group by `Format` |
@@ -269,9 +284,11 @@ Formulas are written as BigQuery-flavored expressions. All are additionally slic
 
 | KPI | Formula |
 |---|---|
-| B2B Contract Status & Ranking | group by `Company`, rank by `SUM(col_21)` (room charges with tax) and by `Nights` |
-| B2B Top ADR Contracts | rank `Company` by `AVG(ADR)`, filter to meaningful volume (e.g. `Nights > 0`) |
-| Corporate Account Retention | annual renewal rate — `Contract_Status = 'Contract'` companies present in consecutive FYs / total companies in prior FY. Needs a per-company per-FY rollup first. |
+| B2B Contract Status & Ranking | ~~group by `Company`, rank by `SUM(col_21)` (room charges with tax)~~ → group by `Bills_due_from`, rank by `SUM(Room_Revenue)` (tax-exclusive), plus `Nights`, `ADR`, and Contribution %. Corrected 2026-08-24 (see KPI reference §0 for the full rationale and the two intermediate Contribution % definitions tried first). Merged with what used to be a separate "Nights/Revenue/ADR by Company" table, same date. |
+| — Contribution % (new, 2026-08-24) | Each company's `SUM(Room_Revenue)` ÷ total company-wide revenue across **every channel** (B2B+B2C+OTA, from `sales_booking`), same Property+FY scope |
+| — "Contract revenue achieved" (new, 2026-08-24) | `SUM(Room_Revenue)` restricted to `Contract_Status = 'Contract'` rows only — not the same base as Contribution % above |
+| B2B Top ADR Contracts | rank ~~`Company`~~ → `Bills_due_from` (2026-08-24) by `AVG(ADR)`, filter to meaningful volume (e.g. `Nights > 0`) |
+| Corporate Account Retention | annual renewal rate — `Contract_Status = 'Contract'` companies present in consecutive FYs / total companies in prior FY, grouped by `Bills_due_from` (2026-08-24). Needs a per-company per-FY rollup first. Property filter now applies here too (previously ignored — corrected 2026-08-24). |
 
 ### 6.10 Excluded from v1
 

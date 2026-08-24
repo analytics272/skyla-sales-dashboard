@@ -1,7 +1,7 @@
 # HANDOVER — Skyla Analytics (Pipeline status + Sales Dashboard PRD + Build)
 
 **Project:** skyla-analytics / BigQuery dataset `Skyla_Sales_Automation`
-**This doc supersedes the previous HANDOVER.md** — Part A carries forward the prior pipeline session in condensed form, Part B documents the PRD-writing session, **Part C (new) documents the actual dashboard build** — implemented, tested against live data, and ready to deploy. Upload this file to Project Knowledge in place of the old one.
+**This doc supersedes the previous HANDOVER.md** — Part A carries forward the prior pipeline session in condensed form, Part B documents the PRD-writing session, Part C documents the actual dashboard build, **Part D (new) documents post-launch testing and corrections** — several formulas from the original PRD/build turned out wrong once tested against real numbers; Part D is the fix log. Upload this file to Project Knowledge in place of the old one.
 
 ---
 
@@ -249,7 +249,11 @@ a range would have wrongly produced).
 
 ## C.7 Deployment status
 
-- **Not deployed, not pushed to GitHub** — explicitly held back per user
+- **Superseded by Part D** — the dashboard is now live in production on
+  Vercel, pushed to GitHub (`analytics272/skyla-sales-dashboard`), and has
+  been through several rounds of post-launch correction. This section is left
+  as a historical record of the initial handoff state.
+- Originally: **not deployed, not pushed to GitHub** — explicitly held back per user
   instruction. Local git repo is initialized and staged; user runs the commit
   and push themselves.
 - `.env.local` and the BigQuery service account key are gitignored; confirmed
@@ -275,10 +279,182 @@ a range would have wrongly produced).
   numbers without reading the code.
 - This updated `HANDOVER.md`.
 
-## Open items, current
+## Open items, as of end of Part C
 
 1. **Generic "OTA" source label commission rate** — still 0%, never supplied. Only remaining gap from the original OTA commission table.
 2. **Expats / Repeat Booking definitions** — still PRD-documented assumptions, never revisited with the business.
 3. **BH4/LP booking-table pipeline gap** (§C.3) — a pipeline issue, not a dashboard one; will self-resolve once the eZee sync backfills BH4/LP into `sales_booking`.
-4. **Deployment** — repo is git-initialized and staged locally; user still needs to commit, create the GitHub repo, push, and connect Vercel (instructions already handed off in-session). Remember the `SHARED_PASSWORD_HASH` unescaping note in §C.7 when setting Vercel env vars.
+4. ~~**Deployment**~~ — **done, see Part D.** Repo pushed to GitHub, connected to Vercel, live in production.
 5. **Additional Occupancy Bookings/Revenue** — still no supporting data column found; would need a new source (not one of the 7 in-scope tables) to ever populate this KPI.
+
+---
+
+# PART D — Post-launch testing and corrections (this session)
+
+## D.1 Session goal
+
+The dashboard from Part C went live on Vercel and through several rounds of
+user testing against the real numbers (side-by-side with the business's own
+knowledge of what things should look like, and against the legacy Looker
+Studio dashboard's layout/conventions). This part is the fix log for what
+that testing turned up — several formulas were wrong, not just cosmetically
+off. Full before/after detail for every KPI lives in
+`Skyla_Dashboard_KPI_Logic_Reference.md` §0 (Revision History); this section
+is the narrative summary of what happened and why, session by session.
+
+## D.2 Login / Vercel env var mixup (recurrence)
+
+The exact `$`-escaping mixup documented in §C.7 recurred — an escaped local
+`.env.local` value was pasted into Vercel's dashboard, which doesn't parse
+`.env` files that way. Same fix: the raw unescaped bcrypt hash is what
+belongs in Vercel's env var UI, no backslashes.
+
+## D.3 Property filter gaps
+
+Three B2B Contracts functions (`getB2bContractRanking`,
+`getB2bTopAdrContracts`, `getCorporateAccountRetention` in
+`lib/bigquery/queries/b2bContracts.ts`) and `getLeadsMoM`
+(`lib/bigquery/queries/leads.ts`) silently ignored the Property filter
+entirely, despite `b2b_bills` and `lead_tracker` both having a `Property`
+column. Found by an explicit code audit (not just user report) after the
+user flagged "not all filters are applied for each graph" — all four now
+scope by Property like every other query on the dashboard.
+
+## D.4 B2B Bills: company identity and revenue source, re-specified
+
+Two related corrections, made together after direct business input (this
+wasn't discoverable from the data alone):
+- **Company identity**: group by `Bills_due_from` (the operational name used
+  day-to-day) instead of `Company`/`Bill_To` (the legal entity name) — company
+  count for the same scope drops from 436 to ~280 as multiple legal entities
+  collapse under one operational name.
+- **Revenue figures**: `Room_Revenue` (tax-exclusive) instead of `col_21`
+  ("Room Charges With Tax") — the dashboard is meant to show tax-exclusive
+  figures throughout.
+
+Both changes are confined to `b2b_bills`-sourced KPIs (Contract Status &
+Ranking, Top ADR Contracts, Corporate Account Retention, and the now-merged
+"Nights/Revenue/ADR by Company" table) — the B2B *category* used elsewhere
+(Revenue by Source, Trends, Brand — all from `sales_booking.Source` via
+`bookingSourceMap.ts`) is a separate, unrelated classification and wasn't
+touched.
+
+## D.5 Contribution % — three attempts to get the definition right
+
+Worth recording because it's a good example of how much a single vague
+phrase ("company's contribution") can hide: three distinct definitions were
+implemented in sequence, each replacing the last, before landing on what the
+business actually meant.
+1. **First**: share of `Contract_Status = 'Contract'` revenue only (a narrow
+   pool — non-contract companies got no contribution % at all).
+2. **Second**: share of total B2B revenue across every company in the
+   filtered scope (all contract statuses) — closer, but still confined to
+   the B2B channel.
+3. **Final** (confirmed via explicit multiple-choice question to the user):
+   each company's B2B revenue ÷ **total company-wide revenue across every
+   channel** (B2B+B2C+OTA combined, from `sales_booking`) — i.e. what share
+   of Skyla's *entire* business this one B2B company represents.
+
+Lesson for future work in this codebase: when a requirement names a
+percentage/ratio without spelling out the denominator, don't guess past one
+attempt — the cost of a wrong guess compounds (three implementation passes
+here) whereas a clarifying question resolves it in one round trip.
+
+## D.6 Target rollover — a real bug, not just a confusing number
+
+The user pushed back hard on a rollover figure that looked obviously wrong
+("how come 43 when target is 28") — this turned out to be two compounding
+bugs, not one:
+1. The sheet's own `Target_With_Roll_Over` column is corrupted for every FY's
+   first month (April came out as a few lakh instead of ~₹2 Cr) — confirmed
+   by reverse-engineering the correct formula from the other 11 months and
+   finding April didn't fit it. Fixed by recomputing rollover in-app.
+2. The recomputation itself then had a second bug: because a month that
+   hasn't started yet always has `Revenue_Achieved = 0`, treating that as a
+   genuine 100% miss caused every future month's "shortfall" to cascade
+   fully into the next one, compounding a flat ₹28.00 Cr annual target up to
+   ₹43.71 Cr summed. Fixed with a guard: once a month is calendar-future, its
+   target-with-rollover is just its own flat target, no compounding penalty.
+   Verified fix: same FY now sums to ~₹28.45 Cr, the expected relationship.
+
+A related, separately-caught edge case: hospitality bookings land revenue
+against future stay dates in advance, so a "future" month can still have
+real partial data (confirmed: September showed ₹41.5L in `Revenue_Achieved`
+despite being calendar-future when checked in August). The line-truncation
+logic (§D.8) was adjusted so it only stops at a future month with genuinely
+zero data, not any future month unconditionally.
+
+## D.7 FY filter not reaching the Targets tab's monthly charts
+
+The three monthly Target charts (Revenue rollover, ADR, Occupancy vs
+achieved) were hardcoded to whatever FY `latestSelectedFy()` resolved to —
+selecting multiple FYs (or "All") never changed what they showed, which the
+user correctly flagged as the FY filter "not working." Fixed by rendering
+one section per selected FY (small multiples) instead of trying to cram
+multiple FYs into one line chart with a new color scheme.
+
+## D.8 Line chart "stop instead of flatten" behavior
+
+General principle applied across every FY-trend chart and the Targets
+monthly charts: a month that hasn't happened yet should make the "actual/
+achieved" line simply **stop** — not bridge a false diagonal across the gap
+(the original `connectNulls` behavior), and not flat-line at 0 through the
+rest of the FY either (an earlier, incomplete fix — 0 reads as "we sold
+nothing," which is wrong for a month that hasn't started). The distinction
+that matters: elapsed-and-genuinely-zero plots as a real 0 (line stays
+flat); not-yet-started-and-empty stops the line; not-yet-started-but-with-
+real-advance-booked-data still plots normally. Target/plan lines are never
+truncated — those are meant to project across the whole FY.
+
+## D.9 UI/UX fixes from direct user testing
+
+- **Extra Revenue** switched to the tax-exclusive column, then the card was
+  removed from the dashboard entirely.
+- **`Website` booking category removed**, folded into B2C (was a near-empty
+  4th category cluttering every B2B/B2C/OTA chart).
+- **B2C Leads** broadened from `Source = 'Exotel'` only to also include
+  `Business WA` (WhatsApp) and `Website` — both genuine B2C acquisition
+  channels that were being undercounted.
+- **Revenue by Room Format chart** changed from a stacked bar (hid the
+  per-segment baseline) to room-type-on-x-axis grouped by FY.
+- **Duplicate table removed**: "Nights/Revenue/ADR by Company" and "Contract
+  Status & Ranking" were the same underlying `b2b_bills` data with different
+  columns — merged into one.
+- **Comparison strips added**: a reusable `FyComparisonStrip` component
+  (value + arrow % vs the FY before it) now sits above every major per-FY
+  chart, matching the format the business already uses in Looker Studio.
+- **Chart x-axis labels**: `interval={0}` forces every category to render on
+  the single-metric bar charts — Recharts was silently auto-skipping labels
+  that would otherwise overlap (room format names, mainly).
+- **Filter performance**: multi-select dropdowns (Property/Month/FY) used to
+  fire one full server round-trip per checkbox click; selections now buffer
+  locally and commit once, on Apply or on close. The "All" option is a single
+  decisive action and still commits immediately (a first pass at this
+  buffering fix accidentally made "All" wait for an extra Apply click too —
+  caught and fixed the same session).
+- **Reset Filters button** added; FY already defaulted to the current
+  financial year automatically (date-driven, no fix needed there).
+
+## D.10 Deliverables produced this part
+
+- All corrections above, live in production.
+- `Skyla_Dashboard_KPI_Logic_Reference.md` — added §0 Revision History, and
+  updated every affected tab section in place to reflect current formulas.
+- `Skyla_Sales_Dashboard_PRD.md` — added a post-launch-corrections pointer
+  near the top, plus inline `~~strikethrough~~ → correction` notes at every
+  affected formula, without deleting the original spec (kept as historical
+  context).
+- `Skyla_Reference_Data.md` — added a deviation note above the verbatim
+  `Mapping.gs` source re: `Website` category removal (the script itself is
+  left unedited as the historical record of what the external script does).
+- This updated `HANDOVER.md`.
+
+## Open items, current (supersedes the Part C list above)
+
+1. **Generic "OTA" source label commission rate** — still 0%, never supplied.
+2. **Expats / Repeat Booking definitions** — still PRD-documented assumptions, never revisited with the business.
+3. **BH4/LP booking-table pipeline gap** — a pipeline issue, not a dashboard one.
+4. **Additional Occupancy Bookings/Revenue** — still no supporting data column found.
+5. **A "per-property revenue targets" reference** was mentioned but the
+   attachment didn't come through in-session — needs to be resent before it
+   can be acted on.

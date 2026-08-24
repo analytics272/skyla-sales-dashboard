@@ -74,7 +74,14 @@ export default function MultiSelectDropdown({
           <div className="max-h-72 overflow-y-auto p-1.5">
             <button
               type="button"
-              onClick={() => setPending([])}
+              onClick={() => {
+                // "All" is a single decisive action, unlike checking boxes one
+                // by one — it commits immediately instead of waiting for Apply
+                // (which regressed to needing an extra click when buffering
+                // was added; fixed 2026-08-24).
+                setOpen(false);
+                if (selected.length > 0) onChange([]);
+              }}
               className={clsx(
                 "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800",
                 pending.length === 0 && "font-semibold text-teal-700 dark:text-teal-400"

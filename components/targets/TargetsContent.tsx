@@ -54,14 +54,13 @@ export default function TargetsContent({
       <div>
         <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">Targets vs Achieved</h2>
         <p className="text-xs text-zinc-400 dark:text-zinc-500">Company-wide — this tab isn&apos;t scoped by the Property filter (leadership targets aren&apos;t tracked per property).</p>
-        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-2">
           <StatTile
             label="Revenue achievement"
             value={revenueAchievement.achievedPct !== null ? formatPercent(revenueAchievement.achievedPct) : "—"}
             sub={`${formatIndianCurrency(revenueAchievement.achieved)} of ${formatIndianCurrency(revenueAchievement.target)}`}
           />
           <StatTile label="Target" value={formatIndianCurrency(revenueAchievement.target)} />
-          <StatTile label="Achieved" value={formatIndianCurrency(revenueAchievement.achieved)} />
         </div>
       </div>
 

@@ -19,6 +19,7 @@
 // to avoid two redundant company tables on the same dashboard tab.
 import { runQuery, table } from "../client";
 import { safeDivide } from "@/lib/format/currency";
+import { fyLabelSqlExpr } from "@/lib/reference/financialYear";
 
 export interface B2bContractRanking {
   company: string; // Bills_due_from
@@ -26,37 +27,47 @@ export interface B2bContractRanking {
   roomRevenue: number; // Room_Revenue — tax-exclusive (col_21 was inclusive-of-tax; see PRD tax-exclusive requirement)
   nights: number;
   adr: number | null;
-  /** Share of total B2B revenue (across every company in the current scope, any contract status) this company represents. */
+  /** Share of TOTAL company-wide sales revenue (B2B+B2C+OTA combined, from sales_booking) this one company's B2B revenue represents — not just its share of the B2B channel. */
   contributionPct: number | null;
 }
 
-export async function getB2bContractRanking(properties: string[], fys: string[]): Promise<B2bContractRanking[]> {
-  const rows = await runQuery<{ company: string; contractStatus: string | null; roomRevenue: number | null; nights: number }>(`
-    SELECT
-      Bills_due_from AS company,
-      ANY_VALUE(Contract_Status) AS contractStatus,
-      SUM(Room_Revenue) AS roomRevenue,
-      SUM(Nights) AS nights
-    FROM ${table("b2b_bills")}
-    WHERE Bills_due_from IS NOT NULL AND Financial_Year != 'FY 99-00'
-      AND Property IN UNNEST(@properties) AND Financial_Year IN UNNEST(@fys)
-    GROUP BY company
-    ORDER BY roomRevenue DESC
+/** Total revenue across every channel (B2B+B2C+OTA) for the same property+FY scope, from sales_booking — the "overall sales revenue" denominator for Contribution %. */
+async function getOverallRevenue(properties: string[], fys: string[]): Promise<number> {
+  const rows = await runQuery<{ revenue: number | null }>(`
+    SELECT SUM(DailyRevenue) AS revenue
+    FROM ${table("sales_booking")}
+    WHERE Property IN UNNEST(@properties) AND ${fyLabelSqlExpr("CAST(StayDate AS DATE)")} IN UNNEST(@fys)
   `, { properties, fys });
+  return rows[0]?.revenue ?? 0;
+}
 
-  // Each company's share of TOTAL B2B revenue across every company in this
-  // scope (not just the Contract_Status='Contract' subset) — per user
-  // direction 2026-08-24: "company's contribution to our overall company
-  // revenue", not a narrower company-to-company comparison within contracts only.
-  const grandTotal = rows.reduce((s, r) => s + (r.roomRevenue ?? 0), 0);
+export async function getB2bContractRanking(properties: string[], fys: string[]): Promise<B2bContractRanking[]> {
+  const [rows, overallRevenue] = await Promise.all([
+    runQuery<{ company: string; contractStatus: string | null; roomRevenue: number | null; nights: number }>(`
+      SELECT
+        Bills_due_from AS company,
+        ANY_VALUE(Contract_Status) AS contractStatus,
+        SUM(Room_Revenue) AS roomRevenue,
+        SUM(Nights) AS nights
+      FROM ${table("b2b_bills")}
+      WHERE Bills_due_from IS NOT NULL AND Financial_Year != 'FY 99-00'
+        AND Property IN UNNEST(@properties) AND Financial_Year IN UNNEST(@fys)
+      GROUP BY company
+      ORDER BY roomRevenue DESC
+    `, { properties, fys }),
+    getOverallRevenue(properties, fys),
+  ]);
 
+  // Each company's share of TOTAL company-wide sales revenue — B2B + B2C +
+  // OTA combined (from sales_booking, the PMS source), not just this
+  // company's slice of the B2B channel — per user direction 2026-08-24.
   return rows.map((r) => ({
     company: r.company,
     contractStatus: r.contractStatus,
     roomRevenue: r.roomRevenue ?? 0,
     adr: safeDivide(r.roomRevenue ?? 0, r.nights),
     nights: r.nights,
-    contributionPct: grandTotal > 0 ? (r.roomRevenue ?? 0) / grandTotal : null,
+    contributionPct: overallRevenue > 0 ? (r.roomRevenue ?? 0) / overallRevenue : null,
   }));
 }
 
