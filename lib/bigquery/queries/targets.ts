@@ -8,7 +8,7 @@ import { safeDivide } from "@/lib/format/currency";
 
 export type TargetsFilter = DateFilter;
 
-function fiscalMonthNumber(calendarMonth: number): number {
+export function fiscalMonthNumber(calendarMonth: number): number {
   return calendarMonth >= 4 ? calendarMonth - 3 : calendarMonth + 9;
 }
 
@@ -159,18 +159,18 @@ export async function getMonthlyRevenueTargets(fy?: string): Promise<MonthlyReve
   return computeRollover(resolvedFy, rows, seedShortfall);
 }
 
-export async function getRevenueAchievement(filter: TargetsFilter): Promise<RevenueAchievement> {
-  const fys = resolveSelectedFYs(filter);
-  const months = resolveSelectedMonths(filter);
+/** Pure aggregation over already-fetched per-FY monthly rows — no BigQuery call. Callers that already fetched `getMonthlyRevenueTargets` per FY (e.g. for the monthly chart) should use this instead of `getRevenueAchievement`, which re-fetches the same data. */
+export function summarizeRevenueAchievement(
+  perFy: { fy: string; data: MonthlyRevenueTarget[] }[],
+  months: number[] // calendar months, [] = whole FY
+): RevenueAchievement {
   const fiscalMonthNums = months.length > 0 ? months.map(fiscalMonthNumber) : null;
-
-  const perFy = await Promise.all(fys.map((fy) => getMonthlyRevenueTargets(fy)));
 
   let target = 0;
   let achieved = 0;
   let targetWithRollOver = 0;
-  for (const monthRows of perFy) {
-    for (const r of monthRows) {
+  for (const { data } of perFy) {
+    for (const r of data) {
       if (fiscalMonthNums && !fiscalMonthNums.includes(r.monthNumber)) continue;
       target += r.deptTarget;
       achieved += r.achievedRevenue;
@@ -178,6 +178,14 @@ export async function getRevenueAchievement(filter: TargetsFilter): Promise<Reve
     }
   }
   return { target, achieved, achievedPct: safeDivide(achieved, target), targetWithRollOver };
+}
+
+/** Convenience wrapper that fetches its own data — prefer `summarizeRevenueAchievement` when the per-FY monthly rows are already being fetched for something else (avoids duplicate BigQuery calls). */
+export async function getRevenueAchievement(filter: TargetsFilter): Promise<RevenueAchievement> {
+  const fys = resolveSelectedFYs(filter);
+  const months = resolveSelectedMonths(filter);
+  const perFy = await Promise.all(fys.map(async (fy) => ({ fy, data: await getMonthlyRevenueTargets(fy) })));
+  return summarizeRevenueAchievement(perFy, months);
 }
 
 export interface MonthlyAdrTarget {
