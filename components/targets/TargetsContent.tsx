@@ -20,20 +20,28 @@ const ROLLOVER_SERIES = [
   { key: "achieved", color: REVENUE_ROLLOVER_COLOR.achieved },
 ];
 
+// Null out "achieved" only when the month hasn't started AND there's
+// genuinely nothing recorded yet — so the line stops there instead of
+// flat-lining at 0 as if "achieved nothing" were a settled outcome. A
+// calendar-future month with real advance/forward-booked revenue already
+// against it (common in hospitality) still shows that real value. Target/plan
+// series aren't touched either way — they're meant to project the full FY.
+function shouldHideAchieved(fy: string, monthNumber: number, achieved: number) {
+  return achieved === 0 && isFutureFiscalMonth(fy, calendarMonthFromFiscal(monthNumber));
+}
+
 export default function TargetsContent({
-  fy,
   categoryAchievement,
   revenueAchievement,
-  monthlyRevenueTargets,
-  adrTargetVsAchieved,
-  occupancyTargetVsAchieved,
+  monthlyRevenueTargetsByFy,
+  adrTargetVsAchievedByFy,
+  occupancyTargetVsAchievedByFy,
 }: {
-  fy: string;
   categoryAchievement: CategoryAchievement[];
   revenueAchievement: RevenueAchievement;
-  monthlyRevenueTargets: MonthlyRevenueTarget[];
-  adrTargetVsAchieved: MonthlyAdrTarget[];
-  occupancyTargetVsAchieved: MonthlyOccupancyTarget[];
+  monthlyRevenueTargetsByFy: { fy: string; data: MonthlyRevenueTarget[] }[];
+  adrTargetVsAchievedByFy: { fy: string; data: MonthlyAdrTarget[] }[];
+  occupancyTargetVsAchievedByFy: { fy: string; data: MonthlyOccupancyTarget[] }[];
 }) {
   const categoryData = categoryAchievement.map((c) => ({
     category: c.category,
@@ -41,43 +49,18 @@ export default function TargetsContent({
     achieved: c.achieved,
   }));
 
-  // "Achieved" is a real fact only for months that have started — future
-  // months null it out so the line stops there instead of flat-lining at 0
-  // (as if "achieved nothing" were already a settled outcome). Target/plan
-  // series aren't touched — they're meant to project across the whole FY.
-  const future = (monthNumber: number) => isFutureFiscalMonth(fy, calendarMonthFromFiscal(monthNumber));
-
-  const adrData = adrTargetVsAchieved.map((r) => ({
-    month: r.month,
-    target: r.targetAdr,
-    achieved: future(r.monthNumber) ? null : r.achievedAdr,
-  }));
-
-  const occupancyData = occupancyTargetVsAchieved.map((r) => ({
-    month: r.month,
-    target: r.targetOccupancyPct * 100,
-    achieved: future(r.monthNumber) ? null : r.achievedOccupancyPct * 100,
-  }));
-
-  const rolloverData = monthlyRevenueTargets.map((r) => ({
-    month: r.month,
-    deptTarget: r.deptTarget,
-    targetWithRollOver: r.targetWithRollOver,
-    achieved: future(r.monthNumber) ? null : r.achievedRevenue,
-  }));
-
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">Targets vs Achieved</h2>
-        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <p className="text-xs text-zinc-400 dark:text-zinc-500">Company-wide — this tab isn&apos;t scoped by the Property filter (leadership targets aren&apos;t tracked per property).</p>
+        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
           <StatTile
             label="Revenue achievement"
             value={revenueAchievement.achievedPct !== null ? formatPercent(revenueAchievement.achievedPct) : "—"}
             sub={`${formatIndianCurrency(revenueAchievement.achieved)} of ${formatIndianCurrency(revenueAchievement.target)}`}
           />
           <StatTile label="Target" value={formatIndianCurrency(revenueAchievement.target)} />
-          <StatTile label="Target with roll-over" value={formatIndianCurrency(revenueAchievement.targetWithRollOver)} />
           <StatTile label="Achieved" value={formatIndianCurrency(revenueAchievement.achieved)} />
         </div>
       </div>
@@ -97,15 +80,63 @@ export default function TargetsContent({
       </Card>
 
       <Card title="Revenue targets with roll over (monthly)">
-        <MultiSeriesLineChart data={rolloverData} xKey="month" series={ROLLOVER_SERIES} valueFormatter={(v) => formatIndianCurrency(v)} />
+        <div className="space-y-6">
+          {monthlyRevenueTargetsByFy.map(({ fy, data }) => (
+            <div key={fy}>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">{fy}</p>
+              <MultiSeriesLineChart
+                data={data.map((r) => ({
+                  month: r.month,
+                  deptTarget: r.deptTarget,
+                  targetWithRollOver: r.targetWithRollOver,
+                  achieved: shouldHideAchieved(fy, r.monthNumber, r.achievedRevenue) ? null : r.achievedRevenue,
+                }))}
+                xKey="month"
+                series={ROLLOVER_SERIES}
+                valueFormatter={(v) => formatIndianCurrency(v)}
+                height={220}
+              />
+            </div>
+          ))}
+        </div>
       </Card>
 
       <Card title="ADR: target vs achieved (monthly)">
-        <MultiSeriesLineChart data={adrData} xKey="month" series={TA_SERIES} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} />
+        <div className="space-y-6">
+          {adrTargetVsAchievedByFy.map(({ fy, data }) => (
+            <div key={fy}>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">{fy}</p>
+              <MultiSeriesLineChart
+                data={data.map((r) => ({ month: r.month, target: r.targetAdr, achieved: shouldHideAchieved(fy, r.monthNumber, r.achievedAdr) ? null : r.achievedAdr }))}
+                xKey="month"
+                series={TA_SERIES}
+                valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`}
+                height={220}
+              />
+            </div>
+          ))}
+        </div>
       </Card>
 
       <Card title="Occupancy: target vs achieved (monthly)">
-        <MultiSeriesLineChart data={occupancyData} xKey="month" series={TA_SERIES} valueFormatter={(v) => `${v.toFixed(0)}%`} />
+        <div className="space-y-6">
+          {occupancyTargetVsAchievedByFy.map(({ fy, data }) => (
+            <div key={fy}>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">{fy}</p>
+              <MultiSeriesLineChart
+                data={data.map((r) => ({
+                  month: r.month,
+                  target: r.targetOccupancyPct * 100,
+                  achieved: shouldHideAchieved(fy, r.monthNumber, r.achievedOccupancyPct) ? null : r.achievedOccupancyPct * 100,
+                }))}
+                xKey="month"
+                series={TA_SERIES}
+                valueFormatter={(v) => `${v.toFixed(0)}%`}
+                height={220}
+              />
+            </div>
+          ))}
+        </div>
       </Card>
     </div>
   );

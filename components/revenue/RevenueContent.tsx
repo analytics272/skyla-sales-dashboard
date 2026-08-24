@@ -123,7 +123,7 @@ export default function RevenueContent({
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Card>
-          <CategorySplitRow caption={`Last month · ${lastMonthCategoryBreakdown.label}`} items={revenueSplit} />
+          <CategorySplitRow items={revenueSplit} />
           <HeroFigure
             label="Room Revenue"
             value={formatIndianCurrency(overview.roomRevenue)}

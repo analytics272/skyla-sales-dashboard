@@ -26,7 +26,7 @@ export interface B2bContractRanking {
   roomRevenue: number; // Room_Revenue — tax-exclusive (col_21 was inclusive-of-tax; see PRD tax-exclusive requirement)
   nights: number;
   adr: number | null;
-  /** Share of total Contract_Status='Contract' revenue this company represents. Null for non-contract rows — they aren't part of that pool. */
+  /** Share of total B2B revenue (across every company in the current scope, any contract status) this company represents. */
   contributionPct: number | null;
 }
 
@@ -44,9 +44,11 @@ export async function getB2bContractRanking(properties: string[], fys: string[])
     ORDER BY roomRevenue DESC
   `, { properties, fys });
 
-  const contractTotal = rows
-    .filter((r) => r.contractStatus === "Contract")
-    .reduce((s, r) => s + (r.roomRevenue ?? 0), 0);
+  // Each company's share of TOTAL B2B revenue across every company in this
+  // scope (not just the Contract_Status='Contract' subset) — per user
+  // direction 2026-08-24: "company's contribution to our overall company
+  // revenue", not a narrower company-to-company comparison within contracts only.
+  const grandTotal = rows.reduce((s, r) => s + (r.roomRevenue ?? 0), 0);
 
   return rows.map((r) => ({
     company: r.company,
@@ -54,7 +56,7 @@ export async function getB2bContractRanking(properties: string[], fys: string[])
     roomRevenue: r.roomRevenue ?? 0,
     adr: safeDivide(r.roomRevenue ?? 0, r.nights),
     nights: r.nights,
-    contributionPct: r.contractStatus === "Contract" && contractTotal > 0 ? (r.roomRevenue ?? 0) / contractTotal : null,
+    contributionPct: grandTotal > 0 ? (r.roomRevenue ?? 0) / grandTotal : null,
   }));
 }
 

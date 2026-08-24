@@ -28,9 +28,13 @@ export default function SingleMetricBarChart({
         <CartesianGrid stroke={CHART_GRIDLINE} vertical={false} strokeWidth={1} />
         <XAxis
           dataKey="name"
-          tick={{ fill: CHART_TEXT.secondary, fontSize: 12 }}
+          tick={{ fill: CHART_TEXT.secondary, fontSize: 11 }}
           axisLine={{ stroke: CHART_GRIDLINE }}
           tickLine={false}
+          interval={0}
+          angle={-20}
+          textAnchor="end"
+          height={50}
         />
         <YAxis
           tick={{ fill: CHART_TEXT.muted, fontSize: 11 }}

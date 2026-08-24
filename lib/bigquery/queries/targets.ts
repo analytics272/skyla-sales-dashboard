@@ -3,7 +3,7 @@
 // doesn't apply here. Month_Number is already FY-relative (Apr=1 ... Mar=12),
 // matching fiscal quarters directly: Q1=1-3, Q2=4-6, Q3=7-9, Q4=10-12.
 import { runQuery, table } from "../client";
-import { currentFYLabel, DateFilter, resolveSelectedFYs, resolveSelectedMonths, fyLabel, parseFyLabel } from "@/lib/reference/financialYear";
+import { currentFYLabel, DateFilter, resolveSelectedFYs, resolveSelectedMonths, fyLabel, parseFyLabel, calendarMonthFromFiscal, isFutureFiscalMonth } from "@/lib/reference/financialYear";
 import { safeDivide } from "@/lib/format/currency";
 
 export type TargetsFilter = DateFilter;
@@ -121,18 +121,33 @@ async function getPriorMarchShortfall(fy: string): Promise<number> {
   return (r.dept_target ?? 0) - (r.achieved ?? 0);
 }
 
-function computeRollover(rows: RawTargetMonthRow[], seedShortfall: number): MonthlyRevenueTarget[] {
+/**
+ * Rollover only carries between months that have actually happened — a month
+ * that hasn't started yet always has Revenue_Achieved = 0, which isn't a real
+ * "miss" to roll forward, it's just "hasn't happened". Without this guard,
+ * every future month's 100% "shortfall" cascades fully into the next one, so
+ * a whole-FY total (Target tile: flat sum of dept_Total_Target) and the
+ * summed Target-with-rollover balloon to roughly 1.5x the flat target purely
+ * from unstarted months compounding against each other — confirmed against
+ * live data 2026-08-24 (28.00 Cr flat target vs 43.71 Cr summed rollover
+ * before this fix; ~28.45 Cr after, which is the sane relationship). Once a
+ * month is future, its own targetWithRollOver is just its flat dept target,
+ * and it carries nothing forward to the month after it either.
+ */
+function computeRollover(fy: string, rows: RawTargetMonthRow[], seedShortfall: number): MonthlyRevenueTarget[] {
   const result: MonthlyRevenueTarget[] = [];
   let carry = seedShortfall;
   for (const r of rows) {
+    const future = isFutureFiscalMonth(fy, calendarMonthFromFiscal(r.monthNumber));
+    const targetWithRollOver = future ? r.deptTarget : r.deptTarget + carry;
     result.push({
       monthNumber: r.monthNumber,
       month: r.month,
       deptTarget: r.deptTarget,
-      targetWithRollOver: r.deptTarget + carry,
+      targetWithRollOver,
       achievedRevenue: r.achieved,
     });
-    carry = r.deptTarget - r.achieved;
+    carry = future ? 0 : r.deptTarget - r.achieved;
   }
   return result;
 }
@@ -141,7 +156,7 @@ function computeRollover(rows: RawTargetMonthRow[], seedShortfall: number): Mont
 export async function getMonthlyRevenueTargets(fy?: string): Promise<MonthlyRevenueTarget[]> {
   const resolvedFy = fy ?? currentFYLabel();
   const [rows, seedShortfall] = await Promise.all([getRawMonthlyRows(resolvedFy), getPriorMarchShortfall(resolvedFy)]);
-  return computeRollover(rows, seedShortfall);
+  return computeRollover(resolvedFy, rows, seedShortfall);
 }
 
 export async function getRevenueAchievement(filter: TargetsFilter): Promise<RevenueAchievement> {
