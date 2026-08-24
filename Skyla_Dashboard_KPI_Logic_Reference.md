@@ -74,6 +74,31 @@ relevant tab section below for the current formula.
   with different columns — merged into one table (Contract Status & Ranking
   gained an ADR column).
 
+**2026-08-25:**
+- **B2B Contribution %, final definition**: each company's B2B revenue ÷
+  total company-wide revenue across every channel (B2B+B2C+OTA, from
+  `sales_booking`) — not just its share of the B2B channel. Third and final
+  attempt at this definition; see §3's B2B section for the history.
+- **"All" in the FY filter was semantically a no-op.** Selecting it cleared
+  the FY selection, which `resolveSelectedFYs()` treats as "default to the
+  current FY" — so "All" behaved exactly like selecting just the current FY.
+  Fixed: the FY dropdown's "All" now writes all 3 known FY labels explicitly
+  instead of clearing the selection (`MultiSelectDropdown`'s new `allValue`
+  prop). Property/Month are unaffected — for them, empty already means
+  unrestricted, which is what "All" should do.
+- **Two charts ignored the FY filter regardless of this fix**: Revenue
+  Details' two small monthly charts (inside the Room Revenue and Occupancy
+  hero cards) and Leads MoM were hardcoded to a single FY. Found by grepping
+  every `latestSelectedFy(...)` call site. Fixed to the same "one
+  line/section per selected FY" pattern already used on Trends and Targets.
+- **"All" filter regression, self-inflicted and caught same day**: the
+  buffered-apply performance fix (previous entry, "Filter performance")
+  accidentally made "All" wait for an extra Apply click too. Fixed — "All" is
+  a single decisive action and commits immediately.
+- **Revenue targets by property added** — a new, fixed-reference-data
+  section (not from BigQuery) comparing per-property FY 26-27 targets against
+  live achieved figures. See §6.1.
+
 ---
 
 ## 1. Shared reference logic
@@ -292,6 +317,42 @@ carries "₹achieved of ₹target". The monthly chart (now fixed) is the place t
 see rollover progression. Company-wide caption added to the tab heading —
 `leadership_targets` has no `Property` column, so this whole tab is
 unaffected by the Property filter (a real data constraint, not a bug).
+
+### 6.1 Revenue targets by property (new, 2026-08-25)
+
+Source: `lib/reference/propertyTargets.ts` (targets) +
+`lib/bigquery/queries/propertyTargets.ts` (achieved, from `sales_booking`).
+
+Unlike everything else on the dashboard, the **target** side of this table is
+NOT read from BigQuery — it's a fixed, hardcoded reference table sourced from
+the business's own planning workbook (`FY27 Turnover Projection.xlsx`,
+provided 2026-08-25), per explicit user direction: these per-property monthly
+targets (Available room-nights, Occ%, ARR, Revenue) are set once for FY 26-27
+and confirmed not to change, so there was no need to build a BigQuery
+pipeline for them. `leadership_targets` only ever had the already-summed
+company-wide figure — this is the first time the per-property breakdown
+exists anywhere in the app. Cross-checked before adding: summing all 5
+properties' target revenue for any given month exactly equals that month's
+`dept_Total_Target` in `leadership_targets` (verified live against BigQuery
+for every month, all 9 elapsed months matched to the rupee).
+
+| Column | Formula |
+|---|---|
+| Target Revenue | `SUM(revenue)` from the fixed reference table, for the selected months (whole FY if none selected) |
+| Achieved Revenue | `SUM(DailyRevenue)` from `sales_booking`, same property + FY 26-27 + selected months |
+| Achievement % | Achieved ÷ Target |
+| Target Occ % | `SUM(available × occPct)` ÷ `SUM(available)` from the reference table (nights-weighted average across selected months) |
+| Achieved Occ % | Sold Room Nights ÷ Available Room Nights (§1.5), same scope |
+| Target ARR | Target Revenue ÷ target sold room-nights |
+| Achieved ARR | Achieved Revenue ÷ achieved sold room-nights |
+
+**Ignores the global FY filter** (only ever shows FY 26-27, since that's the
+only FY with a per-property breakdown) but **does respect Property and Month**
+— same convention as the real-time "pace" cards on Revenue Details, which
+also intentionally ignore parts of the global filter that don't apply to
+them. BH4 shows 0/null achieved figures for any month — this is the
+already-documented pipeline gap (`propertyReference.ts`: BH4 has zero rows in
+`sales_booking` as of this writing), not a bug in this feature.
 
 ## 7. Lead Tracker tab
 

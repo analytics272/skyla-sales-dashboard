@@ -4,9 +4,10 @@ import { OverviewKpis, PropertyAdr, OccupancyPace, LastMonthCategorySnapshot } f
 import { MonthlyTrendPoint } from "@/lib/bigquery/queries/trends";
 import Card from "@/components/ui/Card";
 import SingleMetricBarChart, { BarDatum } from "@/components/charts/SingleMetricBarChart";
+import MultiSeriesLineChart from "@/components/charts/MultiSeriesLineChart";
 import { formatIndianCurrency, formatPercent, formatYoyLine } from "@/lib/format/currency";
-import { CATEGORY_COLOR, CATEGORY_ORDER } from "@/lib/design/tokens";
-import { FISCAL_MONTH_ORDER, MONTH_ABBR } from "@/lib/charts/pivotByFiscalMonth";
+import { CATEGORY_COLOR, CATEGORY_ORDER, FY_COLOR } from "@/lib/design/tokens";
+import { pivotByFiscalMonth } from "@/lib/charts/pivotByFiscalMonth";
 
 function CategorySplitRow({ caption, items }: { caption?: string; items: { label: string; value: string }[] }) {
   return (
@@ -63,14 +64,16 @@ export default function RevenueContent({
   overview,
   adrByProperty,
   occupancyPace,
-  monthlyForFy,
+  monthlyTrends,
+  fys,
   fy,
   lastMonthCategoryBreakdown,
 }: {
   overview: OverviewKpis;
   adrByProperty: PropertyAdr[];
   occupancyPace: OccupancyPace;
-  monthlyForFy: MonthlyTrendPoint[];
+  monthlyTrends: MonthlyTrendPoint[];
+  fys: string[]; // every FY currently selected — the monthly charts below show one line per FY here, not just the latest
   fy: string;
   lastMonthCategoryBreakdown: LastMonthCategorySnapshot;
 }) {
@@ -99,22 +102,18 @@ export default function RevenueContent({
     return { label: c, value: `${pct.toFixed(0)}%` };
   });
 
-  const revenueByMonth: BarDatum[] = FISCAL_MONTH_ORDER.map((m) => ({
-    name: MONTH_ABBR[m],
-    value: monthlyForFy.find((p) => p.month === m)?.revenue ?? 0,
-    color: "var(--series-1)",
-  }));
+  // One line per selected FY (matches Trends tab's convention) rather than a
+  // single-series bar limited to the latest FY — otherwise selecting "All" (or
+  // several FYs) in the filter left these two charts silently stuck on just
+  // one year while every other number on the page correctly reflected all of them.
+  const fySeries = fys.map((f) => ({ key: f, color: FY_COLOR[f] ?? "var(--chart-baseline)" }));
+  const revenueByMonth = pivotByFiscalMonth(monthlyTrends, fys, (p) => p.month, (p) => p.revenue);
+  const occupancyByMonth = pivotByFiscalMonth(monthlyTrends, fys, (p) => p.month, (p) => (p.occupancyPct !== null ? p.occupancyPct * 100 : null));
 
   const adrByPropertyData: BarDatum[] = adrByProperty.map((r) => ({
     name: r.property,
     value: r.adr ?? 0,
     color: "var(--series-4)",
-  }));
-
-  const occupancyByMonth: BarDatum[] = FISCAL_MONTH_ORDER.map((m) => ({
-    name: MONTH_ABBR[m],
-    value: (monthlyForFy.find((p) => p.month === m)?.occupancyPct ?? 0) * 100,
-    color: "var(--series-7)",
   }));
 
   return (
@@ -129,7 +128,7 @@ export default function RevenueContent({
             value={formatIndianCurrency(overview.roomRevenue)}
             sub={`${fy} · ${formatYoyLine(overview.yoy.currentRevenue, overview.yoy.priorRevenue, overview.yoy.pctChange, overview.yoy.priorFY, formatIndianCurrency)}`}
           />
-          <SingleMetricBarChart data={revenueByMonth} valueFormatter={(v) => formatIndianCurrency(v)} height={180} />
+          <MultiSeriesLineChart data={revenueByMonth} xKey="monthLabel" series={fySeries} valueFormatter={(v) => formatIndianCurrency(v)} height={180} />
         </Card>
 
         <Card>
@@ -150,7 +149,7 @@ export default function RevenueContent({
             value={overview.occupancyPct !== null ? formatPercent(overview.occupancyPct, 0) : "—"}
             sub={formatYoyLine(overview.yoy.occupancyPct.current, overview.yoy.occupancyPct.prior, overview.yoy.occupancyPct.pctChange, overview.yoy.priorFY, (v) => formatPercent(v, 0))}
           />
-          <SingleMetricBarChart data={occupancyByMonth} valueFormatter={(v) => `${v.toFixed(0)}%`} height={180} />
+          <MultiSeriesLineChart data={occupancyByMonth} xKey="monthLabel" series={fySeries} valueFormatter={(v) => `${v.toFixed(0)}%`} height={180} />
         </Card>
       </div>
 

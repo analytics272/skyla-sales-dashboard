@@ -1,8 +1,11 @@
 "use client";
 
 import { CategoryAchievement, RevenueAchievement, MonthlyRevenueTarget, MonthlyAdrTarget, MonthlyOccupancyTarget } from "@/lib/bigquery/queries/targets";
+import type { PropertyTargetComparison } from "@/lib/bigquery/queries/propertyTargets";
+import { PROPERTY_TARGETS_FY } from "@/lib/reference/propertyTargets";
 import StatTile from "@/components/ui/StatTile";
 import Card from "@/components/ui/Card";
+import Table, { TableColumn } from "@/components/ui/Table";
 import GroupedBarChart from "@/components/charts/GroupedBarChart";
 import MultiSeriesLineChart from "@/components/charts/MultiSeriesLineChart";
 import { formatIndianCurrency, formatPercent } from "@/lib/format/currency";
@@ -36,18 +39,46 @@ export default function TargetsContent({
   monthlyRevenueTargetsByFy,
   adrTargetVsAchievedByFy,
   occupancyTargetVsAchievedByFy,
+  propertyTargetComparison,
 }: {
   categoryAchievement: CategoryAchievement[];
   revenueAchievement: RevenueAchievement;
   monthlyRevenueTargetsByFy: { fy: string; data: MonthlyRevenueTarget[] }[];
   adrTargetVsAchievedByFy: { fy: string; data: MonthlyAdrTarget[] }[];
   occupancyTargetVsAchievedByFy: { fy: string; data: MonthlyOccupancyTarget[] }[];
+  propertyTargetComparison: PropertyTargetComparison[];
 }) {
   const categoryData = categoryAchievement.map((c) => ({
     category: c.category,
     target: c.target,
     achieved: c.achieved,
   }));
+
+  const propertyColumns: TableColumn<PropertyTargetComparison>[] = [
+    { key: "property", header: "Property", render: (r) => r.property },
+    { key: "targetRevenue", header: "Target revenue", align: "right", render: (r) => formatIndianCurrency(r.targetRevenue) },
+    { key: "achievedRevenue", header: "Achieved revenue", align: "right", render: (r) => formatIndianCurrency(r.achievedRevenue) },
+    { key: "achievedPct", header: "Achievement %", align: "right", render: (r) => (r.achievedPct !== null ? formatPercent(r.achievedPct, 0) : "—") },
+    { key: "targetOcc", header: "Target occ %", align: "right", render: (r) => (r.targetOccPct !== null ? formatPercent(r.targetOccPct, 0) : "—") },
+    { key: "achievedOcc", header: "Achieved occ %", align: "right", render: (r) => (r.achievedOccPct !== null ? formatPercent(r.achievedOccPct, 0) : "—") },
+    { key: "targetArr", header: "Target ARR", align: "right", render: (r) => (r.targetArr !== null ? `₹${Math.round(r.targetArr).toLocaleString("en-IN")}` : "—") },
+    { key: "achievedArr", header: "Achieved ARR", align: "right", render: (r) => (r.achievedArr !== null ? `₹${Math.round(r.achievedArr).toLocaleString("en-IN")}` : "—") },
+  ];
+
+  const propertyTotals = propertyTargetComparison.reduce(
+    (acc, r) => ({
+      property: "Total",
+      targetRevenue: acc.targetRevenue + r.targetRevenue,
+      achievedRevenue: acc.achievedRevenue + r.achievedRevenue,
+      achievedPct: null,
+      targetOccPct: null,
+      achievedOccPct: null,
+      targetArr: null,
+      achievedArr: null,
+    }),
+    { property: "Total", targetRevenue: 0, achievedRevenue: 0, achievedPct: null, targetOccPct: null, achievedOccPct: null, targetArr: null, achievedArr: null } as PropertyTargetComparison
+  );
+  propertyTotals.achievedPct = propertyTotals.targetRevenue > 0 ? propertyTotals.achievedRevenue / propertyTotals.targetRevenue : null;
 
   return (
     <div className="space-y-6">
@@ -63,6 +94,13 @@ export default function TargetsContent({
           <StatTile label="Target" value={formatIndianCurrency(revenueAchievement.target)} />
         </div>
       </div>
+
+      <Card title={`Revenue targets by property (${PROPERTY_TARGETS_FY}, fixed plan)`}>
+        <p className="mb-3 text-xs text-zinc-400 dark:text-zinc-500">
+          Targets are fixed planning figures for {PROPERTY_TARGETS_FY} (won&apos;t change with the FY filter — this data only exists for {PROPERTY_TARGETS_FY}). Achieved figures are live from BigQuery, scoped to the selected Property/Month filters.
+        </p>
+        <Table columns={propertyColumns} rows={propertyTargetComparison} rowKey={(r) => r.property} footerRow={propertyTotals} />
+      </Card>
 
       <Card title="B2B / B2C / OTA achievement (target vs achieved)">
         <GroupedBarChart data={categoryData} xKey="category" series={TA_SERIES} valueFormatter={(v) => formatIndianCurrency(v)} />

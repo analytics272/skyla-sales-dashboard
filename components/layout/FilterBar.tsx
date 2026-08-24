@@ -64,7 +64,7 @@ export default function FilterBar() {
           ))}
         </select>
 
-        <MultiSelectDropdown label="FY" options={FY_MULTI_OPTIONS} selected={fys} onChange={setFys} />
+        <MultiSelectDropdown label="FY" options={FY_MULTI_OPTIONS} selected={fys} onChange={setFys} allValue={FY_OPTIONS} />
 
         <button
           type="button"

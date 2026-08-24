@@ -18,7 +18,7 @@ const RANKING_COLOR = "var(--series-1)";
 
 export default function LeadsContent({
   summary,
-  mom,
+  momByFy,
   byProperty,
   bySource,
   formatLeadsRevenue,
@@ -28,7 +28,7 @@ export default function LeadsContent({
   byOwner,
 }: {
   summary: LeadsSummary;
-  mom: LeadsMoMPoint[];
+  momByFy: { fy: string; data: LeadsMoMPoint[] }[];
   byProperty: LeadsByGroup[];
   bySource: LeadsByGroup[];
   formatLeadsRevenue: FormatLeadsRevenue[];
@@ -37,9 +37,6 @@ export default function LeadsContent({
   bookingPace: number | null;
   byOwner: OwnerLeadStats[];
 }) {
-  const momData = [...mom]
-    .sort((a, b) => a.monthNumber - b.monthNumber)
-    .map((m) => ({ month: FISCAL_MONTH_NAMES[m.monthNumber] ?? m.monthNumber, total: m.totalLeads, closed: m.closedLeads }));
 
   const existingTotal = bySource.find((s) => s.key === "Existing")?.count ?? 0;
   const referenceTotal = bySource.find((s) => s.key === "Reference")?.count ?? 0;
@@ -104,15 +101,25 @@ export default function LeadsContent({
       </div>
 
       <Card title="Leads MoM (total vs closed)">
-        <GroupedBarChart
-          data={momData}
-          xKey="month"
-          series={[
-            { key: "total", color: TARGET_VS_ACHIEVED_COLOR.target },
-            { key: "closed", color: TARGET_VS_ACHIEVED_COLOR.achieved },
-          ]}
-          valueFormatter={(v) => v.toLocaleString("en-IN")}
-        />
+        <div className="space-y-6">
+          {momByFy.map(({ fy, data }) => (
+            <div key={fy}>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">{fy}</p>
+              <GroupedBarChart
+                data={[...data]
+                  .sort((a, b) => a.monthNumber - b.monthNumber)
+                  .map((m) => ({ month: FISCAL_MONTH_NAMES[m.monthNumber] ?? m.monthNumber, total: m.totalLeads, closed: m.closedLeads }))}
+                xKey="month"
+                series={[
+                  { key: "total", color: TARGET_VS_ACHIEVED_COLOR.target },
+                  { key: "closed", color: TARGET_VS_ACHIEVED_COLOR.achieved },
+                ]}
+                valueFormatter={(v) => v.toLocaleString("en-IN")}
+                height={220}
+              />
+            </div>
+          ))}
+        </div>
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-2">

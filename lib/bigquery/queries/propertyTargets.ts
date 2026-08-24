@@ -1,0 +1,73 @@
+// Revenue Targets by Property (Targets tab) — the fixed FY 26-27 per-property
+// targets from lib/reference/propertyTargets.ts, compared against real
+// achieved figures queried live from sales_booking (PMS data). Per user
+// direction 2026-08-25: targets are static reference values, achieved is
+// always live BigQuery.
+import { runQuery, table } from "../client";
+import { PROPERTY_TARGETS_FY27, PROPERTY_TARGETS_FY } from "@/lib/reference/propertyTargets";
+import { fyLabelSqlExpr } from "@/lib/reference/financialYear";
+import { getAvailableRoomNightsByProperty, rangesForFysAndMonths } from "./propertyWindows";
+import { safeDivide } from "@/lib/format/currency";
+
+export interface PropertyTargetComparison {
+  property: string;
+  targetRevenue: number;
+  achievedRevenue: number;
+  achievedPct: number | null;
+  targetOccPct: number | null;
+  achievedOccPct: number | null;
+  targetArr: number | null;
+  achievedArr: number | null;
+}
+
+interface AchievedRow {
+  property: string;
+  revenue: number | null;
+  nights: number;
+}
+
+/**
+ * `months` are calendar months (1-12, matching the global Month filter);
+ * empty = the whole FY. FY selection from the global filter is intentionally
+ * ignored — these fixed targets only exist for FY 26-27, so this section
+ * always compares against FY 26-27 regardless of what FY is selected
+ * elsewhere on the page (same convention as the real-time "pace" cards).
+ */
+export async function getPropertyTargetComparison(properties: string[], months: number[]): Promise<PropertyTargetComparison[]> {
+  const scopedMonths = months.length > 0 ? months : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+
+  const [achievedRows, availableByProperty] = await Promise.all([
+    runQuery<AchievedRow>(`
+      SELECT Property AS property, SUM(DailyRevenue) AS revenue, COUNT(*) AS nights
+      FROM ${table("sales_booking")}
+      WHERE Property IN UNNEST(@properties)
+        AND ${fyLabelSqlExpr("CAST(StayDate AS DATE)")} = @fy
+        AND EXTRACT(MONTH FROM CAST(StayDate AS DATE)) IN UNNEST(@months)
+      GROUP BY property
+    `, { properties, fy: PROPERTY_TARGETS_FY, months: scopedMonths }),
+    getAvailableRoomNightsByProperty(properties, rangesForFysAndMonths([PROPERTY_TARGETS_FY], months)),
+  ]);
+
+  return properties.map((code) => {
+    const targets = (PROPERTY_TARGETS_FY27[code] ?? []).filter((t) => scopedMonths.includes(t.calendarMonth));
+    const targetRevenue = targets.reduce((s, t) => s + t.revenue, 0);
+    const targetSoldNights = targets.reduce((s, t) => s + t.available * t.occPct, 0);
+    const targetAvailable = targets.reduce((s, t) => s + t.available, 0);
+
+    const achieved = achievedRows.find((r) => r.property === code);
+    const achievedRevenue = achieved?.revenue ?? 0;
+    const achievedNights = achieved?.nights ?? 0;
+    const available = availableByProperty[code] ?? 0;
+
+    return {
+      property: code,
+      targetRevenue,
+      achievedRevenue,
+      achievedPct: safeDivide(achievedRevenue, targetRevenue),
+      targetOccPct: safeDivide(targetSoldNights, targetAvailable),
+      achievedOccPct: safeDivide(achievedNights, available),
+      targetArr: safeDivide(targetRevenue, targetSoldNights),
+      achievedArr: safeDivide(achievedRevenue, achievedNights),
+    };
+  });
+}

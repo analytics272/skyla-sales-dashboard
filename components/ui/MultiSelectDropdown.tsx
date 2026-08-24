@@ -13,11 +13,22 @@ export default function MultiSelectDropdown({
   options,
   selected,
   onChange,
+  allValue,
 }: {
   label: string;
   options: MultiSelectOption[];
-  selected: string[]; // empty = "All"
+  selected: string[]; // empty = "All" (unless allValue below changes what "All" writes)
   onChange: (values: string[]) => void;
+  /**
+   * What "All" writes when clicked. Defaults to [] (no filter — the
+   * conventional meaning of "All" for Property/Month, where an absent filter
+   * already means unrestricted). Pass every option's value here when the
+   * underlying resolver treats an empty selection as something OTHER than
+   * "every value" — e.g. the FY filter defaults an empty selection to just
+   * the current FY, so its "All" needs to write every FY explicitly or
+   * selecting "All" silently behaves like selecting nothing (2026-08-25 fix).
+   */
+  allValue?: string[];
 }) {
   const [open, setOpen] = useState(false);
   // Checkbox clicks only update this local buffer — onChange (which triggers a
@@ -27,6 +38,8 @@ export default function MultiSelectDropdown({
   // the user finished clicking; this cuts it to 1.
   const [pending, setPending] = useState<string[]>(selected);
   const ref = useRef<HTMLDivElement>(null);
+  const isAllSelected = selected.length === 0 || selected.length === options.length;
+  const isAllPending = pending.length === 0 || pending.length === options.length;
 
   function commitAndClose() {
     setOpen(false);
@@ -53,7 +66,7 @@ export default function MultiSelectDropdown({
     setPending((prev) => (prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value]));
   }
 
-  const buttonText = selected.length === 0 ? "All" : selected.length === 1 ? options.find((o) => o.value === selected[0])?.label ?? selected[0] : `${selected.length} selected`;
+  const buttonText = isAllSelected ? "All" : selected.length === 1 ? options.find((o) => o.value === selected[0])?.label ?? selected[0] : `${selected.length} selected`;
 
   return (
     <div ref={ref} className="relative">
@@ -80,11 +93,11 @@ export default function MultiSelectDropdown({
                 // (which regressed to needing an extra click when buffering
                 // was added; fixed 2026-08-24).
                 setOpen(false);
-                if (selected.length > 0) onChange([]);
+                if (!isAllSelected) onChange(allValue ?? []);
               }}
               className={clsx(
                 "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800",
-                pending.length === 0 && "font-semibold text-teal-700 dark:text-teal-400"
+                isAllPending && "font-semibold text-teal-700 dark:text-teal-400"
               )}
             >
               All

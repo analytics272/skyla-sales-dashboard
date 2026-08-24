@@ -10,18 +10,19 @@ import {
   getLeadsByOwner,
 } from "@/lib/bigquery/queries/leads";
 import { parseKpiFilter, SearchParams } from "@/lib/filters/parseSearchParams";
-import { latestSelectedFy } from "@/lib/reference/financialYear";
+import { resolveSelectedFYs } from "@/lib/reference/financialYear";
 import LeadsContent from "@/components/leads/LeadsContent";
 
 export default async function LeadsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const sp = await searchParams;
   const filter = parseKpiFilter(sp);
   const leadsFilter = { properties: filter.properties, fys: filter.fys, quarter: filter.quarter, months: filter.months };
+  const fys = resolveSelectedFYs(filter);
 
-  const [summary, mom, byProperty, bySource, formatLeadsRevenue, adrByFormat, lostReasons, bookingPace, byOwner] =
+  const [summary, momByFy, byProperty, bySource, formatLeadsRevenue, adrByFormat, lostReasons, bookingPace, byOwner] =
     await Promise.all([
       getLeadsSummary(leadsFilter),
-      getLeadsMoM(latestSelectedFy(filter), filter.properties),
+      Promise.all(fys.map(async (fy) => ({ fy, data: await getLeadsMoM(fy, filter.properties) }))),
       getLeadsByProperty(leadsFilter),
       getLeadsBySource(leadsFilter),
       getFormatLeadsRevenue(leadsFilter),
@@ -34,7 +35,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   return (
     <LeadsContent
       summary={summary}
-      mom={mom}
+      momByFy={momByFy}
       byProperty={byProperty}
       bySource={bySource}
       formatLeadsRevenue={formatLeadsRevenue}

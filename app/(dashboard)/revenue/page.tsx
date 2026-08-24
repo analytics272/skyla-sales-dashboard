@@ -9,7 +9,7 @@ export default async function RevenuePage({ searchParams }: { searchParams: Prom
   const sp = await searchParams;
   const filter = parseKpiFilter(sp);
   const resolved = resolveFilter(filter);
-  const fy = latestSelectedFy(filter);
+  const fy = latestSelectedFy(filter); // label for the YoY sub-line only — the monthly charts below now show every selected FY, not just this one
 
   const [overview, adrByProperty, occupancyPace, monthlyTrends, lastMonthCategoryBreakdown] = await Promise.all([
     getOverviewKpis(filter),
@@ -19,14 +19,13 @@ export default async function RevenuePage({ searchParams }: { searchParams: Prom
     getLastMonthCategoryBreakdown(resolved.properties),
   ]);
 
-  const monthlyForFy = monthlyTrends.filter((p) => p.fy === fy);
-
   return (
     <RevenueContent
       overview={overview}
       adrByProperty={adrByProperty}
       occupancyPace={occupancyPace}
-      monthlyForFy={monthlyForFy}
+      monthlyTrends={monthlyTrends}
+      fys={resolved.fys}
       fy={fy}
       lastMonthCategoryBreakdown={lastMonthCategoryBreakdown}
     />

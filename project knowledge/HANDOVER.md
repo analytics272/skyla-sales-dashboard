@@ -435,11 +435,108 @@ truncated — those are meant to project across the whole FY.
 - **Reset Filters button** added; FY already defaulted to the current
   financial year automatically (date-driven, no fix needed there).
 
-## D.10 Deliverables produced this part
+## D.10 Contribution %, the "All" filter regression, and a real performance bug
+
+Three more rounds of direct testing turned up:
+- **Contribution % denominator, final answer**: after the two attempts in
+  §D.5, the business gave a direct answer — each B2B company's contribution
+  should be measured against **total company-wide revenue across every
+  channel** (B2B+B2C+OTA combined, from `sales_booking`), not just its share
+  of the B2B channel. Implemented by querying `sales_booking` for the same
+  property+FY scope as a new denominator. Values dropped from ~5-10% (B2B-only
+  share) to correctly small whole-business shares.
+- **"All" filter regression, self-inflicted and caught**: the buffered-apply
+  fix from §D.9 accidentally made the "All" option in every multi-select
+  dropdown wait for an extra Apply click too, instead of committing
+  immediately like it always had — this read as "the filter doesn't work."
+  Fixed: "All" is a single decisive action, unlike checking boxes one by one,
+  and commits immediately again.
+- **A genuine duplicate-query bug**: the multi-FY small-multiples fix in §D.7
+  had an unnoticed side effect — `getRevenueAchievement` was re-fetching the
+  exact same per-FY monthly rows that the page had already fetched separately
+  for the monthly chart, roughly doubling this page's BigQuery round trips.
+  Extracted a pure `summarizeRevenueAchievement()` that reuses already-fetched
+  data instead of re-querying.
+
+## D.11 "Filter feels broken/slow" — root cause was a missing loading state
+
+User report: FY filter "still not working," and filters "taking a lot of
+time to load." Traced both to the same cause: **there was no `loading.tsx`
+anywhere in the dashboard**, so a filter change left the old page completely
+frozen on screen for however long the BigQuery refetch took (measured ~2
+seconds with the dedup fix above), with zero visual feedback — indistinguishable
+from "nothing happened." The FY filter's *mechanism* was re-verified correct
+at both the component and query level before concluding this — true, but
+incomplete: see §D.13 for the actual semantic gap this missed.
+
+Fix: added `app/(dashboard)/loading.tsx`, a shared skeleton Next.js shows
+instantly on any navigation in the route group. **Caveat worth remembering**:
+adding this to an *already-running* Turbopack dev server hung every page
+until the dev server was restarted — reproduced by removing/re-adding the
+file and confirmed it wasn't a code bug. Doesn't affect a fresh `npm run dev`
+start or a Vercel build (both compile from scratch). Any future session
+adding a new special Next.js file (`loading.tsx`, `error.tsx`, etc.) to a
+long-running local dev server should expect this and mention it up front.
+
+## D.12 Revenue targets by property (new feature, fixed reference data)
+
+The business provided `FY27 Turnover Projection.xlsx` — a monthly revenue
+plan broken out **per property** (Kondapur/KDP, Hitec City/HTC, Jubilee
+Hills/JHS, Banjara Hills/BH4, Gachibowli/GB), confirming that
+`leadership_targets.dept_Total_Target` is exactly the sum of these five
+properties' targets (verified against live BigQuery, every elapsed month
+matched to the rupee). Explicit user direction: these per-property targets
+are **fixed for FY 26-27 and won't change**, so no BigQuery pipeline was
+built for them — they're hardcoded as reference data
+(`lib/reference/propertyTargets.ts`), compared against **live** achieved
+figures from `sales_booking` (`lib/bigquery/queries/propertyTargets.ts`).
+New table on the Targets tab: Property × Target/Achieved Revenue, Occ%, ARR.
+Full formula detail in `Skyla_Dashboard_KPI_Logic_Reference.md` §6.1.
+
+## D.13 The real "All" FY bug — a semantic gap, not the filter mechanism
+
+D.11 re-verified the FY filter's *mechanism* (component + query wiring) and
+found it correct, and attributed the "not working" report entirely to the
+missing loading state. That was real but incomplete — the user came back
+with a sharper diagnosis: "when I select All, it should apply to every
+visual... show data across all available financial years," and asked for a
+check across the whole dashboard, not just whether the dropdown's selection
+state changes. Two real gaps, found by grepping every `latestSelectedFy(...)`
+call site rather than guessing:
+
+1. **"All" was semantically a no-op.** `resolveSelectedFYs()` treats an empty
+   FY selection as "default to the current FY" (by original design, so a
+   fresh page load lands on something sensible). But the FY dropdown's "All"
+   button *cleared* the selection to get that same empty state — so clicking
+   "All" was functionally identical to clicking just "FY 26-27." Fixed
+   without touching the default-resolution logic (which is still correct for
+   a fresh, untouched page load): `MultiSelectDropdown` gained an `allValue`
+   prop — what "All" writes when clicked, defaulting to `[]` (unchanged
+   behavior for Property/Month, where empty already means unrestricted).
+   FY's dropdown now passes all 3 known FY labels, so clicking "All" writes
+   an explicit 3-FY selection to the URL instead of clearing it.
+2. **Two charts were hardcoded to one FY regardless of selection**, found via
+   `grep -rn latestSelectedFy`: Revenue Details' two small monthly charts
+   (inside the Room Revenue and Occupancy hero cards) and Leads MoM. Every
+   other query on the dashboard already correctly summed across whatever FYs
+   `resolveSelectedFYs()` returned — these two just never got the memo. Fixed
+   both to the same "one line/section per selected FY" pattern already
+   proven on Trends and Targets (`pivotByFiscalMonth` + `MultiSeriesLineChart`
+   for the two Revenue charts, small-multiples for Leads MoM).
+
+Verified against live BigQuery: Room Revenue with all 3 FYs selected sums to
+~₹48.87 Cr vs ~₹8.89 Cr for FY 26-27 alone; `pivotByFiscalMonth` with 3 FYs
+correctly produces one column per FY per month; Leads MoM correctly returns
+different data per FY (1/12/5 months of data for FY24-25/25-26/26-27
+respectively, matching real data availability).
+
+## D.14 Deliverables produced this part
 
 - All corrections above, live in production.
-- `Skyla_Dashboard_KPI_Logic_Reference.md` — added §0 Revision History, and
-  updated every affected tab section in place to reflect current formulas.
+- New "Revenue targets by property" feature (§D.12).
+- `Skyla_Dashboard_KPI_Logic_Reference.md` — added §0 Revision History and
+  §6.1 (property targets), and updated every affected tab section in place
+  to reflect current formulas.
 - `Skyla_Sales_Dashboard_PRD.md` — added a post-launch-corrections pointer
   near the top, plus inline `~~strikethrough~~ → correction` notes at every
   affected formula, without deleting the original spec (kept as historical
@@ -453,8 +550,6 @@ truncated — those are meant to project across the whole FY.
 
 1. **Generic "OTA" source label commission rate** — still 0%, never supplied.
 2. **Expats / Repeat Booking definitions** — still PRD-documented assumptions, never revisited with the business.
-3. **BH4/LP booking-table pipeline gap** — a pipeline issue, not a dashboard one.
+3. **BH4/LP booking-table pipeline gap** — a pipeline issue, not a dashboard one. Directly visible now in the new per-property targets table too (BH4 always shows 0/null achieved).
 4. **Additional Occupancy Bookings/Revenue** — still no supporting data column found.
-5. **A "per-property revenue targets" reference** was mentioned but the
-   attachment didn't come through in-session — needs to be resent before it
-   can be acted on.
+5. **Property targets are FY 26-27 only** — if the business ever wants FY 27-28 (or beyond) per-property targets shown the same way, the reference file (`lib/reference/propertyTargets.ts`) will need a new entry sourced from an updated planning workbook — there's no pipeline that keeps this current automatically, by design.
