@@ -17,10 +17,13 @@ export default function SingleMetricBarChart({
   data,
   valueFormatter,
   height = 240,
+  verticalLabels = false,
 }: {
   data: BarDatum[];
   valueFormatter: (v: number) => string;
   height?: number;
+  /** Rotate x-axis labels fully vertical instead of horizontal — only where labels are too long/numerous to fit flat (e.g. employee names), not the default. */
+  verticalLabels?: boolean;
 }) {
   return (
     <ResponsiveContainer width="100%" height={height}>
@@ -32,9 +35,9 @@ export default function SingleMetricBarChart({
           axisLine={{ stroke: CHART_GRIDLINE }}
           tickLine={false}
           interval={0}
-          angle={-90}
-          textAnchor="end"
-          height={90}
+          angle={verticalLabels ? -90 : 0}
+          textAnchor={verticalLabels ? "end" : "middle"}
+          height={verticalLabels ? 90 : 30}
         />
         <YAxis
           tick={{ fill: CHART_TEXT.muted, fontSize: 11 }}

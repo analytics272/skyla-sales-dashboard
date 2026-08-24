@@ -133,13 +133,13 @@ export default function LeadsContent({
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Card title="Leads By Format">
-          <SingleMetricBarChart data={formatLeadsData} valueFormatter={(v) => v.toLocaleString("en-IN")} />
+          <SingleMetricBarChart data={formatLeadsData} valueFormatter={(v) => v.toLocaleString("en-IN")} verticalLabels />
         </Card>
         <Card title="Revenue By Format">
-          <SingleMetricBarChart data={formatRevenueData} valueFormatter={(v) => formatIndianCurrency(v)} />
+          <SingleMetricBarChart data={formatRevenueData} valueFormatter={(v) => formatIndianCurrency(v)} verticalLabels />
         </Card>
         <Card title="ADR By Format (Closed Leads)">
-          <SingleMetricBarChart data={adrByFormatData} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} />
+          <SingleMetricBarChart data={adrByFormatData} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} verticalLabels />
         </Card>
       </div>
 

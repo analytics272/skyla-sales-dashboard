@@ -115,7 +115,14 @@ relevant tab section below for the current formula.
   alongside the 5 real employee names. Excluded; see §7.
 - **Chart x-axis labels now fully vertical** (`angle={-90}`, was `-20`) on
   every `SingleMetricBarChart` — room-format/lead-source category names read
-  more clearly stacked vertically than at a shallow diagonal.
+  more clearly stacked vertically than at a shallow diagonal. **Reverted same
+  day**: per follow-up feedback, vertical labels are back to horizontal
+  everywhere except Lead Tracker's three "By Format" charts (Leads/Revenue/
+  ADR By Format), which keep vertical via a new `verticalLabels` prop on
+  `SingleMetricBarChart` (default `false`). The feedback referenced "employee
+  names" needing the vertical treatment, but no chart currently plots
+  `Owner` as bars (it's a table) — applied to the pictured "By Format"
+  charts instead as the closest concrete match; flagged back to the user.
 
 ---
 
