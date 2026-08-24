@@ -32,9 +32,9 @@ export default function SingleMetricBarChart({
           axisLine={{ stroke: CHART_GRIDLINE }}
           tickLine={false}
           interval={0}
-          angle={-20}
+          angle={-90}
           textAnchor="end"
-          height={50}
+          height={90}
         />
         <YAxis
           tick={{ fill: CHART_TEXT.muted, fontSize: 11 }}

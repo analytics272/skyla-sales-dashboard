@@ -99,6 +99,24 @@ relevant tab section below for the current formula.
   section (not from BigQuery) comparing per-property FY 26-27 targets against
   live achieved figures. See §6.1.
 
+**2026-08-25 (later same day):**
+- **Property-targets total row fixed** — the footer row hardcoded Occ%/ARR to
+  "—" (only revenue was summed), showing as a broken blank row. Now computed
+  from the true underlying sold/available-nights and revenue sums, not by
+  averaging each property's own ratio. See §6.1.
+- **Targets tab "Company-wide, not property-scoped" caption removed** per
+  request. The underlying constraint is unchanged — see §6.
+- **Dashboard layout widened** — removed the `max-w-7xl` cap on the main
+  content area (`app/(dashboard)/layout.tsx`), which left a large empty
+  margin on wide screens. Content now fills the available width next to the
+  sidebar.
+- **Lead Tracker "By Owner" filtered to real employees only** — `Owner` had
+  lead-source values (`Business WA`, `Website`, `Walk in`) leaking in
+  alongside the 5 real employee names. Excluded; see §7.
+- **Chart x-axis labels now fully vertical** (`angle={-90}`, was `-20`) on
+  every `SingleMetricBarChart` — room-format/lead-source category names read
+  more clearly stacked vertically than at a shallow diagonal.
+
 ---
 
 ## 1. Shared reference logic
@@ -404,7 +422,7 @@ dropped.
 | Format-wise Leads & Revenue | Grouped by `Format` |
 | ADR by Format | `SUM(Total) ÷ SUM(No_of_nights)`, **closed leads only** |
 | Lost Leads Reasons | Non-`Closed` `Stage` values, with `"Not Intersted"` (a sheet typo) folded into `"Not Interested"` |
-| By Owner | Revenue, Total/Closed leads, Closed %, Exotel leads/closed, Reference, Existing leads, and ADR (`SUM(Total) ÷ SUM(No_of_nights)` on closed leads), grouped by `Owner` |
+| By Owner | Revenue, Total/Closed leads, Closed %, Exotel leads/closed, Reference, Existing leads, and ADR (`SUM(Total) ÷ SUM(No_of_nights)` on closed leads), grouped by `Owner`. **Filtered to real employee names only** (2026-08-25): `Owner` also has lead-*source* values leaking into it (`Business WA`, `Website`, `Walk in`/`walk in`) alongside the 5 real names (Anjali, Rajesh, Dikhita, Sajal, Bhanu) — `Owner` is meant to be employee-level, so those 3 are excluded (`LOWER(TRIM(Owner)) NOT IN ('business wa', 'website', 'walk in')`). Those channel names still correctly appear on **Leads by Source**, a different chart keyed off `Source` — this exclusion only applies to the Owner-grouped table. |
 
 ## 8. OTA Breakdown tab
 

@@ -530,10 +530,46 @@ correctly produces one column per FY per month; Leads MoM correctly returns
 different data per FY (1/12/5 months of data for FY24-25/25-26/26-27
 respectively, matching real data availability).
 
-## D.14 Deliverables produced this part
+## D.15 Property-targets total row, layout width, and Lead Tracker "By Owner" cleanup
+
+Further direct testing after §D.12-13 shipped turned up:
+- **Property-targets total row was broken**: the footer summed only Target/
+  Achieved Revenue and hardcoded Occ%/ARR to "—", rendering as a blank dash
+  row. `getPropertyTargetComparison()` now returns a properly computed
+  `total`, derived from the true underlying sold/available-nights sums
+  across every included property — not from averaging each property's own
+  ratio, which would misrepresent the combined figure across properties with
+  very different room counts (63 rooms at KDP vs 18 at BH4, etc). Verified: a
+  single-property selection makes the total exactly equal that property's row.
+- **Property filter on the Targets tab, clarified not "fixed"**: the
+  per-property targets table already fully respected the Property filter
+  (verified via BigQuery: 5→1→2 rows narrows correctly) — the "Company-wide,
+  not property-scoped" caption was removed per request, but the *other*
+  company-wide Targets charts (Revenue Achievement, B2B/B2C/OTA, the three
+  monthly charts) genuinely still can't be property-scoped, since
+  `leadership_targets` has no Property column at all. Removing the caption
+  doesn't change that constraint — flagged directly in chat since the UI no
+  longer explains it.
+- **Dashboard layout width**: `app/(dashboard)/layout.tsx`'s `mx-auto
+  max-w-7xl` was capping the content area well short of the viewport on wide
+  screens, leaving a large empty margin. Removed — content now fills the
+  space next to the sidebar.
+- **Lead Tracker "By Owner" was mixing employees with lead sources**:
+  `Owner` is meant to be employee/department-level, but the raw data has
+  `Business WA`, `Website`, and `Walk in`/`walk in` leaking into it alongside
+  the 5 real names (Anjali, Rajesh, Dikhita, Sajal, Bhanu) — confirmed by
+  inspecting distinct `Owner` values live. Excluded those 3 from
+  `getLeadsByOwner` specifically; "Leads by Source" (a different chart, keyed
+  off `Source`) is unaffected and correctly still shows those channel names.
+- **Chart x-axis labels switched from a shallow diagonal to fully vertical**
+  (`angle={-90}`, was `-20`) on every `SingleMetricBarChart` instance,
+  per direct feedback that the diagonal reading was harder to scan than
+  straight-up vertical text.
+
+## D.16 Deliverables produced this part
 
 - All corrections above, live in production.
-- New "Revenue targets by property" feature (§D.12).
+- New "Revenue targets by property" feature (§D.12), fixed further in §D.15.
 - `Skyla_Dashboard_KPI_Logic_Reference.md` — added §0 Revision History and
   §6.1 (property targets), and updated every affected tab section in place
   to reflect current formulas.

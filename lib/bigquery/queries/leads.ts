@@ -231,6 +231,14 @@ export async function getBookingPace(filter: LeadsFilter): Promise<number | null
 }
 
 // --- Leads by Owner (lead_tracker.Owner) ---
+// `Owner` is meant to be the employee/department a lead is assigned to, but
+// the raw data also has lead-source values leaking into it ("Business WA",
+// "Website", "Walk in"/"walk in") — confirmed by inspecting distinct Owner
+// values live (2026-08-25): 5 real names (Anjali, Rajesh, Dikhita, Sajal,
+// Bhanu) plus those 3 source-like entries. Excluded here so this view stays
+// employee-level, matching its purpose — "Leads by source" (a different
+// chart, `getLeadsBySource` below) is where those channel names belong.
+const OWNER_EXCLUDE_SQL = "LOWER(TRIM(Owner)) NOT IN ('business wa', 'website', 'walk in')";
 
 export interface OwnerLeadStats {
   owner: string;
@@ -269,7 +277,7 @@ export async function getLeadsByOwner(filter: LeadsFilter): Promise<OwnerLeadSta
       COUNTIF(Source = 'Existing') AS existing_leads,
       SUM(CASE WHEN Stage = 'Closed' THEN No_of_nights ELSE 0 END) AS closed_nights
     FROM ${table("lead_tracker")}
-    WHERE ${clause}
+    WHERE ${clause} AND ${OWNER_EXCLUDE_SQL}
     GROUP BY owner
     ORDER BY revenue DESC
   `, params);
