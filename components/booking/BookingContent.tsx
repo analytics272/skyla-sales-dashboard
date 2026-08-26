@@ -2,7 +2,7 @@
 
 import {
   BookingStats, RoomNightsGap, RepeatBookingShare, RoomFormatStats, RoomFormatByFy,
-  ExpatStats, CancellationStats, CancellationLeadTime,
+  ExpatStats, CancellationStats, CancellationLeadTime, CategoryMix,
 } from "@/lib/bigquery/queries/guestDetail";
 import type { B2bContractRanking, B2bTopAdrContract, RetentionPoint, B2bContractSummary } from "@/lib/bigquery/queries/b2bContracts";
 import StatTile from "@/components/ui/StatTile";
@@ -12,7 +12,7 @@ import SingleMetricBarChart, { BarDatum } from "@/components/charts/SingleMetric
 import GroupedBarChart from "@/components/charts/GroupedBarChart";
 import FyComparisonStrip from "@/components/charts/FyComparisonStrip";
 import { formatIndianCurrency, formatPercent } from "@/lib/format/currency";
-import { ROOM_TYPE_COLOR, ROOM_TYPE_ORDER, FY_COLOR } from "@/lib/design/tokens";
+import { ROOM_TYPE_COLOR, ROOM_TYPE_ORDER, FY_COLOR, CATEGORY_COLOR, CATEGORY_ORDER } from "@/lib/design/tokens";
 
 export default function BookingContent({
   bookingStats,
@@ -23,6 +23,7 @@ export default function BookingContent({
   expatStats,
   cancellationStats,
   cancellationLeadTime,
+  categoryMix,
   b2bRanking,
   b2bContractSummary,
   b2bTopAdr,
@@ -36,6 +37,7 @@ export default function BookingContent({
   expatStats: ExpatStats;
   cancellationStats: CancellationStats;
   cancellationLeadTime: CancellationLeadTime;
+  categoryMix: CategoryMix[];
   b2bRanking: B2bContractRanking[];
   b2bContractSummary: B2bContractSummary;
   b2bTopAdr: B2bTopAdrContract[];
@@ -92,6 +94,21 @@ export default function BookingContent({
     { key: "nights", header: "Nights", align: "right", render: (r) => r.nights.toLocaleString("en-IN") },
   ];
 
+  const categoriesPresent = CATEGORY_ORDER.filter((c) => categoryMix.some((m) => m.category === c));
+  const revenueByCategory: BarDatum[] = categoriesPresent.map((c) => {
+    const m = categoryMix.find((x) => x.category === c);
+    return { name: c, value: m?.revenue ?? 0, color: CATEGORY_COLOR[c] };
+  });
+  const nightsByCategory: BarDatum[] = categoriesPresent.map((c) => {
+    const m = categoryMix.find((x) => x.category === c);
+    return { name: c, value: m?.nights ?? 0, color: CATEGORY_COLOR[c] };
+  });
+  const adrByCategory: BarDatum[] = categoriesPresent.map((c) => {
+    const m = categoryMix.find((x) => x.category === c);
+    const adr = m && m.nights > 0 ? m.revenue / m.nights : 0;
+    return { name: c, value: adr, color: CATEGORY_COLOR[c] };
+  });
+
   const retentionData: BarDatum[] = b2bRetention.map((r) => ({
     name: `${r.fromFy} → ${r.toFy}`,
     value: r.retentionPct !== null ? r.retentionPct * 100 : 0,
@@ -140,6 +157,21 @@ export default function BookingContent({
           <StatTile label="Expat Revenue" value={formatIndianCurrency(expatStats.revenue)} />
           <StatTile label="Expat Nights" value={expatStats.nights.toLocaleString("en-IN")} />
           <StatTile label="Expat ALOS" value={expatStats.alos !== null ? `${expatStats.alos.toFixed(1)} nights` : "—"} />
+        </div>
+      </div>
+
+      <div>
+        <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Night/Revenue Mix By Category</h3>
+        <div className="mt-2 grid gap-4 lg:grid-cols-3">
+          <Card title="Revenue By Category">
+            <SingleMetricBarChart data={revenueByCategory} valueFormatter={(v) => formatIndianCurrency(v)} />
+          </Card>
+          <Card title="Nights By Category">
+            <SingleMetricBarChart data={nightsByCategory} valueFormatter={(v) => v.toLocaleString("en-IN")} />
+          </Card>
+          <Card title="ADR By Category">
+            <SingleMetricBarChart data={adrByCategory} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} />
+          </Card>
         </div>
       </div>
 

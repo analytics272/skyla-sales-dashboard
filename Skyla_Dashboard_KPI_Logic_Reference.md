@@ -173,6 +173,15 @@ relevant tab section below for the current formula.
   every formula in `targets.ts` (Targets: every KPI is target-relative, and
   LP was never given a target). Both tabs unchanged. See §6, §8, §11.
 
+**2026-08-26 (later still — same day):**
+- **`getCategoryMix` wired into the Booking Details UI.** The B2B/B2C/OTA
+  Night/Revenue Mix query existed and was made LP-correct in the prior entry,
+  but was never actually rendered anywhere. Added to
+  `app/(dashboard)/booking/page.tsx`'s existing data-fetch and rendered in
+  `BookingContent.tsx` as a new "Night/Revenue Mix By Category" section
+  (Revenue/Nights/ADR by category, three bar charts). Uses the page's
+  existing Property/FY/Month filters — no new filter plumbing. See §3.
+
 ---
 
 ## 1. Shared reference logic
@@ -305,6 +314,7 @@ column each of those needs (guest identity, cancellation records, or
 |---|---|
 | Total Bookings | `COUNT(DISTINCT CONCAT(Property, ReservationNo))`, excluding rows with a null `ReservationNo`. **LP's `BookingsCount` added when selected** (2026-08-26) — a real count in the source data, not derived. |
 | Guests Served | `SUM` of `MAX(NoOfGuest)` per distinct booking. **LP's `GuestServed` column added when selected** — same "guests served" concept, a real monthly total in the source data. |
+| Night/Revenue Mix By Category | Sold Room Nights and Room Revenue grouped by B2B/B2C/OTA (§1.3), plus derived ADR (revenue ÷ nights) per category. Backed by `getCategoryMix()`, which existed but wasn't rendered anywhere until **wired into the UI 2026-08-26** as three bar charts (Revenue/Nights/ADR By Category). Respects the same Property/FY/Month filters as the rest of this tab — LP's contribution merges in automatically when selected, same as every other KPI on this tab. |
 | ALOS | Sold Room Nights ÷ Total Bookings (both sides include LP's contribution when selected) |
 | Revenue per Guest | Room Revenue ÷ Guests Served (both sides include LP's contribution when selected) |
 | Repeat Bookings | Bookings sharing a guest key (`Mobile`, falling back to `Email`, then `GuestName`) with >1 distinct booking; share % = repeat ÷ total. **LP excluded** — neither LP table has any guest-identity column, at monthly or room-type grain; not computable without fabricating guest identities. |

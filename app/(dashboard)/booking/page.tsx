@@ -7,6 +7,7 @@ import {
   getExpatStats,
   getCancellationStats,
   getCancellationLeadTime,
+  getCategoryMix,
 } from "@/lib/bigquery/queries/guestDetail";
 import {
   getB2bContractRanking,
@@ -32,6 +33,7 @@ export default async function BookingPage({ searchParams }: { searchParams: Prom
     expatStats,
     cancellationStats,
     cancellationLeadTime,
+    categoryMix,
     b2bRanking,
     b2bTopAdr,
     b2bRetention,
@@ -44,6 +46,7 @@ export default async function BookingPage({ searchParams }: { searchParams: Prom
     getExpatStats(filter),
     getCancellationStats(filter),
     getCancellationLeadTime(filter),
+    getCategoryMix(filter),
     getB2bContractRanking(resolved.properties, resolved.fys),
     getB2bTopAdrContracts(resolved.properties, resolved.fys),
     getCorporateAccountRetention(resolved.properties),
@@ -59,6 +62,7 @@ export default async function BookingPage({ searchParams }: { searchParams: Prom
       expatStats={expatStats}
       cancellationStats={cancellationStats}
       cancellationLeadTime={cancellationLeadTime}
+      categoryMix={categoryMix}
       b2bRanking={b2bRanking}
       b2bContractSummary={summarizeB2bContracts(b2bRanking)}
       b2bTopAdr={b2bTopAdr}

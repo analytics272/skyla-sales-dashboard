@@ -738,9 +738,12 @@ has exactly one room type ("Studio Room") in every one of its 24 months.
 
 **Extended**: `getBookingStats` (Total Bookings, Guests Served, ALOS, Revenue
 per Guest), `getRoomNightsGap` (Unsold Room Nights), `getCategoryMix`
-(B2B/B2C/OTA mix — currently dead code, not wired to any page, but fixed for
-correctness regardless), `getRoomFormatStats`, and `getRoomFormatByFy` — all
-in `guestDetail.ts` — now merge in LP when selected.
+(B2B/B2C/OTA mix), `getRoomFormatStats`, and `getRoomFormatByFy` — all in
+`guestDetail.ts` — now merge in LP when selected. `getCategoryMix` was dead
+code at the time (exported but not called from any page) — **wired into the
+Booking Details UI the same day** as a new "Night/Revenue Mix By Category"
+section (Revenue/Nights/ADR by B2B/B2C/OTA), so this is no longer a gap; see
+§E.9.
 
 **A real, pre-existing bug found and fixed along the way**: `getRoomNightsGap`
 computes Unsold = Available − Sold. Since Part E.3's window fix, `Available`
@@ -792,5 +795,27 @@ baseline, confirming no accidental leakage.
 3. **BH4 booking-table pipeline gap** — still open, a pipeline issue not a dashboard one. LP had the identical symptom but is now resolved via the backfill in this Part; BH4 still needs the eZee sync to actually add it.
 4. **Additional Occupancy Bookings/Revenue** — still no supporting data column found.
 5. **Property targets are FY 26-27 only** — unchanged from Part D; still no LP row in that table by design (§E.4/§E.7).
-6. **`getCategoryMix` (Booking Details' B2B/B2C/OTA Night/Revenue Mix) is not wired to any page** — it's exported from `guestDetail.ts`, kept LP-correct in this pass, but `app/(dashboard)/booking/page.tsx` never imports it. Pre-existing, not caused by this session; flag if the business wants that mix surfaced on Booking Details.
+6. ~~`getCategoryMix` (Booking Details' B2B/B2C/OTA Night/Revenue Mix) is not wired to any page~~ → **done, §E.9**: now rendered on Booking Details as "Night/Revenue Mix By Category".
 7. **LP's room-type data will always show exactly one room type ("Studio Room")** — the revenue-weighted nights-allocation logic in `getLpRoomTypeStats()` handles a hypothetical multi-room-type future gracefully, but since this is a one-time, non-recurring backfill (per the addendum), that scenario isn't expected to ever occur.
+
+## E.9 Wired `getCategoryMix` into the Booking Details UI (same day)
+
+`getCategoryMix()` (§E.7) was extended for LP but never actually rendered
+anywhere — flagged as a gap in the prior report. Wired it into
+`app/(dashboard)/booking/page.tsx` (added to the existing `Promise.all` using
+the page's already-resolved `filter`, same as every other Booking Details
+query — no new filter plumbing needed) and rendered in
+`components/booking/BookingContent.tsx` as a new "Night/Revenue Mix By
+Category" section: three `SingleMetricBarChart` cards (Revenue, Nights, ADR
+by B2B/B2C/OTA), styled with the same `CATEGORY_COLOR`/`CATEGORY_ORDER`
+tokens already used on the Brand tab, placed above the existing room-format
+charts. Verified against live BigQuery: the Property/FY/Month filters already
+in use on this page correctly scope it (checked FY 25-26 with vs without LP,
+and a Month-narrowed April-only query) — LP's contribution flows through
+automatically since the query itself was already LP-aware from §E.7, this
+round only added the missing UI wiring. `tsc`/`eslint` clean. Browser-based
+visual verification wasn't possible this round — the local dev server's
+shared login only has a bcrypt hash on file (`SHARED_PASSWORD_HASH` in
+`.env.local`), not a recoverable plaintext password, so the auth gate
+couldn't be passed from this session; verified via BigQuery + code review
+instead, consistent with this session's established fallback.
