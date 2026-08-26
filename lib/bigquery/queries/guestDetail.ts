@@ -2,6 +2,7 @@
 import { runQuery, table } from "../client";
 import { KpiFilter, resolveFilter, buildScopeClause } from "./filters";
 import { getAvailableRoomNights, rangesForFysAndMonths } from "./propertyWindows";
+import { getLpOverviewTotals, getLpRoomTypeStats, getLpRoomTypeByFy, LP_PROPERTY } from "./lpMonthly";
 import { bookingCategorySqlExpr, BookingCategory } from "@/lib/reference/bookingSourceMap";
 import { fyLabelSqlExpr } from "@/lib/reference/financialYear";
 import { roomTypeMappingSqlUnnest, roomTypeJoinCondition } from "@/lib/reference/roomTypeMapping";
@@ -25,38 +26,46 @@ interface BookingStatsRow {
 
 export async function getBookingStats(filter: KpiFilter): Promise<BookingStats> {
   const resolved = resolveFilter(filter);
+  const includeLp = resolved.properties.includes(LP_PROPERTY);
   const { clause: where, params } = buildScopeClause("Property", "CAST(StayDate AS DATE)", resolved, "");
 
-  const rows = await runQuery<BookingStatsRow>(`
-    WITH scoped AS (
-      SELECT Property, ReservationNo, NoOfGuest, DailyRevenue
-      FROM ${table("sales_booking")}
-      WHERE ${where}
-    ),
-    per_booking AS (
-      -- ReservationNo IS NOT NULL matches the PRD's own booking-count formula
-      -- (COUNT(DISTINCT CONCAT(Property, ReservationNo))), which drops null-keyed
-      -- rows since CONCAT(..., NULL) is NULL and excluded from COUNT DISTINCT.
-      -- Grouping by a NULL ReservationNo would otherwise collapse many unrelated
-      -- rows into one phantom booking per property (confirmed against real data).
-      SELECT Property, ReservationNo, MAX(NoOfGuest) AS guests
-      FROM scoped
-      WHERE ReservationNo IS NOT NULL
-      GROUP BY Property, ReservationNo
-    )
-    SELECT
-      (SELECT COUNT(*) FROM per_booking) AS total_bookings,
-      (SELECT SUM(guests) FROM per_booking) AS guests_served,
-      (SELECT COUNT(*) FROM scoped) AS sold_room_nights,
-      (SELECT SUM(DailyRevenue) FROM scoped) AS room_revenue
-  `, params);
+  const [rows, lpTotals] = await Promise.all([
+    runQuery<BookingStatsRow>(`
+      WITH scoped AS (
+        SELECT Property, ReservationNo, NoOfGuest, DailyRevenue
+        FROM ${table("sales_booking")}
+        WHERE ${where}
+      ),
+      per_booking AS (
+        -- ReservationNo IS NOT NULL matches the PRD's own booking-count formula
+        -- (COUNT(DISTINCT CONCAT(Property, ReservationNo))), which drops null-keyed
+        -- rows since CONCAT(..., NULL) is NULL and excluded from COUNT DISTINCT.
+        -- Grouping by a NULL ReservationNo would otherwise collapse many unrelated
+        -- rows into one phantom booking per property (confirmed against real data).
+        SELECT Property, ReservationNo, MAX(NoOfGuest) AS guests
+        FROM scoped
+        WHERE ReservationNo IS NOT NULL
+        GROUP BY Property, ReservationNo
+      )
+      SELECT
+        (SELECT COUNT(*) FROM per_booking) AS total_bookings,
+        (SELECT SUM(guests) FROM per_booking) AS guests_served,
+        (SELECT COUNT(*) FROM scoped) AS sold_room_nights,
+        (SELECT SUM(DailyRevenue) FROM scoped) AS room_revenue
+    `, params),
+    includeLp ? getLpOverviewTotals(resolved.fys, resolved.months) : Promise.resolve(null),
+  ]);
 
   const r = rows[0] ?? { total_bookings: 0, guests_served: 0, sold_room_nights: 0, room_revenue: 0 };
+  const totalBookings = r.total_bookings + (lpTotals?.bookingsCount ?? 0);
+  const guestsServed = (r.guests_served ?? 0) + (lpTotals?.guestsServed ?? 0);
+  const soldRoomNights = r.sold_room_nights + (lpTotals?.soldRoomNights ?? 0);
+  const roomRevenue = (r.room_revenue ?? 0) + (lpTotals?.roomRevenue ?? 0);
   return {
-    totalBookings: r.total_bookings,
-    guestsServed: r.guests_served ?? 0,
-    alos: safeDivide(r.sold_room_nights, r.total_bookings),
-    revenuePerGuest: safeDivide(r.room_revenue ?? 0, r.guests_served ?? 0),
+    totalBookings,
+    guestsServed,
+    alos: safeDivide(soldRoomNights, totalBookings),
+    revenuePerGuest: safeDivide(roomRevenue, guestsServed),
   };
 }
 
@@ -73,14 +82,23 @@ export interface RoomNightsGap {
 
 export async function getRoomNightsGap(filter: KpiFilter): Promise<RoomNightsGap> {
   const resolved = resolveFilter(filter);
+  const includeLp = resolved.properties.includes(LP_PROPERTY);
   const available = await getAvailableRoomNights(resolved.properties, rangesForFysAndMonths(resolved.fys, resolved.months));
 
   const { clause: where, params } = buildScopeClause("Property", "CAST(StayDate AS DATE)", resolved, "");
-  const soldRows = await runQuery<{ n: number }>(`
-    SELECT COUNT(*) AS n FROM ${table("sales_booking")}
-    WHERE ${where}
-  `, params);
-  const sold = soldRows[0]?.n ?? 0;
+  // `available` already includes LP's contribution (getAvailableRoomNights is
+  // LP-aware via propertyWindows.ts). LP has zero sales_booking rows, so its
+  // real sold nights must be added here too — otherwise Unsold Room Nights
+  // would overstate LP as 100% unsold, when it actually sold real nights
+  // (just recorded in sales_booking_lp_monthly instead).
+  const [soldRows, lpTotals] = await Promise.all([
+    runQuery<{ n: number }>(`
+      SELECT COUNT(*) AS n FROM ${table("sales_booking")}
+      WHERE ${where}
+    `, params),
+    includeLp ? getLpOverviewTotals(resolved.fys, resolved.months) : Promise.resolve(null),
+  ]);
+  const sold = (soldRows[0]?.n ?? 0) + (lpTotals?.soldRoomNights ?? 0);
   const unsoldRoomNights = Math.max(0, available - sold);
 
   const today = new Date().toISOString().slice(0, 10);
@@ -111,17 +129,39 @@ export interface CategoryMix {
 
 export async function getCategoryMix(filter: KpiFilter): Promise<CategoryMix[]> {
   const resolved = resolveFilter(filter);
+  const includeLp = resolved.properties.includes(LP_PROPERTY);
   const { clause: where, params } = buildScopeClause("Property", "CAST(StayDate AS DATE)", resolved, "");
-  return runQuery<CategoryMix>(`
-    SELECT ${bookingCategorySqlExpr("Source")} AS category, COUNT(*) AS nights, SUM(DailyRevenue) AS revenue
-    FROM ${table("sales_booking")}
-    WHERE ${where}
-    GROUP BY category
-    ORDER BY revenue DESC
-  `, params);
+  const [rows, lpTotals] = await Promise.all([
+    runQuery<CategoryMix>(`
+      SELECT ${bookingCategorySqlExpr("Source")} AS category, COUNT(*) AS nights, SUM(DailyRevenue) AS revenue
+      FROM ${table("sales_booking")}
+      WHERE ${where}
+      GROUP BY category
+    `, params),
+    includeLp ? getLpOverviewTotals(resolved.fys, resolved.months) : Promise.resolve(null),
+  ]);
+
+  const merged = new Map<BookingCategory, CategoryMix>();
+  for (const r of rows) merged.set(r.category, r);
+  if (lpTotals) {
+    for (const lp of lpTotals.bySource) {
+      const existing = merged.get(lp.category);
+      if (existing) {
+        existing.nights += lp.nights;
+        existing.revenue += lp.revenue;
+      } else {
+        merged.set(lp.category, { category: lp.category, nights: lp.nights, revenue: lp.revenue });
+      }
+    }
+  }
+  return [...merged.values()].sort((a, b) => b.revenue - a.revenue);
 }
 
 // --- Repeat Booking Share (§3.6: same guest via Mobile/Email, fallback GuestName, >1 distinct ReservationNo) ---
+// LP excluded (2026-08-26 reassessment): neither sales_booking_lp_monthly nor
+// _monthly_roomtype has a guest-identity column (Mobile/Email/GuestName) at
+// any grain — there's nothing to match a repeat guest against. Not
+// implementable without fabricating guest identities.
 
 export interface RepeatBookingShare {
   repeatBookings: number;
@@ -178,25 +218,42 @@ export interface RoomFormatStats {
 
 export async function getRoomFormatStats(filter: KpiFilter): Promise<RoomFormatStats[]> {
   const resolved = resolveFilter(filter);
+  const includeLp = resolved.properties.includes(LP_PROPERTY);
   const { clause: where, params } = buildScopeClause("b.Property", "CAST(b.StayDate AS DATE)", resolved, "");
 
-  const rows = await runQuery<{ room_type: string | null; nights: number; revenue: number | null }>(`
-    SELECT rt.room_type, COUNT(*) AS nights, SUM(b.DailyRevenue) AS revenue
-    FROM ${table("sales_booking")} b
-    LEFT JOIN ${roomTypeMappingSqlUnnest()} AS rt ON ${roomTypeJoinCondition("b")}
-    WHERE ${where}
-    GROUP BY rt.room_type
-    ORDER BY nights DESC
-  `, params);
+  const [rows, lpRows] = await Promise.all([
+    runQuery<{ room_type: string | null; nights: number; revenue: number | null }>(`
+      SELECT rt.room_type, COUNT(*) AS nights, SUM(b.DailyRevenue) AS revenue
+      FROM ${table("sales_booking")} b
+      LEFT JOIN ${roomTypeMappingSqlUnnest()} AS rt ON ${roomTypeJoinCondition("b")}
+      WHERE ${where}
+      GROUP BY rt.room_type
+    `, params),
+    includeLp ? getLpRoomTypeStats(resolved.fys, resolved.months) : Promise.resolve([]),
+  ]);
 
-  const totalNights = rows.reduce((sum, r) => sum + r.nights, 0);
-  return rows.map((r) => ({
-    roomType: r.room_type,
-    nights: r.nights,
-    revenue: r.revenue ?? 0,
-    adr: safeDivide(r.revenue ?? 0, r.nights),
-    nightsSharePct: safeDivide(r.nights, totalNights),
-  }));
+  const merged = new Map<string | null, { nights: number; revenue: number }>();
+  for (const r of rows) merged.set(r.room_type, { nights: r.nights, revenue: r.revenue ?? 0 });
+  for (const lp of lpRows) {
+    const existing = merged.get(lp.roomType);
+    if (existing) {
+      existing.nights += lp.nights;
+      existing.revenue += lp.revenue;
+    } else {
+      merged.set(lp.roomType, { nights: lp.nights, revenue: lp.revenue });
+    }
+  }
+
+  const totalNights = [...merged.values()].reduce((sum, r) => sum + r.nights, 0);
+  return [...merged.entries()]
+    .map(([roomType, v]) => ({
+      roomType,
+      nights: v.nights,
+      revenue: v.revenue,
+      adr: safeDivide(v.revenue, v.nights),
+      nightsSharePct: safeDivide(v.nights, totalNights),
+    }))
+    .sort((a, b) => b.nights - a.nights);
 }
 
 // --- Revenue by Room Format & FY ---
@@ -209,19 +266,34 @@ export interface RoomFormatByFy {
 
 export async function getRoomFormatByFy(filter: KpiFilter): Promise<RoomFormatByFy[]> {
   const resolved = resolveFilter(filter);
+  const includeLp = resolved.properties.includes(LP_PROPERTY);
   const { clause: where, params } = buildScopeClause("b.Property", "CAST(b.StayDate AS DATE)", resolved, "");
 
-  return runQuery<RoomFormatByFy>(`
-    SELECT rt.room_type AS roomType, ${fyLabelSqlExpr("CAST(b.StayDate AS DATE)")} AS fy, SUM(b.DailyRevenue) AS revenue
-    FROM ${table("sales_booking")} b
-    LEFT JOIN ${roomTypeMappingSqlUnnest()} AS rt ON ${roomTypeJoinCondition("b")}
-    WHERE ${where}
-    GROUP BY roomType, fy
-    ORDER BY fy, revenue DESC
-  `, params);
+  const [rows, lpRows] = await Promise.all([
+    runQuery<RoomFormatByFy>(`
+      SELECT rt.room_type AS roomType, ${fyLabelSqlExpr("CAST(b.StayDate AS DATE)")} AS fy, SUM(b.DailyRevenue) AS revenue
+      FROM ${table("sales_booking")} b
+      LEFT JOIN ${roomTypeMappingSqlUnnest()} AS rt ON ${roomTypeJoinCondition("b")}
+      WHERE ${where}
+      GROUP BY roomType, fy
+    `, params),
+    includeLp ? getLpRoomTypeByFy(resolved.fys, resolved.months) : Promise.resolve([]),
+  ]);
+
+  const merged = new Map<string, RoomFormatByFy>();
+  for (const r of rows) merged.set(`${r.roomType}|${r.fy}`, r);
+  for (const lp of lpRows) {
+    const key = `${lp.roomType}|${lp.fy}`;
+    const existing = merged.get(key);
+    if (existing) existing.revenue += lp.revenue;
+    else merged.set(key, { roomType: lp.roomType, fy: lp.fy, revenue: lp.revenue });
+  }
+  return [...merged.values()].sort((a, b) => (a.fy === b.fy ? b.revenue - a.revenue : a.fy.localeCompare(b.fy)));
 }
 
 // --- Expats (§3.6: Country IS NOT NULL AND Country != 'India') ---
+// LP excluded (2026-08-26 reassessment): neither LP table has a Country
+// column at any grain — no basis to classify any of LP's guests as expat.
 
 export interface ExpatStats {
   bookings: number;
@@ -258,6 +330,9 @@ export async function getExpatStats(filter: KpiFilter): Promise<ExpatStats> {
 }
 
 // --- Cancellations % (booking-count basis, active vs cancelled) ---
+// LP excluded (2026-08-26 reassessment): the backfill only covers realized
+// (checked-out) bookings — neither LP table records cancellations, so there's
+// no cancelled-booking count to add to either side of this ratio.
 
 export interface CancellationStats {
   activeBookings: number;
@@ -292,6 +367,8 @@ export async function getCancellationStats(filter: KpiFilter): Promise<Cancellat
 }
 
 // --- Lead Time for Cancellations: ArrivalDate - CancelDate (PRD's own recommended direction) ---
+// LP excluded (2026-08-26 reassessment): no cancellation data at all in the
+// LP tables (see getCancellationStats above) — nothing to compute a lead time from.
 
 export interface CancellationLeadTime {
   avgLeadTimeDays: number | null;

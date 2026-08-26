@@ -145,6 +145,34 @@ relevant tab section below for the current formula.
   LP query module, which converts LP's fiscal `MonthNumber` the same way
   `leadership_targets` does.
 
+**2026-08-26 (later, second pass — LP extended to Booking Details):**
+- **Booking Details reassessed and extended.** Total Bookings, Guests Served,
+  ALOS, Revenue per Guest, Unsold Room Nights, the B2B/B2C/OTA Night/Revenue
+  Mix, and all three room-format KPIs now merge in LP when selected — the
+  monthly table has real `BookingsCount`/`GuestServed` columns, and
+  `sales_booking_lp_monthly_roomtype` (previously unused) supplies the
+  room-type dimension. Repeat Bookings, Cancellations %, Cancellation Lead
+  Time, and Expat stats stay excluded — checked directly, neither LP table
+  has a guest-identity, cancellation, or `Country` column at any grain. Full
+  detail: §3, §11.
+- **Real bug fixed**: `getRoomNightsGap()`'s Unsold Room Nights was silently
+  overstating LP as 100% unsold whenever selected — `Available` already
+  included LP (via the window fix above), but `Sold` only ever came from
+  `sales_booking`, which has zero LP rows. Now adds LP's real
+  `SoldRoomNights`. See §11 for the verified before/after numbers.
+- **Room-type merge uses a revenue-weighted nights allocation, not the
+  roomtype table's own `Nights` column** — that column doesn't reconcile with
+  the already-validated `sales_booking_lp_monthly.SoldRoomNights` (off by
+  19%–76% across all 24 months, no fixed ratio), while `TotalRevenue` and
+  `BookingsCount` reconcile exactly. Since LP has exactly one room type
+  ("Studio Room") throughout its history, this allocation is exact for LP's
+  real data, not an approximation. Full reasoning: §11.
+- **OTA Breakdown and Targets reassessed and confirmed to have no safe
+  extension** — re-verified against BigQuery's actual column list (OTA
+  Breakdown: no per-OTA-site column anywhere in the LP data) and against
+  every formula in `targets.ts` (Targets: every KPI is target-relative, and
+  LP was never given a target). Both tabs unchanged. See §6, §8, §11.
+
 ---
 
 ## 1. Shared reference logic
@@ -263,29 +291,31 @@ room-format chart) rather than a single current-vs-prior pair.
 
 Source: `lib/bigquery/queries/guestDetail.ts` (`sales_booking`,
 `sales_booking_cancelled`) and `lib/bigquery/queries/b2bContracts.ts` (`b2b_bills`).
-**LP is deliberately excluded from every KPI on this tab** (2026-08-26) — its
-data lives at monthly grain (`sales_booking_lp_monthly`), and this whole tab's
-logic (repeat bookings, cancellation lead time, expat nights, room-format mix)
-is inherently nightly/reservation-level and would misrepresent LP if forced
-into that shape. Since `sales_booking`/`sales_booking_cancelled` genuinely
-have zero LP rows, this tab already shows 0/blank for LP with no code change
-needed — same as before the LP re-activation.
+**Reassessed 2026-08-26** (originally blanket-excluded — see §0): LP now
+merges into every KPI on this tab that the monthly-grain data genuinely
+supports (Total Bookings, Guests Served, ALOS, Revenue per Guest, Unsold Room
+Nights, the B2B/B2C/OTA Night/Revenue Mix, and all three room-format charts,
+the last via `sales_booking_lp_monthly_roomtype`). It remains excluded from
+Repeat Bookings, Cancellations %, Cancellation Lead Time, and Expat stats —
+not by category-level policy, but because neither LP table has the specific
+column each of those needs (guest identity, cancellation records, or
+`Country`). Full detail: §11.
 
 | KPI | Formula |
 |---|---|
-| Total Bookings | `COUNT(DISTINCT CONCAT(Property, ReservationNo))`, excluding rows with a null `ReservationNo` |
-| Guests Served | `SUM` of `MAX(NoOfGuest)` per distinct booking |
-| ALOS | Sold Room Nights ÷ Total Bookings |
-| Revenue per Guest | Room Revenue ÷ Guests Served |
-| Repeat Bookings | Bookings sharing a guest key (`Mobile`, falling back to `Email`, then `GuestName`) with >1 distinct booking; share % = repeat ÷ total |
-| Cancellations % | Cancelled bookings ÷ (active + cancelled bookings), both counted the same way as Total Bookings |
-| Avg Cancellation Lead Time | `AVG(ArrivalDate − CancelDate)` in days, over `sales_booking_cancelled` |
-| Unsold Room Nights | Available − Sold, for the selected scope |
-| Remaining Room Nights | Available − Sold, narrowed to **[today, scope end]** — 0 if the whole scope is already in the past (implementation choice: PRD didn't give an exact "remaining" formula) |
-| Expat Bookings / Revenue / Nights / ALOS | `Country IS NOT NULL AND Country != 'India'`, same booking/night/ALOS logic as above |
-| ADR by Room Format | Room Revenue ÷ nights, grouped by Room Type (§1.6) |
-| Nights Share by Room Format | Each room type's nights ÷ total nights (no separate room-count-by-type reference exists, so this is a nights-share reading rather than a true occupancy %) |
-| Revenue by Room Format & FY | Room Revenue by Room Type, grouped by FY. **Chart type changed 2026-08-24**: room type on the x-axis, one bar per FY per cluster (was: FY on x-axis, stacked by room type — stacking hid the per-segment baseline, making cross-FY comparison hard) |
+| Total Bookings | `COUNT(DISTINCT CONCAT(Property, ReservationNo))`, excluding rows with a null `ReservationNo`. **LP's `BookingsCount` added when selected** (2026-08-26) — a real count in the source data, not derived. |
+| Guests Served | `SUM` of `MAX(NoOfGuest)` per distinct booking. **LP's `GuestServed` column added when selected** — same "guests served" concept, a real monthly total in the source data. |
+| ALOS | Sold Room Nights ÷ Total Bookings (both sides include LP's contribution when selected) |
+| Revenue per Guest | Room Revenue ÷ Guests Served (both sides include LP's contribution when selected) |
+| Repeat Bookings | Bookings sharing a guest key (`Mobile`, falling back to `Email`, then `GuestName`) with >1 distinct booking; share % = repeat ÷ total. **LP excluded** — neither LP table has any guest-identity column, at monthly or room-type grain; not computable without fabricating guest identities. |
+| Cancellations % | Cancelled bookings ÷ (active + cancelled bookings), both counted the same way as Total Bookings. **LP excluded** — the backfill only covers realized (checked-out) stays; no cancellation records exist in either LP table. |
+| Avg Cancellation Lead Time | `AVG(ArrivalDate − CancelDate)` in days, over `sales_booking_cancelled`. **LP excluded** — depends on `sales_booking_cancelled`, which has (and will always have) zero LP rows. |
+| Unsold Room Nights | Available − Sold, for the selected scope. **LP's real sold nights now subtracted when selected** (2026-08-26 fix) — Available already included LP via §1.5's window fix, but Sold didn't, which was silently overstating LP as 100% unsold. Verified: FY 25-26 delta between with/without LP is exactly 1,995 nights = LP's own Available (5,840) − Sold (3,845). |
+| Remaining Room Nights | Available − Sold, narrowed to **[today, scope end]** — 0 if the whole scope is already in the past. **LP naturally contributes 0** — its entire data window (Apr 2024–Mar 2026) is already in the past relative to any realistic "today," so the forward-looking slice never overlaps it; no LP-specific code needed here. |
+| Expat Bookings / Revenue / Nights / ALOS | `Country IS NOT NULL AND Country != 'India'`, same booking/night/ALOS logic as above. **LP excluded** — neither LP table has a `Country` column at any grain. |
+| ADR by Room Format | Room Revenue ÷ nights, grouped by Room Type (§1.6). **LP merged in when selected** (2026-08-26) via `sales_booking_lp_monthly_roomtype` — see §11 for the nights-allocation caveat. |
+| Nights Share by Room Format | Each room type's nights ÷ total nights (no separate room-count-by-type reference exists, so this is a nights-share reading rather than a true occupancy %). LP included in both the per-type and total-nights figures when selected. |
+| Revenue by Room Format & FY | Room Revenue by Room Type, grouped by FY. **Chart type changed 2026-08-24**: room type on the x-axis, one bar per FY per cluster (was: FY on x-axis, stacked by room type — stacking hid the per-segment baseline, making cross-FY comparison hard). **LP merged in when selected** (2026-08-26) — exact, not estimated (see §11). |
 | **Additional Occupancy Bookings/Revenue** | **Not available.** No supporting column found across the 7 in-scope tables (PRD §3.6). Shown as an explicit placeholder, not fabricated. |
 | Corporate Account Retention | For each consecutive FY pair: % of companies with `Contract_Status = 'Contract'` in the earlier FY that also appear (any status) in the later FY |
 | Contract Status & Ranking | Companies ranked by `SUM(Room_Revenue)` (tax-exclusive), with `Contract_Status`, `ADR`, and Contribution %. **Merged 2026-08-24** with what used to be a separate "Nights / Revenue / ADR by Company" table — same underlying data, now one table. |
@@ -350,6 +380,21 @@ Source: `lib/bigquery/queries/targets.ts`, table `leadership_targets`.
 **Not property-scoped** — this table has no `Property` column, so only
 FY/Quarter/Month apply. `Month_Number` on this table is already fiscal
 (Apr=1…Mar=12), matching quarters directly (Q1=1-3, Q2=4-6, Q3=7-9, Q4=10-12).
+
+**Reassessed for LP, 2026-08-26 — no safe extension found, tab left
+unchanged.** Checked every KPI/chart in `targets.ts` individually: `Revenue
+Achievement %`, `Target`, and `B2B/B2C/OTA Achievement %` are all ratios with
+`leadership_targets`'s target sum as the denominator; the three monthly
+charts plot `Achieved` specifically as the numerator being compared against
+that same target. There is no "achieved, independent of any target" tile
+anywhere on this tab — every single figure is either a target, or an achieved
+value whose entire purpose is to be read against a target. Adding LP's real
+revenue to any `Achieved` figure here without a matching addition to the
+`Target` side (which never existed for LP, and per the addendum never should)
+would silently inflate that figure's achievement % — exactly the distortion
+ruled out. §6.1's per-property table was reassessed the same way and stays
+unchanged for the identical reason (adding an LP row with a real Achieved but
+no Target would corrupt that table's Total row's achievement %).
 
 | KPI / Chart | Formula |
 |---|---|
@@ -483,11 +528,14 @@ dropped.
 
 Source: `lib/bigquery/queries/otaBreakdown.ts`, table `sales_booking`,
 filtered to the OTA category (§1.3). **LP is deliberately excluded from this
-tab** (2026-08-26) — `sales_booking_lp_monthly` has no per-OTA-site column to
-attach a commission rate to, only an aggregate OTA total (which does surface
-elsewhere — Revenue Details' Revenue by Source, Brand's category chart, §11).
-Since `sales_booking` has zero LP rows, this tab already shows nothing for LP
-with no code change needed.
+tab, reconfirmed 2026-08-26**: the full column list of both LP tables was
+checked directly against BigQuery's `INFORMATION_SCHEMA.COLUMNS` (§11) —
+neither has an OTA-name/channel/source column, only an aggregate
+`OTARevenue`/`OTANights` pair with no way to say *which* OTA. That aggregate
+does surface elsewhere (Revenue Details' Revenue by Source, Brand's category
+chart, §11), just never broken out by named site here. Since `sales_booking`
+has zero LP rows, this tab already shows nothing for LP with no code change
+needed.
 
 | Column | Formula |
 |---|---|
@@ -562,23 +610,62 @@ permanently retired hotel with no PMS feed — it will never produce
 (Apr 2024 – Mar 2026) was backfilled and validated by the business directly
 into two new BigQuery tables at **monthly grain** (not per-night like
 `sales_booking`): `sales_booking_lp_monthly` (property-level monthly
-aggregates) and `sales_booking_lp_monthly_roomtype` (room-type-level detail,
-not currently wired into any dashboard query — see "Not implemented" below).
+aggregates) and `sales_booking_lp_monthly_roomtype` (room-type-level detail).
 This is a one-time backfill; there is no pipeline that keeps it current, by
 design.
 
+**2026-08-26, second pass — extended as far as the source data safely
+allows.** The initial integration (above) merged LP into Revenue Details,
+Trends, and Brand, and left Booking Details, OTA Breakdown, and Targets fully
+excluded as an easy, safe default. On request, each of the three exclusions
+was individually reassessed against the actual column list of both LP tables
+(`INFORMATION_SCHEMA.COLUMNS`, checked directly) rather than left as a
+blanket policy:
+- **Booking Details**: `sales_booking_lp_monthly` turned out to carry
+  `BookingsCount` and `GuestServed` columns, and
+  `sales_booking_lp_monthly_roomtype` carries a `RoomType` dimension — both
+  usable. Extended (see below). What's still missing — guest identity,
+  `Country`, cancellation records — genuinely isn't in either table, so those
+  specific KPIs stay excluded.
+- **OTA Breakdown**: reconfirmed no per-OTA-site column exists in either
+  table (only an aggregate `OTARevenue`/`OTANights` pair) — stays excluded,
+  see §8.
+- **Targets**: reconfirmed every KPI on that tab is target-relative (a ratio
+  or a value plotted against a target) and LP was never given a target — stays
+  excluded, see §6.
+
 **Mechanism** — `lib/bigquery/queries/lpMonthly.ts` is the single shared
 module every consumer merges LP data from (`getLpOverviewTotals`,
-`getLpMonthlyPoints`, `getLpCategoryByFy`, `getLpSoldRoomNights`, `getLpAdr`).
-Each consuming query file (`overview.ts`, `trends.ts`, `brandCategory.ts`)
-fetches its normal `sales_booking` rows and, when LP is in the Property
-selection, fetches the matching LP helper **in parallel**, then merges the
-two result sets additively (via `Map` keyed on `fy|month` or `fy|category`,
-or simple addition for single-number totals) rather than a SQL `UNION ALL` —
-the addendum specifically calls for this because the two source tables are at
-different grains (nightly vs monthly) and a raw union would misrepresent
-LP's numbers when re-aggregated. `SAFE_DIVIDE` is used throughout, per the
-addendum's rule.
+`getLpMonthlyPoints`, `getLpCategoryByFy`, `getLpSoldRoomNights`, `getLpAdr`,
+`getLpRoomTypeStats`, `getLpRoomTypeByFy`). Each consuming query file
+(`overview.ts`, `trends.ts`, `brandCategory.ts`, `guestDetail.ts`) fetches its
+normal `sales_booking` rows and, when LP is in the Property selection,
+fetches the matching LP helper **in parallel**, then merges the two result
+sets additively (via `Map` keyed on `fy|month`, `fy|category`, or
+`roomType|fy`, or simple addition for single-number totals) rather than a SQL
+`UNION ALL` — the addendum specifically calls for this because the two source
+tables are at different grains (nightly vs monthly) and a raw union would
+misrepresent LP's numbers when re-aggregated. `SAFE_DIVIDE` is used
+throughout, per the addendum's rule.
+
+**Room-type merge, with a data-quality caveat**: `sales_booking_lp_monthly_
+roomtype`'s own `Nights` column does **not** reconcile with `sales_booking_
+lp_monthly.SoldRoomNights` — checked directly against BigQuery across all 24
+months, off by 19%–76% with no consistent ratio (a guest-nights-vs-room-
+nights explanation was checked and ruled out). `TotalRevenue` and
+`BookingsCount`, by contrast, reconcile exactly with the monthly table in
+every single month. Rather than surface the unreconciled `Nights` figure
+(which would misstate ADR and nights-share), `getLpRoomTypeStats()` allocates
+each month's already-validated `SoldRoomNights` total across room types by
+each type's share of that month's room-type revenue. LP has exactly one room
+type ("Studio Room") in every one of its 24 months, so this allocation is
+**100% exact for LP's actual data today** (a 100% revenue share resolves to
+the full validated nights figure, no estimation involved) — the
+revenue-weighted approach exists as a defensible fallback only if a future
+backfill ever added a second room type, which the addendum doesn't expect to
+happen. `getLpRoomTypeByFy()` (used for the Revenue-by-Room-Format-&-FY
+chart, which needs revenue only, no nights) reads `TotalRevenue` directly —
+no allocation involved, no caveat.
 
 One foundational fix made everything else easier: `getPropertyActiveWindows()`
 (`propertyWindows.ts`) now also queries `sales_booking_lp_monthly` for LP's
@@ -588,46 +675,63 @@ all built on top of that one function, this single change made LP's
 occupancy/RevPAR correct everywhere automatically — no per-consumer changes
 needed for the availability side, only for the sold-nights/revenue side.
 
-**Where LP participates** (merged into the `sales_booking` figures when
-selected):
+**Where LP participates** (merged into the `sales_booking`-derived figures
+when selected):
 - Revenue Details: Room Revenue, Sold/Available Room Nights, Revenue by
   Source, ADR by Property (LP gets its own bar), YoY comparison.
 - Trends: all three monthly trend charts (Occupancy/RevPAR/ADR), Business
   Category ADR.
 - Brand: Occupancy by Brand (rolls into Aptly alongside BH4), Revenue by
   Business Category by FY.
+- Booking Details (extended 2026-08-26): Total Bookings, Guests Served, ALOS,
+  Revenue per Guest, Unsold Room Nights (this also **fixed a real bug** — see
+  below), the B2B/B2C/OTA Night/Revenue Mix, and all three room-format
+  KPIs/charts (ADR by Room Format, Nights Share by Room Format, Revenue by
+  Room Format & FY) via `sales_booking_lp_monthly_roomtype`.
 - The aggregate B2B/B2C/OTA split, wherever it appears above — never a
   per-OTA-site breakdown.
 
-**Where LP does NOT participate** (by design, per the addendum):
-- Booking Details tab (§3) — nightly/reservation-level logic (repeat
-  bookings, cancellations, expats, room-format mix) doesn't fit LP's monthly
-  grain; already 0/blank with no code change needed.
-- OTA Breakdown tab (§8) — no per-OTA-site column in the LP data.
+**Bug fixed in this pass**: `getRoomNightsGap()` (Booking Details' Unsold
+Room Nights) computes `Available − Sold`. `Available` already included LP
+automatically once §1.5's window fix landed (both go through the same
+`getAvailableRoomNights()`), but `Sold` was still `COUNT(*)` on
+`sales_booking` alone, which is always 0 for LP — so selecting LP was
+silently counting 100% of its available nights as unsold, when LP actually
+sold real nights (just recorded in `sales_booking_lp_monthly`). Fixed by
+adding LP's real `SoldRoomNights` into the `Sold` side too. Verified: the
+FY 25-26 delta between with/without LP is exactly 1,995 nights = LP's own
+Available (5,840) − Sold (3,845) — the correct, LP-only unsold figure, not
+5,840.
+
+**Where LP still does NOT participate** (reassessed 2026-08-26, each for a
+specific missing column, not a blanket policy):
+- Booking Details' Repeat Bookings, Cancellations %, Cancellation Lead Time,
+  and Expat stats — no guest-identity, cancellation, or `Country` column
+  exists in either LP table at any grain. Remaining Room Nights needs no
+  special handling either way: LP's entire data window (Apr 2024–Mar 2026)
+  is already in the past, so it naturally never overlaps the forward-looking
+  slice this KPI computes.
+- OTA Breakdown tab (§8) — no per-OTA-site column in the LP data, only an
+  aggregate that can't be attributed to a named OTA.
 - Targets tab (§6) — no fixed target was ever set for a retired property, so
   no target-vs-achieved line is fabricated for it, on either the company-wide
-  charts or the §6.1 per-property table.
+  charts or the §6.1 per-property table (adding LP's real Achieved there
+  without a matching Target would distort the Total row's achievement %).
 - Leads (`lead_tracker`), B2B Contracts (`b2b_bills`), Reviews
   (`rating_sheet`/`ota`) — separate source tables, out of scope for this
   backfill. Each of these already had real, independent LP rows before this
   change (confirmed via BigQuery: 359/548/498+8 rows respectively) and are
   completely unaffected by it either way.
 
-**Not implemented / deliberately out of scope for this pass**:
-`sales_booking_lp_monthly_roomtype` (room-type-level detail) is not queried
-anywhere yet — the addendum frames LP's room-type detail as its own separate
-view only if a specific KPI needs it, not a mandatory merge into Booking
-Details' nightly room-format chart. No dashboard KPI currently asks for it,
-so nothing was built; flag if LP's room-type mix needs to be surfaced
-somewhere. Similarly, "Bookings" (`BookingsCount` in
-`sales_booking_lp_monthly`) isn't surfaced anywhere — Revenue Details has no
-existing Bookings stat to merge it into, and Booking Details' own Total
-Bookings stat is nightly-`ReservationNo`-based and out of scope per the rule
-above.
-
 **Verified against live BigQuery** (2026-08-26): LP alone contributes ₹1.53
-Cr / 3,845 nights / 5,840 available nights to FY 25-26 across the merged
-functions, and this exact figure is the entire delta between "with LP" and
-"without LP" runs of `getOverviewKpis` — confirming the merge is additive
-with no double-counting or leakage into the 5 pre-existing properties'
-figures.
+Cr / 3,845 nights / 5,840 available nights to FY 25-26 across the Revenue
+Details/Trends/Brand functions, and this exact figure is the entire delta
+between "with LP" and "without LP" runs of `getOverviewKpis` — confirming the
+merge is additive with no double-counting or leakage into the 5 pre-existing
+properties' figures. For Booking Details: LP's `BookingsCount` (741) and
+`GuestServed` (8,410) exactly match the delta of `getBookingStats` with vs
+without LP; `getRoomFormatStats` shows LP's full "Studio Room" contribution
+folded into the dashboard-wide Studio Room total alongside the other
+properties that also have Studio Room units; `getCategoryMix` with LP
+selected reproduces the same B2B/B2C/OTA totals already verified for
+Revenue Details (internally consistent, as expected — same source data).

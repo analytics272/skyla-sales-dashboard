@@ -23,7 +23,12 @@ All table references below are short for `skyla-analytics.Skyla_Sales_Automation
 > re-activated using two new, separately-backfilled monthly-grain BigQuery
 > tables (`sales_booking_lp_monthly` / `sales_booking_lp_monthly_roomtype`),
 > not `sales_booking` (which still has zero LP rows). Current formulas are in
-> `Skyla_Dashboard_KPI_Logic_Reference.md` §1.5/§10/§11.
+> `Skyla_Dashboard_KPI_Logic_Reference.md` §1.5/§10/§11. **Extended the same
+> day** to also cover Booking Details' bookings/guests/ALOS/unsold-nights and
+> room-format KPIs (via `sales_booking_lp_monthly_roomtype`) — Repeat
+> Bookings, Cancellations, Expat stats, OTA Breakdown, and Targets were each
+> individually reassessed and confirmed to have no data support for LP, and
+> remain excluded. Full detail in §11 of the KPI Logic Reference.
 
 ---
 
@@ -312,7 +317,7 @@ Formulas are written as BigQuery-flavored expressions. All are additionally slic
 3. Refresh window gap (ReservationDate-scoped, not ArrivalDate-scoped) is an accepted risk, not being fixed in v1 — cancellations of old bookings for future stays may lag.
 4. Expats and Repeat Booking definitions are inferred (§3.6), not explicitly confirmed by the business.
 5. ~~GB and LP need active-period-scoped Available Room Nights (§2.1, §3.3) or Occupancy %/RevPAR will be wrong for those properties.~~ → GB: unchanged, still needs its empirical active window. LP: **resolved 2026-08-26** — LP's active window now comes from `sales_booking_lp_monthly`'s own date range instead of `sales_booking` (which has none for LP). See the addendum and KPI Logic Reference §1.5.
-7. **(new, 2026-08-26)** LP participates in Revenue Details, Trends, Brand, and the aggregate B2B/B2C/OTA split (all merged in from `sales_booking_lp_monthly`), but deliberately does **not** participate in: Booking Details' nightly-only KPIs, the per-OTA-site breakdown, Targets vs Achieved, or the per-property Revenue Targets table (§6.1) — no fabricated target line for a retired property. Leads/B2B Contracts/Reviews already had real, independent LP rows before this backfill and are unaffected by it either way. Full rules: `Skyla_Sales_Dashboard_PRD_LP_Addendum.md`.
+7. **(new, 2026-08-26, extended same day)** LP participates in Revenue Details, Trends, Brand, the aggregate B2B/B2C/OTA split, and — as far as the monthly-grain data genuinely supports — Booking Details (bookings, guests, ALOS, revenue-per-guest, unsold nights, and the room-format charts via `sales_booking_lp_monthly_roomtype`). It deliberately does **not** participate in: Booking Details' guest-identity-dependent KPIs (Repeat Bookings, Cancellations %, Cancellation Lead Time, Expat stats — no such columns exist in either LP table), the per-OTA-site breakdown (no OTA-name column), or Targets vs Achieved / the per-property Revenue Targets table (§6.1) — no fabricated target line for a retired property. Leads/B2B Contracts/Reviews already had real, independent LP rows before this backfill and are unaffected by it either way. Full rules: `Skyla_Sales_Dashboard_PRD_LP_Addendum.md`, `Skyla_Dashboard_KPI_Logic_Reference.md` §11.
 6. `lead_tracker` lead-vs-row-count distinction (§2.4) — default to row count per legacy formula; flag if the business wants deduped lead counts instead.
 
 ## 8. Explicitly Out of Scope

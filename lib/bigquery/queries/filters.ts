@@ -2,7 +2,7 @@ import { DateFilter, resolveSelectedFYs, resolveSelectedMonths, fyLabelSqlExpr }
 import { ACTIVE_PROPERTY_CODES } from "@/lib/reference/propertyReference";
 
 export interface KpiFilter extends DateFilter {
-  /** Property codes to include. Omit/empty = all active properties (LP excluded per §3.3 unless explicitly requested for historical views). */
+  /** Property codes to include. Omit/empty = all active properties (includes LP as of the 2026-08-26 re-integration — see the LP PRD addendum). */
   properties?: string[];
 }
 

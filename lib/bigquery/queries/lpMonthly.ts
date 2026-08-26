@@ -28,6 +28,7 @@ interface LpMonthlyRow {
   FnBRevenue: number | null;
   SoldRoomNights: number | null;
   BookingsCount: number | null;
+  GuestServed: number | null;
   B2BRevenue: number | null;
   B2BNights: number | null;
   B2CRevenue: number | null;
@@ -54,7 +55,7 @@ function whereForScope(fys: string[], months: number[]): { clause: string; param
 async function getLpMonthlyRows(fys: string[], months: number[]): Promise<LpMonthlyRow[]> {
   const { clause, params } = whereForScope(fys, months);
   return runQuery<LpMonthlyRow>(`
-    SELECT FinancialYear, MonthNumber, RoomRevenue, FnBRevenue, SoldRoomNights, BookingsCount,
+    SELECT FinancialYear, MonthNumber, RoomRevenue, FnBRevenue, SoldRoomNights, BookingsCount, GuestServed,
       B2BRevenue, B2BNights, B2CRevenue, B2CNights, OTARevenue, OTANights
     FROM ${table("sales_booking_lp_monthly")}
     WHERE ${clause}
@@ -66,10 +67,11 @@ export interface LpOverviewTotals {
   extrasRevenue: number; // FnBRevenue
   soldRoomNights: number;
   bookingsCount: number;
+  guestsServed: number;
   bySource: { category: BookingCategory; nights: number; revenue: number }[];
 }
 
-/** Summed across the whole scope — for Revenue Details' overview KPIs. */
+/** Summed across the whole scope — for Revenue Details' overview KPIs and Booking Details' booking-count/guest-count stats. */
 export async function getLpOverviewTotals(fys: string[], months: number[]): Promise<LpOverviewTotals> {
   const rows = await getLpMonthlyRows(fys, months);
   const sum = (f: (r: LpMonthlyRow) => number | null) => rows.reduce((s, r) => s + (f(r) ?? 0), 0);
@@ -78,12 +80,87 @@ export async function getLpOverviewTotals(fys: string[], months: number[]): Prom
     extrasRevenue: sum((r) => r.FnBRevenue),
     soldRoomNights: sum((r) => r.SoldRoomNights),
     bookingsCount: sum((r) => r.BookingsCount),
+    guestsServed: sum((r) => r.GuestServed),
     bySource: [
       { category: "B2B", nights: sum((r) => r.B2BNights), revenue: sum((r) => r.B2BRevenue) },
       { category: "B2C", nights: sum((r) => r.B2CNights), revenue: sum((r) => r.B2CRevenue) },
       { category: "OTA", nights: sum((r) => r.OTANights), revenue: sum((r) => r.OTARevenue) },
     ],
   };
+}
+
+export interface LpRoomTypeStat {
+  roomType: string;
+  nights: number;
+  revenue: number;
+}
+
+/**
+ * Room-type breakdown for Booking Details' ADR/Nights-share-by-Room-Format
+ * charts. `sales_booking_lp_monthly_roomtype`'s own `Nights` column does NOT
+ * reconcile with `sales_booking_lp_monthly.SoldRoomNights` — confirmed
+ * directly against BigQuery: off by 19%-76% in every one of LP's 24 months,
+ * with no consistent ratio (ruled out a guest-nights-vs-room-nights
+ * explanation). `TotalRevenue` and `BookingsCount`, by contrast, reconcile
+ * exactly with the monthly table in every month. Rather than surface the
+ * unreconciled Nights figure (which could misrepresent occupancy/ADR), nights
+ * are allocated to each room type by its share of that month's room-type
+ * revenue, anchored to the already-validated `SoldRoomNights` total. This is
+ * mathematically exact for LP's actual data today (a single room type, 100%
+ * revenue share, every month) and a defensible revenue-weighted estimate
+ * should a future backfill ever add a second room type.
+ */
+export async function getLpRoomTypeStats(fys: string[], months: number[]): Promise<LpRoomTypeStat[]> {
+  const { clause, params } = whereForScope(fys, months);
+  const [roomTypeRows, monthlyRows] = await Promise.all([
+    runQuery<{ FinancialYear: string; MonthNumber: number; RoomType: string; TotalRevenue: number | null }>(`
+      SELECT FinancialYear, MonthNumber, RoomType, TotalRevenue
+      FROM ${table("sales_booking_lp_monthly_roomtype")}
+      WHERE ${clause}
+    `, params),
+    getLpMonthlyRows(fys, months),
+  ]);
+
+  const soldByMonth = new Map<string, number>();
+  for (const r of monthlyRows) soldByMonth.set(`${r.FinancialYear}|${r.MonthNumber}`, r.SoldRoomNights ?? 0);
+
+  const revenueByMonth = new Map<string, number>();
+  for (const r of roomTypeRows) {
+    const key = `${r.FinancialYear}|${r.MonthNumber}`;
+    revenueByMonth.set(key, (revenueByMonth.get(key) ?? 0) + (r.TotalRevenue ?? 0));
+  }
+
+  const byType = new Map<string, { nights: number; revenue: number }>();
+  for (const r of roomTypeRows) {
+    const key = `${r.FinancialYear}|${r.MonthNumber}`;
+    const monthRevenue = revenueByMonth.get(key) ?? 0;
+    const monthSold = soldByMonth.get(key) ?? 0;
+    const share = monthRevenue > 0 ? (r.TotalRevenue ?? 0) / monthRevenue : 0;
+    const acc = byType.get(r.RoomType) ?? { nights: 0, revenue: 0 };
+    acc.nights += monthSold * share;
+    acc.revenue += r.TotalRevenue ?? 0;
+    byType.set(r.RoomType, acc);
+  }
+
+  return [...byType.entries()].map(([roomType, v]) => ({ roomType, nights: Math.round(v.nights), revenue: v.revenue }));
+}
+
+export interface LpRoomTypeByFy {
+  roomType: string;
+  fy: string;
+  revenue: number;
+}
+
+/** Revenue by room type, by FY — `TotalRevenue` reconciles exactly with `sales_booking_lp_monthly.RoomRevenue` when summed across room types (verified), so this is a direct sum, no allocation needed. */
+export async function getLpRoomTypeByFy(fys: string[], months: number[]): Promise<LpRoomTypeByFy[]> {
+  const { clause, params } = whereForScope(fys, months);
+  const rows = await runQuery<{ FinancialYear: string; RoomType: string; TotalRevenue: number | null }>(`
+    SELECT FinancialYear, RoomType, SUM(TotalRevenue) AS TotalRevenue
+    FROM ${table("sales_booking_lp_monthly_roomtype")}
+    WHERE ${clause}
+    GROUP BY FinancialYear, RoomType
+  `, params);
+  return rows.map((r) => ({ roomType: r.RoomType, fy: r.FinancialYear, revenue: r.TotalRevenue ?? 0 }));
 }
 
 export interface LpMonthlyPoint {
