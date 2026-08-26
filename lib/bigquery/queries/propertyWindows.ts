@@ -33,21 +33,37 @@ interface WindowRow {
  * sales_booking_cancelled. User-confirmed approach (2026-08-19) for Available Room
  * Nights scoping (§2.1/§3.3) — real data contradicted the documented "mid-2026"
  * GB go-live date, so all properties use their true first/last StayDate instead
- * of a hardcoded date. Properties with zero rows (currently BH4, LP — known
+ * of a hardcoded date. Properties with zero rows (currently BH4 — known
  * pipeline gap) resolve to null bounds, i.e. zero Available Room Nights.
+ *
+ * LP is a special case (LP Integration PRD Addendum, 2026-08-26): it has zero
+ * rows in sales_booking/sales_booking_cancelled (retired, no PMS feed), so its
+ * window comes from sales_booking_lp_monthly instead — MIN(MonthStartDate) to
+ * the end of its last covered month. This is the ONLY place LP's window needs
+ * special handling; once set here, the existing clamp/day-count logic below
+ * (and every caller of getAvailableRoomNightsByProperty) handles LP the same
+ * as every other property, using its real roomCount (16, propertyReference.ts).
  */
 export async function getPropertyActiveWindows(): Promise<Map<string, PropertyWindow>> {
   if (cache && Date.now() - cacheAt < CACHE_TTL_MS) return cache;
 
-  const rows = await runQuery<WindowRow>(`
-    SELECT Property, MIN(StayDate) AS min_stay, MAX(StayDate) AS max_stay
-    FROM (
-      SELECT Property, StayDate FROM ${table("sales_booking")}
-      UNION ALL
-      SELECT Property, StayDate FROM ${table("sales_booking_cancelled")}
-    )
-    GROUP BY Property
-  `);
+  const [rows, lpRows] = await Promise.all([
+    runQuery<WindowRow>(`
+      SELECT Property, MIN(StayDate) AS min_stay, MAX(StayDate) AS max_stay
+      FROM (
+        SELECT Property, StayDate FROM ${table("sales_booking")}
+        UNION ALL
+        SELECT Property, StayDate FROM ${table("sales_booking_cancelled")}
+      )
+      GROUP BY Property
+    `),
+    runQuery<{ min_stay: string | null; max_stay: string | null }>(`
+      SELECT
+        CAST(MIN(MonthStartDate) AS STRING) AS min_stay,
+        CAST(LAST_DAY(MAX(MonthStartDate)) AS STRING) AS max_stay
+      FROM ${table("sales_booking_lp_monthly")}
+    `),
+  ]);
 
   const map = new Map<string, PropertyWindow>();
   for (const code of ALL_PROPERTY_CODES) {
@@ -55,6 +71,10 @@ export async function getPropertyActiveWindows(): Promise<Map<string, PropertyWi
   }
   for (const r of rows) {
     map.set(r.Property, { property: r.Property, minStay: r.min_stay, maxStay: r.max_stay });
+  }
+  const lp = lpRows[0];
+  if (lp && lp.min_stay && lp.max_stay) {
+    map.set("LP", { property: "LP", minStay: lp.min_stay, maxStay: lp.max_stay });
   }
 
   cache = map;

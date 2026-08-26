@@ -16,6 +16,14 @@ All table references below are short for `skyla-analytics.Skyla_Sales_Automation
 > **`Skyla_Dashboard_KPI_Logic_Reference.md`, §0 Revision History** (full
 > before/after + rationale) and its per-tab sections (current truth). Inline
 > pointers are added at each affected line below.
+>
+> **LP re-integration (2026-08-26)**: §3.3 and §7 item 5 below describe LP as
+> "permanently removed" — that has changed. See
+> **`Skyla_Sales_Dashboard_PRD_LP_Addendum.md`** for the full spec: LP is
+> re-activated using two new, separately-backfilled monthly-grain BigQuery
+> tables (`sales_booking_lp_monthly` / `sales_booking_lp_monthly_roomtype`),
+> not `sales_booking` (which still has zero LP rows). Current formulas are in
+> `Skyla_Dashboard_KPI_Logic_Reference.md` §1.5/§10/§11.
 
 ---
 
@@ -47,7 +55,7 @@ Full column reference already exists in `sales_booking_column_reference.md` (pro
 - `DailyOtherRevenueExclusiveTax`/`DailyOtherRevenueInclusiveTax` are **always** an even split — never date-exact. Confirmed contents (7-week sample, not full history — full-history confirmation was explicitly skipped per product decision): F&B service charges + GST only. Treat "Extras Revenue" as whatever is in these columns; do not assume other charge types (late checkout etc.) are captured.
 - `NoOfNights` (raw API field) can be 0 for day-use bookings — don't use it for "nights sold." Count `StayDate` rows per booking instead.
 - `Property` is script-computed and reliable. `Country` is guest-entered and may be blank.
-- **Active property-period nuance:** GB (Gachibowli) only started producing data once its API key was added (mid-2026); LP (Lotus Pond) stopped syncing once removed from `HOTELS` (historical LP rows remain, but no new ones). Any "Available Room Nights" calculation (§3.3) must only count a property's room-nights over its actual active window, or Occupancy % will be distorted for GB (understated, if you count days before it existed) and LP (overstated, if you count days after it went inactive).
+- **Active property-period nuance:** GB (Gachibowli) only started producing data once its API key was added (mid-2026); LP (Lotus Pond) stopped syncing once removed from `HOTELS` (historical LP rows remain, but no new ones). Any "Available Room Nights" calculation (§3.3) must only count a property's room-nights over its actual active window, or Occupancy % will be distorted for GB (understated, if you count days before it existed) and LP (overstated, if you count days after it went inactive). **Update 2026-08-26**: LP is re-activated per `Skyla_Sales_Dashboard_PRD_LP_Addendum.md` — it still has zero `sales_booking` rows, but its real historical revenue/nights now come from a separate monthly-grain table (`sales_booking_lp_monthly`), merged in additively rather than queried from `sales_booking`. LP's active window for Available Room Nights is now sourced from that table's own `MIN/MAX(MonthStartDate)`, not from `sales_booking`.
 - Known accepted risk (not being fixed for v1, per product decision): the recurring refresh is scoped by `ReservationDate` (booking creation date) 1 month back, daily 3× (8am/1pm/4pm). A booking created 3+ months ago for a future stay, cancelled today, will not be caught by refresh. Cancellation-based KPIs may lag for these edge cases.
 
 ### 2.2 `b2b_bills`
@@ -134,6 +142,7 @@ Booking.com:  KDP 18%, HTC 18%, GB 15%, JHS 16%, BH4 → intentionally blank (0%
 Generic "OTA" label, "Travex" → intentionally blank (0%) for now
 LP → removed entirely, not part of this table (property permanently removed, §3.3)
 ```
+**Update 2026-08-26**: LP is re-activated (see §3.3 note below) but still has no per-OTA-site breakdown of its own — LP's OTA revenue only participates in the *aggregate* B2B/B2C/OTA split (§6.4/§6.1), never in this per-OTA-name commission table, since `sales_booking_lp_monthly` has no OTA-name column to apply a rate to.
 
 **Confirmed decision:** BH4's Booking.com rate, and the generic "OTA"/"Travex" rows, are intentionally left blank (treated as 0%) for now rather than blocking the build — net-OTA-revenue KPIs (§6.7) will understate commission for these until real rates are supplied. Build the table as an easily-editable config (not hardcoded deep in a query) so filling these in later doesn't require touching query logic.
 
@@ -145,7 +154,7 @@ LP → removed entirely, not part of this table (property permanently removed, �
 | HTC | Skyla | 34 | Active |
 | JHS | Skyla | 33 | Active |
 | BH4 | Aptly | 18 | Active |
-| LP | Aptly | 16 | **Permanently removed** — historical `sales_booking` rows remain and should still count in KPIs for the periods LP was active, but LP must not appear in current/future property filters or in any "active properties" list |
+| LP | Aptly | 16 | ~~Permanently removed — historical `sales_booking` rows remain and should still count in KPIs for the periods LP was active, but LP must not appear in current/future property filters or in any "active properties" list~~ → **Re-activated 2026-08-26** per `Skyla_Sales_Dashboard_PRD_LP_Addendum.md`. LP is back in `ACTIVE_PROPERTY_CODES` and in every property filter. It still has zero `sales_booking` rows (no PMS feed, retired hotel) — its real Apr2024–Mar2026 revenue/nights come from a separately-backfilled monthly table instead. See `Skyla_Dashboard_KPI_Logic_Reference.md` §1.5/§11 for exactly which KPIs it does/doesn't participate in. |
 | GB | Hyber | 21 | Active (added mid-2026 — see §2.1 active-period nuance) |
 
 Room count × days-in-period = Available Room Nights, scoped to each property's actual active window (§2.1).
@@ -302,7 +311,8 @@ Formulas are written as BigQuery-flavored expressions. All are additionally slic
 2. `DailyOtherRevenue*` / Extras Revenue confirmed only for F&B + GST in a 7-week sample; full-history confirmation was explicitly skipped by product decision. Don't imply the number is a complete "all extras" figure.
 3. Refresh window gap (ReservationDate-scoped, not ArrivalDate-scoped) is an accepted risk, not being fixed in v1 — cancellations of old bookings for future stays may lag.
 4. Expats and Repeat Booking definitions are inferred (§3.6), not explicitly confirmed by the business.
-5. GB and LP need active-period-scoped Available Room Nights (§2.1, §3.3) or Occupancy %/RevPAR will be wrong for those properties.
+5. ~~GB and LP need active-period-scoped Available Room Nights (§2.1, §3.3) or Occupancy %/RevPAR will be wrong for those properties.~~ → GB: unchanged, still needs its empirical active window. LP: **resolved 2026-08-26** — LP's active window now comes from `sales_booking_lp_monthly`'s own date range instead of `sales_booking` (which has none for LP). See the addendum and KPI Logic Reference §1.5.
+7. **(new, 2026-08-26)** LP participates in Revenue Details, Trends, Brand, and the aggregate B2B/B2C/OTA split (all merged in from `sales_booking_lp_monthly`), but deliberately does **not** participate in: Booking Details' nightly-only KPIs, the per-OTA-site breakdown, Targets vs Achieved, or the per-property Revenue Targets table (§6.1) — no fabricated target line for a retired property. Leads/B2B Contracts/Reviews already had real, independent LP rows before this backfill and are unaffected by it either way. Full rules: `Skyla_Sales_Dashboard_PRD_LP_Addendum.md`.
 6. `lead_tracker` lead-vs-row-count distinction (§2.4) — default to row count per legacy formula; flag if the business wants deduped lead counts instead.
 
 ## 8. Explicitly Out of Scope

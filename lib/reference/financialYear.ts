@@ -86,6 +86,11 @@ export function calendarMonthFromFiscal(fiscalMonth: number): number {
   return fiscalMonth <= 9 ? fiscalMonth + 3 : fiscalMonth - 9;
 }
 
+/** Calendar month (1-12) -> fiscal month number (1-12, Apr=1...Mar=12) — the inverse of calendarMonthFromFiscal. */
+export function fiscalMonthNumber(calendarMonth: number): number {
+  return calendarMonth >= 4 ? calendarMonth - 3 : calendarMonth + 9;
+}
+
 /** True once a fiscal month's start date is still ahead of today — hasn't happened yet, nothing to plot as "actual". */
 export function isFutureFiscalMonth(fy: string, calendarMonth: number, today: Date = new Date()): boolean {
   return fyMonthBounds(fy, calendarMonth).start > today.toISOString().slice(0, 10);

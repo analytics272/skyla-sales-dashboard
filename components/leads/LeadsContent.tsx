@@ -82,7 +82,7 @@ export default function LeadsContent({
           />
           <StatTile label="Revenue" value={formatIndianCurrency(summary.revenue)} />
           <StatTile
-            label="B2C Leads"
+            label="New Leads"
             value={summary.b2cLeads.toLocaleString("en-IN")}
             sub={`${summary.b2cLeadsClosed.toLocaleString("en-IN")} closed → ${b2cAchievedPct}% achieved`}
           />

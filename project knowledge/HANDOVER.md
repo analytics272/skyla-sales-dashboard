@@ -566,10 +566,26 @@ Further direct testing after §D.12-13 shipped turned up:
   per direct feedback that the diagonal reading was harder to scan than
   straight-up vertical text.
 
+## D.17 Chart x-axis labels — vertical reverted to horizontal, except Lead Tracker's "By Format" charts
+
+Direct follow-up to §D.15's "fully vertical everywhere" change: the user came
+back with a screenshot showing the vertical treatment made most charts harder
+to scan, and asked for horizontal labels everywhere **except** one specific
+chart, "because there isn't enough space for the employee names." Fixed via a
+`verticalLabels` boolean prop on `SingleMetricBarChart` (default `false`,
+i.e. horizontal) — applied `true` only to Lead Tracker's three "By Format"
+charts (Leads/Revenue/ADR By Format), the same concrete match used in §D.15
+(flagged again: "By Owner," the chart that actually shows employee names, is
+a table, not a bar chart — no chart currently plots employee names as x-axis
+categories). Every other `SingleMetricBarChart` instance across the dashboard
+is back to horizontal labels.
+
 ## D.16 Deliverables produced this part
 
 - All corrections above, live in production.
 - New "Revenue targets by property" feature (§D.12), fixed further in §D.15.
+- Chart x-axis labels reverted to horizontal dashboard-wide, vertical kept
+  only on Lead Tracker's three "By Format" charts (§D.17).
 - `Skyla_Dashboard_KPI_Logic_Reference.md` — added §0 Revision History and
   §6.1 (property targets), and updated every affected tab section in place
   to reflect current formulas.
@@ -582,10 +598,120 @@ Further direct testing after §D.12-13 shipped turned up:
   left unedited as the historical record of what the external script does).
 - This updated `HANDOVER.md`.
 
-## Open items, current (supersedes the Part C list above)
+## Open items, as of end of Part D (superseded by Part E below)
 
 1. **Generic "OTA" source label commission rate** — still 0%, never supplied.
 2. **Expats / Repeat Booking definitions** — still PRD-documented assumptions, never revisited with the business.
-3. **BH4/LP booking-table pipeline gap** — a pipeline issue, not a dashboard one. Directly visible now in the new per-property targets table too (BH4 always shows 0/null achieved).
+3. **BH4/LP booking-table pipeline gap** — a pipeline issue, not a dashboard one. Directly visible now in the new per-property targets table too (BH4 always shows 0/null achieved). **LP side resolved in Part E** — BH4 remains open.
 4. **Additional Occupancy Bookings/Revenue** — still no supporting data column found.
 5. **Property targets are FY 26-27 only** — if the business ever wants FY 27-28 (or beyond) per-property targets shown the same way, the reference file (`lib/reference/propertyTargets.ts`) will need a new entry sourced from an updated planning workbook — there's no pipeline that keeps this current automatically, by design.
+
+---
+
+# PART E — LP (Lotus Pond) Re-integration (this session)
+
+## E.1 Session goal
+
+The user supplied `Skyla_Sales_Dashboard_PRD_LP_Addendum.md`, a full addendum
+spec re-activating LP (Lotus Pond) on the dashboard. LP had been treated as
+permanently removed since Part A (no PMS feed, hotel code dropped from the
+sync script) — every prior part of this doc, and the KPI Logic Reference,
+documented it that way. The business has since backfilled and validated LP's
+full historical trading data into two new BigQuery tables at monthly grain,
+and asked for it wired back into the dashboard following a specific set of
+participation rules (which tabs LP should and shouldn't appear in). Full
+spec lives in the addendum file; this Part is the implementation log.
+
+## E.2 Why a monthly-grain merge, not a UNION
+
+LP will never produce a `sales_booking` row again — it's permanently
+retired, and the two new tables (`sales_booking_lp_monthly`,
+`sales_booking_lp_monthly_roomtype`) are monthly aggregates, not per-night
+rows like every other property's data. A literal `UNION ALL` into
+`sales_booking`-shaped queries would either require fabricating fake nightly
+rows (misrepresenting LP's real per-night pattern) or would only work for
+month-grain aggregations and silently break anything finer. Instead, one
+shared query module (`lib/bigquery/queries/lpMonthly.ts`) exposes LP's
+monthly totals in the shapes each consumer already needs, and each consumer
+(`overview.ts`, `trends.ts`, `brandCategory.ts`) fetches its normal
+`sales_booking` query and LP's helper **in parallel**, then adds them
+together — by simple addition for single totals, by `Map`-keyed merge
+(`fy|month` or `fy|category`) for multi-row series.
+
+## E.3 The one foundational fix that made everything else easy
+
+`getPropertyActiveWindows()` (`lib/bigquery/queries/propertyWindows.ts`) is
+the function every Available Room Nights / Occupancy% / RevPAR calculation
+on the dashboard is built on top of. It now also queries
+`sales_booking_lp_monthly` for LP's own `MIN`/`LAST_DAY(MAX(MonthStartDate))`
+and merges it into the same window map used for every other property. Because
+every downstream consumer already calls this one function rather than
+computing windows itself, LP's availability became correct dashboard-wide
+from this single change — no per-tab changes needed on the availability side,
+only on the sold-nights/revenue side.
+
+## E.4 Where LP does and doesn't participate
+
+Per the addendum, confirmed in code:
+- **Participates** (merged in when LP is in the Property selection): Revenue
+  Details (Room Revenue, Sold/Available Nights, Revenue by Source, ADR by
+  Property, YoY), Trends (all monthly charts, Business Category ADR), Brand
+  (Occupancy by Brand — rolls into Aptly with BH4 — and Revenue by Category
+  by FY), and the aggregate B2B/B2C/OTA split wherever it's shown.
+- **Does not participate**: Booking Details (nightly-only logic doesn't fit
+  LP's monthly grain — already 0/blank for free), OTA Breakdown (no
+  per-OTA-site column in LP's data), Targets vs Achieved (no target was ever
+  set for a retired property, so no fabricated target line), and the §6.1
+  per-property Revenue Targets table (same reason).
+- **Unaffected either way**: Leads, B2B Contracts, Reviews — these three
+  already had real, independent LP rows in their own source tables before
+  this backfill (confirmed via BigQuery: 359 lead_tracker rows, 548 b2b_bills
+  rows, 498+8 rating_sheet/ota rows), untouched by this change.
+
+Full per-tab detail: `Skyla_Dashboard_KPI_Logic_Reference.md` §11 (new).
+
+## E.5 Verification
+
+Ran a throwaway script (`scripts/_verify_lp_integration.ts`, deleted after
+use — matches this project's established verification pattern) against live
+BigQuery: confirmed `getAvailableRoomNightsByProperty(["LP"], FY24-25)` = 5,840
+(16 rooms × 365 days, correct); confirmed the exact delta between
+`getOverviewKpis` run with vs without LP in the Property list (₹1.53 Cr /
+3,845 nights / 5,840 available nights for FY 25-26) matches LP's own row in
+`getAdrByProperty` to the rupee — proving the merge is purely additive with
+no double-counting; confirmed Trends, Business Category ADR, Brand occupancy
+rollup, and category-by-FY all reflect LP's contribution once selected;
+confirmed YoY still includes LP correctly for both compared years. One
+pre-existing, unrelated fact surfaced during this check: **BH4 has zero rows
+in `sales_booking` at all**, across every FY — this is the same known
+pipeline gap from Part C/D, not something this session's changes touched or
+caused.
+
+## E.6 Deliverables produced this part
+
+- `lib/reference/propertyReference.ts` — LP's `status` flipped from
+  `"removed"` to `"active"`.
+- `lib/bigquery/queries/propertyWindows.ts` — LP's active window now sourced
+  from `sales_booking_lp_monthly`.
+- `lib/reference/financialYear.ts` — `fiscalMonthNumber()` promoted to a
+  shared export (was private inside `targets.ts`).
+- `lib/bigquery/queries/lpMonthly.ts` — new shared LP query module.
+- `lib/bigquery/queries/overview.ts`, `trends.ts`, `brandCategory.ts` — LP
+  merged in additively wherever the addendum calls for it.
+- `Skyla_Dashboard_KPI_Logic_Reference.md` — new §11, updated §0/§1.5/§2–§6/
+  §8/§10 to reflect LP's re-activation.
+- `Skyla_Sales_Dashboard_PRD.md` — `~~strikethrough~~ → correction` notes at
+  every place the original spec called LP permanently removed, plus a pointer
+  to the addendum near the top.
+- This updated `HANDOVER.md`.
+- `npx tsc --noEmit` and `npx eslint . --quiet` both clean after every file
+  change in this Part.
+
+## Open items, current (supersedes the Part D list above)
+
+1. **Generic "OTA" source label commission rate** — still 0%, never supplied.
+2. **Expats / Repeat Booking definitions** — still PRD-documented assumptions, never revisited with the business.
+3. **BH4 booking-table pipeline gap** — still open, a pipeline issue not a dashboard one. LP had the identical symptom but is now resolved via the backfill in this Part; BH4 still needs the eZee sync to actually add it.
+4. **Additional Occupancy Bookings/Revenue** — still no supporting data column found.
+5. **Property targets are FY 26-27 only** — unchanged from Part D; still no LP row in that table by design (§E.4).
+6. **`sales_booking_lp_monthly_roomtype` is not wired into any query yet** — the addendum treats LP's room-type detail as its own optional view, not a mandatory merge; nothing currently asks for it. Revisit if the business wants LP's room-type mix surfaced somewhere.

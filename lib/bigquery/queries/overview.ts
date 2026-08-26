@@ -2,6 +2,7 @@
 import { runQuery, table } from "../client";
 import { KpiFilter, resolveFilter, buildScopeClause } from "./filters";
 import { getAvailableRoomNights, rangesForFysAndMonths } from "./propertyWindows";
+import { getLpOverviewTotals, getLpAdr, LP_PROPERTY } from "./lpMonthly";
 import { bookingCategorySqlExpr, BookingCategory } from "@/lib/reference/bookingSourceMap";
 import { fyBounds, currentFYLabel, parseFyLabel, fyLabel } from "@/lib/reference/financialYear";
 import { safeDivide } from "@/lib/format/currency";
@@ -61,8 +62,12 @@ interface YoyRow {
 export async function getOverviewKpis(filter: KpiFilter): Promise<OverviewKpis> {
   const resolved = resolveFilter(filter);
   const { clause: where, params } = buildScopeClause("Property", "CAST(StayDate AS DATE)", resolved, "");
+  // LP (LP Integration PRD Addendum, 2026-08-26) has zero sales_booking rows —
+  // its real numbers come from sales_booking_lp_monthly and are merged in
+  // here additively when it's in the selected properties.
+  const includeLp = resolved.properties.includes(LP_PROPERTY);
 
-  const [aggRows, sourceRows, availableRoomNights] = await Promise.all([
+  const [aggRows, sourceRows, availableRoomNights, lpTotals] = await Promise.all([
     runQuery<AggRow>(`
       SELECT
         SUM(DailyRevenue) AS room_revenue,
@@ -82,11 +87,30 @@ export async function getOverviewKpis(filter: KpiFilter): Promise<OverviewKpis> 
       ORDER BY revenue DESC
     `, params),
     getAvailableRoomNights(resolved.properties, rangesForFysAndMonths(resolved.fys, resolved.months)),
+    includeLp ? getLpOverviewTotals(resolved.fys, resolved.months) : null,
   ]);
 
   const agg = aggRows[0] ?? { room_revenue: 0, extras_revenue: 0, sold_room_nights: 0 };
-  const roomRevenue = agg.room_revenue ?? 0;
-  const soldRoomNights = agg.sold_room_nights ?? 0;
+  let roomRevenue = agg.room_revenue ?? 0;
+  let extrasRevenue = agg.extras_revenue ?? 0;
+  let soldRoomNights = agg.sold_room_nights ?? 0;
+
+  const bySourceMap = new Map<BookingCategory, { nights: number; revenue: number }>();
+  for (const r of sourceRows) bySourceMap.set(r.category, { nights: r.nights, revenue: r.revenue ?? 0 });
+
+  if (lpTotals) {
+    roomRevenue += lpTotals.roomRevenue;
+    extrasRevenue += lpTotals.extrasRevenue;
+    soldRoomNights += lpTotals.soldRoomNights;
+    for (const s of lpTotals.bySource) {
+      const existing = bySourceMap.get(s.category) ?? { nights: 0, revenue: 0 };
+      bySourceMap.set(s.category, { nights: existing.nights + s.nights, revenue: existing.revenue + s.revenue });
+    }
+  }
+
+  const bySource = [...bySourceMap.entries()]
+    .map(([category, v]) => ({ category, ...v }))
+    .sort((a, b) => b.revenue - a.revenue);
 
   // With multiple FYs selected, YoY compares the latest selected FY against the year before it.
   const latestSelectedFy = [...resolved.fys].sort().at(-1);
@@ -94,13 +118,13 @@ export async function getOverviewKpis(filter: KpiFilter): Promise<OverviewKpis> 
 
   return {
     roomRevenue,
-    extrasRevenue: agg.extras_revenue ?? 0,
+    extrasRevenue,
     soldRoomNights,
     availableRoomNights,
     adr: safeDivide(roomRevenue, soldRoomNights),
     occupancyPct: safeDivide(soldRoomNights, availableRoomNights),
     revPar: safeDivide(roomRevenue, availableRoomNights),
-    bySource: sourceRows.map((r) => ({ category: r.category, nights: r.nights, revenue: r.revenue ?? 0 })),
+    bySource,
     yoy,
   };
 }
@@ -123,7 +147,15 @@ export async function getAdrByProperty(filter: KpiFilter): Promise<PropertyAdr[]
     GROUP BY property
     ORDER BY revenue DESC
   `, params);
-  return rows.map((r) => ({ property: r.property, revenue: r.revenue ?? 0, nights: r.nights, adr: safeDivide(r.revenue ?? 0, r.nights) }));
+  const result = rows.map((r) => ({ property: r.property, revenue: r.revenue ?? 0, nights: r.nights, adr: safeDivide(r.revenue ?? 0, r.nights) }));
+
+  // LP has zero sales_booking rows — its own row comes from sales_booking_lp_monthly instead.
+  if (resolved.properties.includes(LP_PROPERTY)) {
+    const lp = await getLpAdr(resolved.fys, resolved.months);
+    if (lp.nights > 0 || lp.revenue > 0) result.push({ property: LP_PROPERTY, revenue: lp.revenue, nights: lp.nights, adr: lp.adr });
+  }
+
+  return result.sort((a, b) => b.revenue - a.revenue);
 }
 
 export interface OccupancyPace {
@@ -234,8 +266,9 @@ async function getYoyComparison(properties: string[], fy?: string): Promise<YoyC
   const current = fyBounds(currentFY);
   const prior = fyBounds(priorFY);
   const dateExpr = "CAST(StayDate AS DATE)";
+  const includeLp = properties.includes(LP_PROPERTY);
 
-  const [rows, currentAvailable, priorAvailable] = await Promise.all([
+  const [rows, currentAvailable, priorAvailable, lpCurrent, lpPrior] = await Promise.all([
     runQuery<YoyRow & { nights: number }>(`
       SELECT 'current' AS fy, SUM(DailyRevenue) AS revenue, COUNT(*) AS nights
       FROM ${table("sales_booking")}
@@ -253,12 +286,14 @@ async function getYoyComparison(properties: string[], fy?: string): Promise<YoyC
     }),
     getAvailableRoomNights(properties, [current]),
     getAvailableRoomNights(properties, [prior]),
+    includeLp ? getLpOverviewTotals([currentFY], []) : null,
+    includeLp ? getLpOverviewTotals([priorFY], []) : null,
   ]);
 
-  const currentRevenue = rows.find((r) => r.fy === "current")?.revenue ?? 0;
-  const priorRevenue = rows.find((r) => r.fy === "prior")?.revenue ?? 0;
-  const currentNights = rows.find((r) => r.fy === "current")?.nights ?? 0;
-  const priorNights = rows.find((r) => r.fy === "prior")?.nights ?? 0;
+  const currentRevenue = (rows.find((r) => r.fy === "current")?.revenue ?? 0) + (lpCurrent?.roomRevenue ?? 0);
+  const priorRevenue = (rows.find((r) => r.fy === "prior")?.revenue ?? 0) + (lpPrior?.roomRevenue ?? 0);
+  const currentNights = (rows.find((r) => r.fy === "current")?.nights ?? 0) + (lpCurrent?.soldRoomNights ?? 0);
+  const priorNights = (rows.find((r) => r.fy === "prior")?.nights ?? 0) + (lpPrior?.soldRoomNights ?? 0);
   const pctChange = safeDivide(currentRevenue - priorRevenue, priorRevenue);
 
   return {
