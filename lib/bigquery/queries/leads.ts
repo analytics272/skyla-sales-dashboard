@@ -253,9 +253,15 @@ export interface OwnerLeadStats {
   adr: number | null;
 }
 
-export async function getLeadsByOwner(filter: LeadsFilter): Promise<OwnerLeadStats[]> {
+export interface OwnerLeadStatsResult {
+  rows: OwnerLeadStats[];
+  /** Grand total row — computed from the true underlying summed counts/revenue, not by averaging each owner's own closedPct/ADR (which would misrepresent the combined figure across owners with very different lead volumes). */
+  total: OwnerLeadStats;
+}
+
+export async function getLeadsByOwner(filter: LeadsFilter): Promise<OwnerLeadStatsResult> {
   const { clause, params } = whereForFilter(filter);
-  const rows = await runQuery<{
+  const rawRows = await runQuery<{
     owner: string | null;
     revenue: number | null;
     total_leads: number;
@@ -282,7 +288,7 @@ export async function getLeadsByOwner(filter: LeadsFilter): Promise<OwnerLeadSta
     ORDER BY revenue DESC
   `, params);
 
-  return rows.map((r) => ({
+  const rows = rawRows.map((r) => ({
     owner: r.owner ?? "null",
     revenue: r.revenue ?? 0,
     totalLeads: r.total_leads,
@@ -294,4 +300,24 @@ export async function getLeadsByOwner(filter: LeadsFilter): Promise<OwnerLeadSta
     existingLeads: r.existing_leads,
     adr: safeDivide(r.revenue ?? 0, r.closed_nights ?? 0),
   }));
+
+  const sum = (f: (r: (typeof rawRows)[number]) => number | null) => rawRows.reduce((s, r) => s + (f(r) ?? 0), 0);
+  const totalRevenue = sum((r) => r.revenue);
+  const totalLeads = sum((r) => r.total_leads);
+  const totalClosedLeads = sum((r) => r.closed_leads);
+  const totalClosedNights = sum((r) => r.closed_nights);
+  const total: OwnerLeadStats = {
+    owner: "Grand total",
+    revenue: totalRevenue,
+    totalLeads,
+    closedLeads: totalClosedLeads,
+    closedPct: safeDivide(totalClosedLeads, totalLeads),
+    exotelLeads: sum((r) => r.exotel_leads),
+    exotelClosed: sum((r) => r.exotel_closed),
+    referenceLeads: sum((r) => r.reference_leads),
+    existingLeads: sum((r) => r.existing_leads),
+    adr: safeDivide(totalRevenue, totalClosedNights),
+  };
+
+  return { rows, total };
 }

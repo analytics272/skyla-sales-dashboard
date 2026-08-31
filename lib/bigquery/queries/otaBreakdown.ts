@@ -1,7 +1,7 @@
 // PRD §6.7 — OTA Breakdown. Commission/net-revenue uses sales_booking + §3.2 table.
 import { runQuery, table } from "../client";
 import { KpiFilter, resolveFilter, buildScopeClause } from "./filters";
-import { bookingCategorySqlExpr, canonicalSourceNameSqlExpr } from "@/lib/reference/bookingSourceMap";
+import { bookingCategorySqlExpr, otaBreakdownDisplayNameSqlExpr } from "@/lib/reference/bookingSourceMap";
 import { commissionRateSqlExpr } from "@/lib/reference/otaCommission";
 import { safeDivide } from "@/lib/format/currency";
 
@@ -29,7 +29,7 @@ export async function getOtaBreakdown(filter: KpiFilter): Promise<OtaBreakdownRo
 
   const rows = await runQuery<OtaRow>(`
     SELECT
-      ${canonicalSourceNameSqlExpr("Source")} AS ota_name,
+      ${otaBreakdownDisplayNameSqlExpr("Source")} AS ota_name,
       COUNT(*) AS nights,
       SUM(DailyRevenue) AS total_revenue,
       SUM(DailyRevenue * (1 - ${commissionRateSqlExpr("TRIM(Source)", "Property")} / 100)) AS net_revenue

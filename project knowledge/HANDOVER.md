@@ -819,3 +819,52 @@ shared login only has a bcrypt hash on file (`SHARED_PASSWORD_HASH` in
 `.env.local`), not a recoverable plaintext password, so the auth gate
 couldn't be passed from this session; verified via BigQuery + code review
 instead, consistent with this session's established fallback.
+
+---
+
+# PART F — Lead Tracker Grand Total & OTA GoMMT Grouping (this session)
+
+## F.1 Lead Tracker "By Owner" Grand Total row
+
+Requested directly, with a screenshot of the desired total-row layout.
+`getLeadsByOwner()` (`lib/bigquery/queries/leads.ts`) now returns
+`{rows, total}` instead of a bare array — `total` is computed from the true
+underlying summed counts/revenue across every owner (not by averaging each
+owner's own Closed %/ADR, which would misrepresent the combined figure —
+same principle as the §D.15 property-targets total fix). Rendered via the
+`Table` component's existing `footerRow` prop (already built for exactly this
+purpose, previously used only for the Targets §6.1 property table).
+`app/(dashboard)/leads/page.tsx` needed no changes — `byOwner` flows straight
+into `LeadsContent`. Verified against live BigQuery: the total row's
+`totalLeads`/`closedLeads`/`revenue` exactly equal the sum of the individual
+owner rows.
+
+## F.2 OTA Breakdown: EaseMyTrip/MakeMyTrip/go-mmt combined into "GoMMT"
+
+Requested directly: these three OTA names should show as one combined
+"GoMMT" row rather than three separate rows. Added
+`otaBreakdownDisplayNameSqlExpr()` in `lib/reference/bookingSourceMap.ts`, a
+thin wrapper around the existing `canonicalSourceNameSqlExpr()` (which only
+folds case variants of the *same* name, e.g. "Go-MMT"/"go-mmt") that also
+folds these three genuinely different names into one display bucket. Scoped
+to the OTA Breakdown tab only (`otaBreakdown.ts`'s `GROUP BY`) — doesn't touch
+the B2B/B2C/OTA category classification (all three were already OTA) or the
+per-row commission-rate lookup, which still keys off each row's own raw
+`Source` value before this grouping applies. Confirmed all three already
+carried the same 20% commission rate (`lib/reference/otaCommission.ts`), so
+the combined row's blended commission % is unchanged at exactly 20%.
+Verified against live BigQuery: exactly one "GoMMT" row appears in the
+breakdown, no stray EaseMyTrip/MakeMyTrip/go-mmt rows remain.
+
+## F.3 Deliverables
+
+- `lib/bigquery/queries/leads.ts` — `getLeadsByOwner()` return type changed
+  to `OwnerLeadStatsResult`.
+- `components/leads/LeadsContent.tsx` — renders the Grand Total footer row.
+- `lib/reference/bookingSourceMap.ts` — new `otaBreakdownDisplayNameSqlExpr()`.
+- `lib/bigquery/queries/otaBreakdown.ts` — uses the new grouping function.
+- `Skyla_Dashboard_KPI_Logic_Reference.md` — new revision-history entry, §7
+  and §8 updated.
+- This updated `HANDOVER.md`.
+- `npx tsc --noEmit` and `npx eslint . --quiet` both clean; verified against
+  live BigQuery (§F.1, §F.2).

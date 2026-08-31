@@ -242,3 +242,30 @@ export function bookingIsUnmappedSqlExpr(sourceCol: string): string {
   const exactKeysLower = Object.keys(BOOKING_SOURCE_MAP).map((k) => `'${sqlEscape(k.toLowerCase())}'`);
   return `LOWER(TRIM(COALESCE(${sourceCol}, ''))) NOT IN (${exactKeysLower.join(", ")})`;
 }
+
+/**
+ * OTA Breakdown tab display grouping (user direction, 2026-08-27): EaseMyTrip,
+ * MakeMyTrip, and go-mmt are shown as one combined "GoMMT" row, rather than
+ * three separate rows. This is a display/grouping decision for that one tab
+ * only — it doesn't change §3.1's B2B/B2C/OTA category (all three are already
+ * OTA) or §otaCommission.ts's per-row commission rate (each already carries
+ * the same 20% rate, so the row's blended commission % comes out unchanged
+ * whether shown as one row or three — commissionRateSqlExpr still keys off
+ * the raw, ungrouped Source value on each row before this grouping applies).
+ */
+const OTA_DISPLAY_GROUPS: Record<string, string> = {
+  easemytrip: "GoMMT",
+  makemytrip: "GoMMT",
+  "go-mmt": "GoMMT",
+};
+
+/** Wraps `canonicalSourceNameSqlExpr` with the OTA Breakdown-specific grouping above. Use this (not the bare canonical name) for OTA Breakdown's per-OTA GROUP BY. */
+export function otaBreakdownDisplayNameSqlExpr(sourceCol: string): string {
+  const groupWhens = Object.entries(OTA_DISPLAY_GROUPS)
+    .map(([key, group]) => `WHEN '${sqlEscape(key)}' THEN '${sqlEscape(group)}'`)
+    .join("\n    ");
+  return `CASE LOWER(TRIM(COALESCE(${sourceCol}, '')))
+    ${groupWhens}
+    ELSE (${canonicalSourceNameSqlExpr(sourceCol)})
+  END`;
+}

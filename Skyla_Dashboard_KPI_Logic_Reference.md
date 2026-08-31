@@ -182,6 +182,15 @@ relevant tab section below for the current formula.
   (Revenue/Nights/ADR by category, three bar charts). Uses the page's
   existing Property/FY/Month filters — no new filter plumbing. See §3.
 
+**2026-08-27:**
+- **Lead Tracker "By Owner" gained a Grand Total row.** `getLeadsByOwner()`
+  now returns `{rows, total}` — `total` is computed from summed underlying
+  counts/revenue, not by averaging each owner's Closed %/ADR. See §7.
+- **OTA Breakdown: EaseMyTrip, MakeMyTrip, and go-mmt combined into one
+  "GoMMT" row**, per user direction — a display-grouping change only (all
+  three were already OTA-category and already shared the same 20% commission
+  rate). See §8.
+
 ---
 
 ## 1. Shared reference logic
@@ -532,7 +541,7 @@ dropped.
 | Format-wise Leads & Revenue | Grouped by `Format` |
 | ADR by Format | `SUM(Total) ÷ SUM(No_of_nights)`, **closed leads only** |
 | Lost Leads Reasons | Non-`Closed` `Stage` values, with `"Not Intersted"` (a sheet typo) folded into `"Not Interested"` |
-| By Owner | Revenue, Total/Closed leads, Closed %, Exotel leads/closed, Reference, Existing leads, and ADR (`SUM(Total) ÷ SUM(No_of_nights)` on closed leads), grouped by `Owner`. **Filtered to real employee names only** (2026-08-25): `Owner` also has lead-*source* values leaking into it (`Business WA`, `Website`, `Walk in`/`walk in`) alongside the 5 real names (Anjali, Rajesh, Dikhita, Sajal, Bhanu) — `Owner` is meant to be employee-level, so those 3 are excluded (`LOWER(TRIM(Owner)) NOT IN ('business wa', 'website', 'walk in')`). Those channel names still correctly appear on **Leads by Source**, a different chart keyed off `Source` — this exclusion only applies to the Owner-grouped table. |
+| By Owner | Revenue, Total/Closed leads, Closed %, Exotel leads/closed, Reference, Existing leads, and ADR (`SUM(Total) ÷ SUM(No_of_nights)` on closed leads), grouped by `Owner`. **Filtered to real employee names only** (2026-08-25): `Owner` also has lead-*source* values leaking into it (`Business WA`, `Website`, `Walk in`/`walk in`) alongside the 5 real names (Anjali, Rajesh, Dikhita, Sajal, Bhanu) — `Owner` is meant to be employee-level, so those 3 are excluded (`LOWER(TRIM(Owner)) NOT IN ('business wa', 'website', 'walk in')`). Those channel names still correctly appear on **Leads by Source**, a different chart keyed off `Source` — this exclusion only applies to the Owner-grouped table. **Grand total row added** (2026-08-27): `getLeadsByOwner()` now returns `{rows, total}`, with `total` computed from the true underlying summed counts/revenue across every owner — not by averaging each owner's own Closed %/ADR, which would misrepresent the combined figure across owners with very different lead volumes (same principle as the Targets §6.1 property-total fix). Verified: the total row's `totalLeads`/`closedLeads`/`revenue` exactly equal the sum of the individual owner rows. |
 
 ## 8. OTA Breakdown tab
 
@@ -559,6 +568,18 @@ needed.
 OTA names are canonicalized before grouping (e.g. real data has both
 `"Go-MMT"` and `"go-mmt"` — these are folded into one row; the commission math
 was already correct either way, this only affects the row label).
+
+**EaseMyTrip, MakeMyTrip, and go-mmt combined into one "GoMMT" row (2026-08-27,
+user direction)** — a further display grouping on top of the case-variant
+folding above, via a new `otaBreakdownDisplayNameSqlExpr()`
+(`lib/reference/bookingSourceMap.ts`), used only by this tab's `GROUP BY`.
+Doesn't touch §1.3's B2B/B2C/OTA category (all three are already OTA) or the
+per-row commission rate lookup (`commissionRateSqlExpr` still keys off each
+row's own raw `Source` before this grouping applies) — and since all three
+already carried the same 20% rate (§1.4), the combined row's blended
+commission % comes out at exactly 20%, unchanged from what each showed
+separately. Verified against live BigQuery: exactly one "GoMMT" row appears,
+no stray EaseMyTrip/MakeMyTrip/go-mmt rows remain.
 
 ## 9. Reviews tab
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { LeadsSummary, LeadsMoMPoint, LeadsByGroup, FormatLeadsRevenue, AdrByFormat, LostLeadReason, OwnerLeadStats } from "@/lib/bigquery/queries/leads";
+import { LeadsSummary, LeadsMoMPoint, LeadsByGroup, FormatLeadsRevenue, AdrByFormat, LostLeadReason, OwnerLeadStats, OwnerLeadStatsResult } from "@/lib/bigquery/queries/leads";
 import StatTile from "@/components/ui/StatTile";
 import Card from "@/components/ui/Card";
 import Table, { TableColumn } from "@/components/ui/Table";
@@ -35,7 +35,7 @@ export default function LeadsContent({
   adrByFormat: AdrByFormat[];
   lostReasons: LostLeadReason[];
   bookingPace: number | null;
-  byOwner: OwnerLeadStats[];
+  byOwner: OwnerLeadStatsResult;
 }) {
 
   const existingTotal = bySource.find((s) => s.key === "Existing")?.count ?? 0;
@@ -147,8 +147,8 @@ export default function LeadsContent({
         <Table columns={lostColumns} rows={lostReasons} rowKey={(r) => r.stage} />
       </Card>
 
-      <Card title={`By Owner (${byOwner.length})`}>
-        <Table columns={ownerColumns} rows={byOwner} rowKey={(r) => r.owner} />
+      <Card title={`By Owner (${byOwner.rows.length})`}>
+        <Table columns={ownerColumns} rows={byOwner.rows} rowKey={(r) => r.owner} footerRow={byOwner.total} />
       </Card>
     </div>
   );
