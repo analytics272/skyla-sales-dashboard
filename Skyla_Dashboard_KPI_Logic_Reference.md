@@ -190,6 +190,12 @@ relevant tab section below for the current formula.
   "GoMMT" row**, per user direction — a display-grouping change only (all
   three were already OTA-category and already shared the same 20% commission
   rate). See §8.
+- **Booking Details gained an "Available Room Nights" stat tile.** No new
+  query — `getRoomNightsGap()` already computed this value internally via the
+  existing `getAvailableRoomNights()` (§1.5) to derive Unsold/Remaining Room
+  Nights; it now also returns that figure so it can sit alongside them.
+  Verified identical to a direct `getAvailableRoomNights()` call for the same
+  scope. See §3.
 
 ---
 
@@ -329,6 +335,7 @@ column each of those needs (guest identity, cancellation records, or
 | Repeat Bookings | Bookings sharing a guest key (`Mobile`, falling back to `Email`, then `GuestName`) with >1 distinct booking; share % = repeat ÷ total. **LP excluded** — neither LP table has any guest-identity column, at monthly or room-type grain; not computable without fabricating guest identities. |
 | Cancellations % | Cancelled bookings ÷ (active + cancelled bookings), both counted the same way as Total Bookings. **LP excluded** — the backfill only covers realized (checked-out) stays; no cancellation records exist in either LP table. |
 | Avg Cancellation Lead Time | `AVG(ArrivalDate − CancelDate)` in days, over `sales_booking_cancelled`. **LP excluded** — depends on `sales_booking_cancelled`, which has (and will always have) zero LP rows. |
+| Available Room Nights | Same value already computed by `getAvailableRoomNights()` inside `getRoomNightsGap()` (§1.5) — **added as its own stat tile 2026-08-27**, no new query and no change to the calculation; `RoomNightsGap` just also returns the `available` figure it already had. Shown next to Unsold and Remaining Room Nights so all three read together. |
 | Unsold Room Nights | Available − Sold, for the selected scope. **LP's real sold nights now subtracted when selected** (2026-08-26 fix) — Available already included LP via §1.5's window fix, but Sold didn't, which was silently overstating LP as 100% unsold. Verified: FY 25-26 delta between with/without LP is exactly 1,995 nights = LP's own Available (5,840) − Sold (3,845). |
 | Remaining Room Nights | Available − Sold, narrowed to **[today, scope end]** — 0 if the whole scope is already in the past. **LP naturally contributes 0** — its entire data window (Apr 2024–Mar 2026) is already in the past relative to any realistic "today," so the forward-looking slice never overlaps it; no LP-specific code needed here. |
 | Expat Bookings / Revenue / Nights / ALOS | `Country IS NOT NULL AND Country != 'India'`, same booking/night/ALOS logic as above. **LP excluded** — neither LP table has a `Country` column at any grain. |

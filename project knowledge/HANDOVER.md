@@ -856,15 +856,33 @@ the combined row's blended commission % is unchanged at exactly 20%.
 Verified against live BigQuery: exactly one "GoMMT" row appears in the
 breakdown, no stray EaseMyTrip/MakeMyTrip/go-mmt rows remain.
 
-## F.3 Deliverables
+## F.3 Booking Details: "Available Room Nights" stat tile
+
+Requested directly, with the explicit constraint of reusing
+`getAvailableRoomNights()` as-is — no new query, no change to the
+calculation. `getRoomNightsGap()` (`guestDetail.ts`) already called it
+internally to derive Unsold/Remaining Room Nights but never returned the
+value itself; added `availableRoomNights` to the `RoomNightsGap` interface
+and its return statement (the existing `available` variable, unchanged) and
+rendered a new `StatTile` next to Unsold/Remaining on Booking Details. No
+page-level changes needed — `roomNightsGap` already flows through as one
+object. Verified against live BigQuery: the returned value is bit-for-bit
+identical to a direct, independent call to `getAvailableRoomNights()` for
+the same scope.
+
+## F.4 Deliverables
 
 - `lib/bigquery/queries/leads.ts` — `getLeadsByOwner()` return type changed
   to `OwnerLeadStatsResult`.
 - `components/leads/LeadsContent.tsx` — renders the Grand Total footer row.
 - `lib/reference/bookingSourceMap.ts` — new `otaBreakdownDisplayNameSqlExpr()`.
 - `lib/bigquery/queries/otaBreakdown.ts` — uses the new grouping function.
-- `Skyla_Dashboard_KPI_Logic_Reference.md` — new revision-history entry, §7
-  and §8 updated.
+- `lib/bigquery/queries/guestDetail.ts` — `RoomNightsGap` now also returns
+  `availableRoomNights`.
+- `components/booking/BookingContent.tsx` — new "Available Room Nights" stat
+  tile.
+- `Skyla_Dashboard_KPI_Logic_Reference.md` — revision-history entries, §3/§7/§8
+  updated.
 - This updated `HANDOVER.md`.
 - `npx tsc --noEmit` and `npx eslint . --quiet` both clean; verified against
-  live BigQuery (§F.1, §F.2).
+  live BigQuery (§F.1, §F.2, §F.3).

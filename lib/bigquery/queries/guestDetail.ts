@@ -76,6 +76,7 @@ export async function getBookingStats(filter: KpiFilter): Promise<BookingStats> 
 // formula beyond "available nights from today forward").
 
 export interface RoomNightsGap {
+  availableRoomNights: number;
   unsoldRoomNights: number;
   remainingRoomNights: number;
 }
@@ -116,7 +117,7 @@ export async function getRoomNightsGap(filter: KpiFilter): Promise<RoomNightsGap
     remainingRoomNights = Math.max(0, forwardAvailable - (forwardSoldRows[0]?.n ?? 0));
   }
 
-  return { unsoldRoomNights, remainingRoomNights };
+  return { availableRoomNights: available, unsoldRoomNights, remainingRoomNights };
 }
 
 // --- Night/Revenue Mix by Category (§3.1) ---

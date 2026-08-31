@@ -141,6 +141,7 @@ export default function BookingContent({
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <StatTile label="Available Room Nights" value={roomNightsGap.availableRoomNights.toLocaleString("en-IN")} />
         <StatTile label="Unsold Room Nights" value={roomNightsGap.unsoldRoomNights.toLocaleString("en-IN")} />
         <StatTile label="Remaining Room Nights" value={roomNightsGap.remainingRoomNights.toLocaleString("en-IN")} sub="from today forward" />
         <StatTile
