@@ -89,13 +89,20 @@ function monthLabelOf(iso: string): string {
   return `${MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}`;
 }
 
-// Scoped to the active period's current range only — §6.8 says "monthly
-// x-axis", not a multi-year comparison. (Reviews history predates the
-// booking system by a decade — an unscoped trend would produce a 15-series
-// chart spanning 2013-2027.)
-async function ratingTrend(tableName: string, dateExprAsDate: string, filter: ReviewsFilter): Promise<RatingTrendPoint[]> {
-  const period = resolvePeriodFromFilter(filter);
-  const { clause, params } = scopeClause(period.current, dateExprAsDate, filter.properties);
+// Each grain (current, and previous when compareYoY is on) is scoped to its
+// own single range only — §6.8 says "monthly x-axis", not a multi-FY
+// comparison. (Reviews history predates the booking system by a decade — an
+// unscoped, one-line-per-FY trend would've produced a 15-series chart
+// spanning 2013-2027; that's not what this is. Item #4, 2026-09-02 seventh
+// pass: exactly one opt-in previous-year line, same as every other trend
+// chart, not a multi-year one.)
+export interface RatingTrendSeries {
+  current: RatingTrendPoint[];
+  previous: RatingTrendPoint[];
+}
+
+async function ratingTrendForRange(tableName: string, dateExprAsDate: string, range: DateRange, properties: string[] | undefined): Promise<RatingTrendPoint[]> {
+  const { clause, params } = scopeClause(range, dateExprAsDate, properties);
   const rows = await runQuery<{ month_start: string; count: number }>(`
     SELECT CAST(DATE_TRUNC(${dateExprAsDate}, MONTH) AS STRING) AS month_start, COUNT(*) AS count
     FROM ${table(tableName)}
@@ -106,10 +113,19 @@ async function ratingTrend(tableName: string, dateExprAsDate: string, filter: Re
   return rows.map((r) => ({ monthStartDate: r.month_start, monthLabel: monthLabelOf(r.month_start), count: r.count }));
 }
 
-export async function getGoogleRatingTrend(filter: ReviewsFilter): Promise<RatingTrendPoint[]> {
+async function ratingTrend(tableName: string, dateExprAsDate: string, filter: ReviewsFilter): Promise<RatingTrendSeries> {
+  const period = resolvePeriodFromFilter(filter);
+  const [current, previous] = await Promise.all([
+    ratingTrendForRange(tableName, dateExprAsDate, period.current, filter.properties),
+    filter.compareYoY ? ratingTrendForRange(tableName, dateExprAsDate, period.previous, filter.properties) : Promise.resolve([]),
+  ]);
+  return { current, previous };
+}
+
+export async function getGoogleRatingTrend(filter: ReviewsFilter): Promise<RatingTrendSeries> {
   return ratingTrend("rating_sheet", "CAST(Date AS DATE)", filter);
 }
 
-export async function getOtaRatingTrend(filter: ReviewsFilter): Promise<RatingTrendPoint[]> {
+export async function getOtaRatingTrend(filter: ReviewsFilter): Promise<RatingTrendSeries> {
   return ratingTrend("ota", "CAST(DATE AS DATE)", filter);
 }

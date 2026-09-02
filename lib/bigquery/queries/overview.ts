@@ -30,6 +30,7 @@ export interface PeriodComparison {
   adr: ComparisonMetric;
   occupancyPct: ComparisonMetric;
   revPar: ComparisonMetric;
+  soldRoomNights: ComparisonMetric;
 }
 
 export interface OverviewKpis {
@@ -157,6 +158,7 @@ export async function getOverviewKpis(filter: KpiFilter): Promise<OverviewKpis> 
       adr: comparisonMetric(adr, prevAdr),
       occupancyPct: comparisonMetric(occupancyPct, prevOccupancyPct),
       revPar: comparisonMetric(revPar, prevRevPar),
+      soldRoomNights: comparisonMetric(soldRoomNights, prevSoldRoomNights),
     },
   };
 }

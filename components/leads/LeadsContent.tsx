@@ -131,12 +131,10 @@ export default function LeadsContent({
   byOwnerSource: OwnerSourceCell[];
   compareYoY: boolean;
 }) {
-  const existingTotal = bySource.find((s) => s.key === "Existing")?.count ?? 0;
-  const referenceTotal = bySource.find((s) => s.key === "Reference")?.count ?? 0;
   const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 100) : 0);
   const b2cAchievedPct = pct(summary.b2cLeadsClosed, summary.b2cLeads);
-  const existingAchievedPct = pct(summary.existingClosedLeads, existingTotal);
-  const referenceAchievedPct = pct(summary.referenceClosedLeads, referenceTotal);
+  const existingAchievedPct = pct(summary.existingClosedLeads, summary.existingLeads);
+  const referenceAchievedPct = pct(summary.referenceClosedLeads, summary.referenceLeads);
 
   const propertyData: BarDatum[] = byProperty.map((r) => ({ name: r.key, value: r.count, color: RANKING_COLOR }));
   const sourceData: BarDatum[] = bySource.map((r, i) => ({ name: r.key, value: r.count, color: LOST_REASON_PALETTE[i % LOST_REASON_PALETTE.length] }));
@@ -167,7 +165,11 @@ export default function LeadsContent({
             value={summary.totalLeads.toLocaleString("en-IN")}
             delta={summary.comparison.totalLeads.pctChange !== null ? { pct: summary.comparison.totalLeads.pctChange * 100, label: "vs previous" } : undefined}
           />
-          <StatTile label="Closed Leads" value={summary.closedLeads.toLocaleString("en-IN")} />
+          <StatTile
+            label="Closed Leads"
+            value={summary.closedLeads.toLocaleString("en-IN")}
+            delta={summary.comparison.closedLeads.pctChange !== null ? { pct: summary.comparison.closedLeads.pctChange * 100, label: "vs previous" } : undefined}
+          />
           <StatTile
             label="Conversion Rate"
             value={summary.conversionRate !== null ? formatPercent(summary.conversionRate) : "—"}
@@ -186,18 +188,21 @@ export default function LeadsContent({
             value={summary.b2cLeads.toLocaleString("en-IN")}
             sub={`${summary.b2cLeadsClosed.toLocaleString("en-IN")} closed → ${b2cAchievedPct}% achieved`}
             progress={{ pct: b2cAchievedPct / 100 }}
+            delta={summary.comparison.b2cLeads.pctChange !== null ? { pct: summary.comparison.b2cLeads.pctChange * 100, label: "vs previous" } : undefined}
           />
           <StatTile
             label="Existing Leads"
-            value={existingTotal.toLocaleString("en-IN")}
+            value={summary.existingLeads.toLocaleString("en-IN")}
             sub={`${summary.existingClosedLeads.toLocaleString("en-IN")} closed → ${existingAchievedPct}% achieved`}
             progress={{ pct: existingAchievedPct / 100 }}
+            delta={summary.comparison.existingLeads.pctChange !== null ? { pct: summary.comparison.existingLeads.pctChange * 100, label: "vs previous" } : undefined}
           />
           <StatTile
             label="Reference Leads"
-            value={referenceTotal.toLocaleString("en-IN")}
+            value={summary.referenceLeads.toLocaleString("en-IN")}
             sub={`${summary.referenceClosedLeads.toLocaleString("en-IN")} closed → ${referenceAchievedPct}% achieved`}
             progress={{ pct: referenceAchievedPct / 100 }}
+            delta={summary.comparison.referenceLeads.pctChange !== null ? { pct: summary.comparison.referenceLeads.pctChange * 100, label: "vs previous" } : undefined}
           />
         </div>
       </div>

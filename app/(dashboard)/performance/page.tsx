@@ -56,6 +56,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
       googleTrend={googleTrend}
       otaStats={otaStats}
       otaTrend={otaTrend}
+      compareYoY={filter.compareYoY ?? false}
     />
   );
 }

@@ -6,7 +6,7 @@
 // different slice — folded into one TabbedCard apiece per item #11.
 import { CategoryAchievement, RevenueAchievement, MonthlyRevenueTarget, MonthlyAdrTarget, MonthlyOccupancyTarget } from "@/lib/bigquery/queries/targets";
 import type { PropertyTargetComparisonResult } from "@/lib/bigquery/queries/propertyTargets";
-import { ReviewStats, RatingTrendPoint } from "@/lib/bigquery/queries/reviews";
+import { ReviewStats, RatingTrendSeries } from "@/lib/bigquery/queries/reviews";
 import StatTile from "@/components/ui/StatTile";
 import Card from "@/components/ui/Card";
 import TabbedCard, { useTabbedCard } from "@/components/ui/TabbedCard";
@@ -38,12 +38,29 @@ function shouldHideAchieved(fy: string, monthNumber: number, achieved: number) {
   return achieved === 0 && isFutureFiscalMonth(fy, calendarMonthFromFiscal(monthNumber));
 }
 
-function RatingTrendChart({ trend }: { trend: RatingTrendPoint[] }) {
-  const data = trend.map((p) => ({ month: p.monthLabel, count: p.count }));
-  return trend.length === 0 ? (
+// Item #4 (2026-09-02, seventh pass): one opt-in previous-year line, same
+// pattern as every other trend chart, paired by index (this month's point
+// vs. the same-position point 12 months back) — not the old one-line-per-FY
+// model this file's history comment above still describes.
+function RatingTrendChart({ trend, compareYoY }: { trend: RatingTrendSeries; compareYoY: boolean }) {
+  const len = compareYoY ? Math.max(trend.current.length, trend.previous.length) : trend.current.length;
+  const data = Array.from({ length: len }, (_, i) => {
+    const c = trend.current[i];
+    const p = trend.previous[i];
+    return {
+      month: c?.monthLabel ?? p?.monthLabel ?? `#${i + 1}`,
+      count: c?.count ?? 0,
+      ...(compareYoY ? { previousCount: p ? p.count : null } : {}),
+    };
+  });
+  const series = [
+    { key: "count", color: "var(--series-1)" },
+    ...(compareYoY ? [{ key: "previousCount", color: "var(--chart-baseline)" }] : []),
+  ];
+  return trend.current.length === 0 ? (
     <p className="py-8 text-center text-sm text-zinc-400 dark:text-zinc-600">No reviews for this period.</p>
   ) : (
-    <MultiSeriesLineChart data={data} xKey="month" series={[{ key: "count", color: "var(--series-1)" }]} valueFormatter={(v) => v.toLocaleString("en-IN")} />
+    <MultiSeriesLineChart data={data} xKey="month" series={series} valueFormatter={(v) => v.toLocaleString("en-IN")} />
   );
 }
 
@@ -65,6 +82,7 @@ export default function PerformanceContent({
   googleTrend,
   otaStats,
   otaTrend,
+  compareYoY,
 }: {
   fy: string;
   categoryAchievement: CategoryAchievement[];
@@ -74,9 +92,10 @@ export default function PerformanceContent({
   occupancyTargetVsAchieved: MonthlyOccupancyTarget[];
   propertyTargetComparison: PropertyTargetComparisonResult;
   googleStats: ReviewStats;
-  googleTrend: RatingTrendPoint[];
+  googleTrend: RatingTrendSeries;
   otaStats: ReviewStats;
-  otaTrend: RatingTrendPoint[];
+  otaTrend: RatingTrendSeries;
+  compareYoY: boolean;
 }) {
   const categoryData = categoryAchievement.map((c) => ({ category: c.category, target: c.target, achieved: c.achieved }));
   const propertyRevenueData = propertyTargetComparison.rows.map((r) => ({ property: r.property, Target: r.targetRevenue, Achieved: r.achievedRevenue }));
@@ -117,18 +136,21 @@ export default function PerformanceContent({
           />
           <StatTile label="Overall Occ %" value={propertyTargetComparison.total.achievedOccPct !== null ? formatPercent(propertyTargetComparison.total.achievedOccPct, 0) : "—"} />
         </div>
-        <Card title="Target Vs Achieved Revenue By Property">
-          <GroupedBarChart
-            data={propertyRevenueData}
-            xKey="property"
-            series={[
-              { key: "Target", color: TARGET_VS_ACHIEVED_COLOR.target },
-              { key: "Achieved", color: TARGET_VS_ACHIEVED_COLOR.achieved },
-            ]}
-            valueFormatter={(v) => formatIndianCurrency(v)}
-          />
-        </Card>
-        <div className="mt-3">
+        {/* Item #3: bar chart + its own per-property drill-down, paired side
+            by side — both are "property targets" reads and neither needs
+            full card width on its own. */}
+        <div className="grid gap-3 lg:grid-cols-2">
+          <Card title="Target Vs Achieved Revenue By Property">
+            <GroupedBarChart
+              data={propertyRevenueData}
+              xKey="property"
+              series={[
+                { key: "Target", color: TARGET_VS_ACHIEVED_COLOR.target },
+                { key: "Achieved", color: TARGET_VS_ACHIEVED_COLOR.achieved },
+              ]}
+              valueFormatter={(v) => formatIndianCurrency(v)}
+            />
+          </Card>
           <TabbedCard title="Property Detail" tabs={propertyTabs} active={activeProperty} onChange={setActiveProperty}>
             {activeRow && (
               <>
@@ -142,7 +164,7 @@ export default function PerformanceContent({
                     </p>
                   </div>
                 )}
-                <div className="mt-3 grid grid-cols-2 gap-3 border-t border-zinc-100 pt-3 dark:border-zinc-800 sm:grid-cols-4">
+                <div className="mt-3 grid grid-cols-2 gap-3 border-t border-zinc-100 pt-3 dark:border-zinc-800">
                   <StatTile label="Target Occ %" value={activeRow.targetOccPct !== null ? formatPercent(activeRow.targetOccPct, 0) : "—"} />
                   <StatTile label="Achieved Occ %" value={activeRow.achievedOccPct !== null ? formatPercent(activeRow.achievedOccPct, 0) : "—"} />
                   <StatTile label="Target ARR" value={activeRow.targetArr !== null ? `₹${Math.round(activeRow.targetArr).toLocaleString("en-IN")}` : "—"} />
@@ -222,7 +244,7 @@ export default function PerformanceContent({
               delta={activeReviewStats.comparison.totalReviews.pctChange !== null ? { pct: activeReviewStats.comparison.totalReviews.pctChange * 100, label: "vs previous" } : undefined}
             />
           </div>
-          <RatingTrendChart trend={activeReviewTrend} />
+          <RatingTrendChart trend={activeReviewTrend} compareYoY={compareYoY} />
         </TabbedCard>
       </div>
     </div>

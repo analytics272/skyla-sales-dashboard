@@ -155,43 +155,51 @@ export default function BookingsContent({
             value={bookingStats.totalBookings.toLocaleString("en-IN")}
             delta={bookingStats.comparison.totalBookings.pctChange !== null ? { pct: bookingStats.comparison.totalBookings.pctChange * 100, label: "vs previous" } : undefined}
           />
+          {/* Item #2 (2026-09-02, seventh pass): "Unique Guests Served" is its
+              own metric (distinct people hosted, MAX(NoOfGuest) per booking) —
+              the sheet-reconciled guest-nights figure and its Data Error Rate
+              live only in the Guest Served card below, not duplicated here. */}
           <StatTile
-            label="Guest Nights Served"
+            label="Unique Guests Served"
             value={bookingStats.guestsServed.toLocaleString("en-IN")}
-            sub="Sum of guests across every night stayed — see Guest Served card below"
             delta={bookingStats.comparison.guestsServed.pctChange !== null ? { pct: bookingStats.comparison.guestsServed.pctChange * 100, label: "vs previous" } : undefined}
           />
-          <StatTile label="ALOS" value={bookingStats.alos !== null ? `${bookingStats.alos.toFixed(1)} nights` : "—"} />
           <StatTile
-            label="Revenue Per Guest-Night"
+            label="ALOS"
+            value={bookingStats.alos !== null ? `${bookingStats.alos.toFixed(1)} nights` : "—"}
+            delta={bookingStats.comparison.alos.pctChange !== null ? { pct: bookingStats.comparison.alos.pctChange * 100, label: "vs previous" } : undefined}
+          />
+          <StatTile
+            label="Revenue Per Guest"
             value={bookingStats.revenuePerGuest !== null ? `₹${Math.round(bookingStats.revenuePerGuest).toLocaleString("en-IN")}` : "—"}
+            delta={bookingStats.comparison.revenuePerGuest.pctChange !== null ? { pct: bookingStats.comparison.revenuePerGuest.pctChange * 100, label: "vs previous" } : undefined}
           />
           <StatTile
             label="Repeat Bookings"
             value={repeatBookingShare.repeatBookings.toLocaleString("en-IN")}
             sub={repeatBookingShare.sharePct !== null ? `${formatPercent(repeatBookingShare.sharePct)} of ${repeatBookingShare.totalBookings.toLocaleString("en-IN")}` : undefined}
+            delta={repeatBookingShare.comparison.sharePct.pctChange !== null ? { pct: repeatBookingShare.comparison.sharePct.pctChange * 100, label: "share vs previous" } : undefined}
           />
           <StatTile
             label="Cancellations"
             value={cancellationStats.cancellationPct !== null ? formatPercent(cancellationStats.cancellationPct) : "—"}
             sub={`${cancellationStats.cancelledBookings.toLocaleString("en-IN")} of ${(cancellationStats.activeBookings + cancellationStats.cancelledBookings).toLocaleString("en-IN")}`}
+            delta={cancellationStats.comparison.cancellationPct.pctChange !== null ? { pct: cancellationStats.comparison.cancellationPct.pctChange * 100, label: "vs previous", upIsGood: false } : undefined}
           />
         </div>
       </div>
 
+      {/* Item #2: this card now shows exactly one number — the residual Data
+          Error Rate — instead of four tiles (BigQuery/Sheet/Variance/Error
+          Rate) that were mostly restating the same gap. The raw BigQuery and
+          Sheet totals move into the caption text below instead of their own
+          StatTiles. */}
       <Card title="Guest Served — Sheet Vs BigQuery" subtitle={`One-time accuracy snapshot, ${guestServedAccuracy.label} — not scoped by the period filter above`}>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <StatTile label="BigQuery (guest-nights)" value={guestServedAccuracy.totalBigQuery.toLocaleString("en-IN")} />
-          <StatTile label="Sheet (manual PMS extract)" value={guestServedAccuracy.totalSheet.toLocaleString("en-IN")} />
-          <StatTile
-            label="Variance"
-            value={guestServedAccuracy.totalVariancePct !== null ? formatPercent(guestServedAccuracy.totalVariancePct, 0) : "—"}
-            delta={guestServedAccuracy.totalVariancePct !== null ? { pct: guestServedAccuracy.totalVariancePct * 100, label: "BigQuery vs Sheet", upIsGood: true } : undefined}
-          />
+        <div className="sm:max-w-xs">
           <StatTile
             label="Data Error Rate"
             value={guestServedAccuracy.dataErrorRatePct !== null ? formatPercent(guestServedAccuracy.dataErrorRatePct, 1) : "—"}
-            sub="Residual gap after correcting the guest-count formula (below)"
+            sub={`BigQuery ${guestServedAccuracy.totalBigQuery.toLocaleString("en-IN")} guest-nights vs Sheet ${guestServedAccuracy.totalSheet.toLocaleString("en-IN")}`}
           />
         </div>
         <div className="mt-3 grid grid-cols-2 gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800 sm:grid-cols-5">
@@ -221,6 +229,7 @@ export default function BookingsContent({
           label="Avg Cancellation Lead Time"
           value={cancellationLeadTime.avgLeadTimeDays !== null ? `${cancellationLeadTime.avgLeadTimeDays.toFixed(1)} days` : "—"}
           sub={`n=${cancellationLeadTime.sampledCancellations.toLocaleString("en-IN")}`}
+          delta={cancellationLeadTime.comparison.avgLeadTimeDays.pctChange !== null ? { pct: cancellationLeadTime.comparison.avgLeadTimeDays.pctChange * 100, label: "vs previous", upIsGood: false } : undefined}
         />
       </div>
 
@@ -256,17 +265,17 @@ export default function BookingsContent({
       <div>
         <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">B2B Contracts</h3>
 
+        {/* Item #1 (2026-09-02, seventh pass): donut + caption stacked and
+            centered instead of a flex row — at some widths the caption's
+            long sentence was squeezing the donut's legend column, wrapping
+            "3.43 Cr · 65%" onto three lines. Stacking removes any squeeze. */}
         <div className="mt-2">
-          <Card title="Corporate Account Retention">
-            <SingleMetricBarChart data={retentionData} valueFormatter={(v) => `${v.toFixed(0)}%`} />
-          </Card>
-        </div>
-
-        <div className="mt-3">
           <Card title={`Revenue By Company (${b2bRanking.length})`} subtitle="Green = under contract · Amber = no contract">
-            <div className="mb-3 flex flex-col gap-3 border-b border-zinc-100 pb-3 dark:border-zinc-800 sm:flex-row sm:items-center">
-              <DonutChart data={contractShareDonut} valueFormatter={(v) => formatIndianCurrency(v)} height={140} innerRadiusRatio={0.58} />
-              <p className="text-xs text-zinc-400 dark:text-zinc-500 sm:ml-2">
+            <div className="mb-3 border-b border-zinc-100 pb-3 dark:border-zinc-800">
+              <div className="flex justify-center">
+                <DonutChart data={contractShareDonut} valueFormatter={(v) => formatIndianCurrency(v)} height={140} innerRadiusRatio={0.58} />
+              </div>
+              <p className="mt-2 text-center text-xs text-zinc-400 dark:text-zinc-500">
                 {b2bContractSummary.contractCompanyCount.toLocaleString("en-IN")} of {b2bRanking.length.toLocaleString("en-IN")} companies under contract.
                 Contract revenue reflects Contract_Status = Contract rows only, not each company&apos;s total revenue.
               </p>
@@ -275,7 +284,13 @@ export default function BookingsContent({
           </Card>
         </div>
 
-        <div className="mt-3">
+        {/* Item #3: two compact bar-chart-style B2B reads, paired side by
+            side instead of each taking a full-width row on its own. */}
+        <div className="mt-3 grid gap-3 lg:grid-cols-2">
+          <Card title="Corporate Account Retention">
+            <SingleMetricBarChart data={retentionData} valueFormatter={(v) => `${v.toFixed(0)}%`} />
+          </Card>
+
           <TabbedCard title="Company Rankings" tabs={B2B_RANK_TABS} active={b2bRankTab} onChange={setB2bRankTab}>
             {b2bRankTab === "Contribution %" ? (
               <HorizontalBarChart data={b2bContributionData} valueFormatter={(v) => `${v.toFixed(0)}%`} labelWidth={140} />
