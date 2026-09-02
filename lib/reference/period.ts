@@ -1,24 +1,25 @@
-// Global comparison-period model (2026-09-02 redesign, extended 2026-09-02
-// later the same day to match the reference dashboard's exact tab set) —
-// replaces the old Property/FY/Quarter/Month filter combination. Every KPI
-// query resolves a `current` date range plus a `previous` (comparison) date
-// range from whichever tab is active, instead of a multi-select
-// FY/Quarter/Month combination. Property remains a separate, independent
-// multi-select filter (unchanged).
+// Global comparison-period model (2026-09-02 redesign, extended twice more
+// the same day). Two independent axes:
+//  - `PeriodKey`: which window is "now" — Today / This Month / Last 7 Days /
+//    Last 30 Days / This FY / Custom Range (single-select, matches the
+//    reference dashboard's own tab set exactly).
+//  - `compareYoY`: a toggle, not a 7th tab — when off (default), the
+//    comparison is the immediately-preceding window of the same length; when
+//    on, the comparison is the exact same window shifted back one year (same
+//    dates, same span), so "This Month + compare-to-last-year" reads as
+//    "September 2026 vs September 2025", not "vs August 2026". Applies to
+//    whichever period tab is active — it's a modifier, not its own tab.
 import { DateRange, currentFYLabel, fyStartYearOf, fyLabel, fyBounds } from "./financialYear";
 
-export type PeriodKey = "today" | "this_month" | "last_7_days" | "last_30_days" | "this_fy" | "last_year" | "custom";
+export type PeriodKey = "today" | "this_month" | "last_7_days" | "last_30_days" | "this_fy" | "custom";
 
-// Order and labels match the reference dashboard (skyla-fnb.lovable.app)
-// exactly, plus "Last Year" (requested in addition, not in the reference,
-// placed right after "This FY" — same pill styling, not the default tab).
+// Order and labels match the reference dashboard (skyla-fnb.lovable.app) exactly.
 export const PERIOD_OPTIONS: { key: PeriodKey; label: string }[] = [
   { key: "today", label: "Today" },
   { key: "this_month", label: "This Month" },
   { key: "last_7_days", label: "Last 7 Days" },
   { key: "last_30_days", label: "Last 30 Days" },
   { key: "this_fy", label: "This FY" },
-  { key: "last_year", label: "Last Year" },
   { key: "custom", label: "Custom Range" },
 ];
 
@@ -30,11 +31,11 @@ export interface PeriodDef {
   key: PeriodKey;
   /** What the active tab is scoped to right now — the primary range every KPI sums/averages over. */
   current: DateRange;
-  /** The equivalent prior period, used for every "vs previous" comparison. Same span length as `current`. */
+  /** The comparison range — the preceding window, or the same window one year back when compareYoY is on. Same span length as `current` either way. */
   previous: DateRange;
-  /** Short label for the current range, e.g. "Today", "FY 25-26 (to date)", "FY 24-25". */
+  /** Short label for the current range, e.g. "Today", "FY 25-26 (to date)". */
   currentLabel: string;
-  /** Short label for the previous range, e.g. "Yesterday", "FY 24-25 (to date)", "FY 23-24". */
+  /** Short label for the previous range, e.g. "Yesterday", "FY 24-25 (to date)". */
   previousLabel: string;
 }
 
@@ -69,106 +70,69 @@ function daySpan(start: string, end: string): number {
   return Math.round(ms / 86400000) + 1;
 }
 
-function trailingWindow(days: 7 | 30, todayIso: string, label: string): PeriodDef {
-  const start = addDays(todayIso, -(days - 1));
-  const prevEnd = addDays(start, -1);
-  const prevStart = addDays(prevEnd, -(days - 1));
-  return {
-    key: days === 7 ? "last_7_days" : "last_30_days",
-    current: { start, end: todayIso },
-    previous: { start: prevStart, end: prevEnd },
-    currentLabel: label,
-    previousLabel: "Preceding period",
-  };
-}
-
 const MONTH_NAMES_FULL = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
 ];
 
+/** The immediately-preceding window of the same length as [start, end] (default comparison, compareYoY off). */
+function precedingWindow(start: string, end: string): DateRange {
+  const span = daySpan(start, end);
+  return { start: addDays(start, -span), end: addDays(start, -1) };
+}
+
+/** The exact same window, shifted back one calendar year (compareYoY on). */
+function sameWindowLastYear(start: string, end: string): DateRange {
+  return { start: addYears(start, -1), end: addYears(end, -1) };
+}
+
 /**
- * Resolves the current/previous date ranges for a period tab, as of a given
- * date (defaults to today — parameterized for testability).
+ * Resolves the current/comparison date ranges for a period tab, as of a
+ * given date (defaults to today — parameterized for testability).
  *
- * - "today": current = today only; previous = yesterday.
- * - "this_month": current = calendar-month-start .. today; previous = the
- *   same elapsed span one calendar month earlier (apples-to-apples, not a
- *   partial-vs-full-month comparison).
+ * - "today": current = today only.
+ * - "this_month": current = calendar-month-start .. today (to-date, not the
+ *   full month — comparing a partial month to a full one would mislead).
  * - "last_7_days" / "last_30_days": current = the trailing N days ending
- *   today (inclusive); previous = the N days immediately before that window.
- * - "this_fy": current = FY-start .. today (year-to-date); previous = the
- *   exact same elapsed span one year earlier.
- * - "last_year": current = the last fully-completed FY (Apr-Mar); previous =
- *   the FY before that. Both spans complete, ordinary FY-over-FY.
- * - "custom": current = the caller-supplied range; previous = an
- *   immediately-preceding window of the same length (a defensible default
- *   comparison the reference dashboard doesn't specify beyond "Custom Range"
- *   existing as an option).
+ *   today (inclusive).
+ * - "this_fy": current = FY-start .. today (year-to-date).
+ * - "custom": current = the caller-supplied range.
+ *
+ * For every key, `previous` is either the immediately-preceding window of
+ * the same length (compareYoY off — the default) or the identical window
+ * shifted back exactly one year (compareYoY on), per `compareYoY`.
  */
-export function resolvePeriod(key: PeriodKey, asOf: Date = new Date(), custom?: DateRange): PeriodDef {
+export function resolvePeriod(key: PeriodKey, asOf: Date = new Date(), custom?: DateRange, compareYoY = false): PeriodDef {
   const todayIso = toIso(asOf);
+  let current: DateRange;
+  let currentLabel: string;
 
   if (key === "today") {
-    return {
-      key,
-      current: { start: todayIso, end: todayIso },
-      previous: { start: addDays(todayIso, -1), end: addDays(todayIso, -1) },
-      currentLabel: "Today",
-      previousLabel: "Yesterday",
-    };
-  }
-
-  if (key === "this_month") {
+    current = { start: todayIso, end: todayIso };
+    currentLabel = "Today";
+  } else if (key === "this_month") {
     const monthStart = `${asOf.getFullYear()}-${pad(asOf.getMonth() + 1)}-01`;
-    const monthName = MONTH_NAMES_FULL[asOf.getMonth()];
-    const prevMonthStart = addMonths(monthStart, -1);
-    return {
-      key,
-      current: { start: monthStart, end: todayIso },
-      previous: { start: prevMonthStart, end: addMonths(todayIso, -1) },
-      currentLabel: `${monthName} (to date)`,
-      previousLabel: `${MONTH_NAMES_FULL[new Date(`${prevMonthStart}T00:00:00`).getMonth()]} (to date)`,
-    };
-  }
-
-  if (key === "last_7_days") return trailingWindow(7, todayIso, "Last 7 Days");
-  if (key === "last_30_days") return trailingWindow(30, todayIso, "Last 30 Days");
-
-  if (key === "this_fy") {
+    current = { start: monthStart, end: todayIso };
+    currentLabel = `${MONTH_NAMES_FULL[asOf.getMonth()]} (to date)`;
+  } else if (key === "last_7_days") {
+    current = { start: addDays(todayIso, -6), end: todayIso };
+    currentLabel = "Last 7 Days";
+  } else if (key === "last_30_days") {
+    current = { start: addDays(todayIso, -29), end: todayIso };
+    currentLabel = "Last 30 Days";
+  } else if (key === "this_fy") {
     const fy = currentFYLabel(asOf);
-    const { start: fyStart } = fyBounds(fy);
-    return {
-      key,
-      current: { start: fyStart, end: todayIso },
-      previous: { start: addYears(fyStart, -1), end: addYears(todayIso, -1) },
-      currentLabel: `${fy} (to date)`,
-      previousLabel: `${fyLabel(fyStartYearOf(asOf) - 1)} (to date)`,
-    };
+    current = { start: fyBounds(fy).start, end: todayIso };
+    currentLabel = `${fy} (to date)`;
+  } else {
+    // "custom"
+    current = custom ?? { start: todayIso, end: todayIso };
+    currentLabel = `${current.start} to ${current.end}`;
   }
 
-  if (key === "last_year") {
-    const lastCompletedFyStartYear = fyStartYearOf(asOf) - 1;
-    const priorFyStartYear = lastCompletedFyStartYear - 1;
-    return {
-      key,
-      current: fyBounds(fyLabel(lastCompletedFyStartYear)),
-      previous: fyBounds(fyLabel(priorFyStartYear)),
-      currentLabel: fyLabel(lastCompletedFyStartYear),
-      previousLabel: fyLabel(priorFyStartYear),
-    };
-  }
-
-  // "custom"
-  const range = custom ?? { start: todayIso, end: todayIso };
-  const span = daySpan(range.start, range.end);
-  return {
-    key,
-    current: range,
-    previous: { start: addDays(range.start, -span), end: addDays(range.start, -1) },
-    currentLabel: `${range.start} to ${range.end}`,
-    previousLabel: "Preceding period",
-  };
+  const previous = compareYoY ? sameWindowLastYear(current.start, current.end) : precedingWindow(current.start, current.end);
+  const previousLabel = compareYoY ? `${previous.start} to ${previous.end} (last year)` : "Preceding period";
+  return { key, current, previous, currentLabel, previousLabel };
 }
 
 export function periodLabel(key: PeriodKey): string {
@@ -181,11 +145,13 @@ export interface PeriodFilter {
   /** Only meaningful when period === "custom" — ISO dates. */
   customStart?: string;
   customEnd?: string;
+  /** Compare-to-last-year toggle (default off = compare to the preceding window). Applies to whichever period tab is active. */
+  compareYoY?: boolean;
 }
 
-/** Resolves a filter's period, threading the custom range through when present — the one place every query file should call from, instead of resolvePeriod() directly, so "custom" is never silently dropped. */
+/** Resolves a filter's period, threading the custom range and compare-mode through — the one place every query file should call from, instead of resolvePeriod() directly, so neither is ever silently dropped. */
 export function resolvePeriodFromFilter(filter: PeriodFilter): PeriodDef {
   const key = filter.period ?? "this_fy";
   const custom = key === "custom" && filter.customStart && filter.customEnd ? { start: filter.customStart, end: filter.customEnd } : undefined;
-  return resolvePeriod(key, new Date(), custom);
+  return resolvePeriod(key, new Date(), custom, filter.compareYoY ?? false);
 }

@@ -56,16 +56,23 @@ export default function DonutChart({
         </PieChart>
       </ResponsiveContainer>
 
-      <div className="w-full min-w-0 flex-1 space-y-1.5">
+      {/* grid-cols-[auto_auto]: columns size to their own content instead of
+          a flex row stretching label/value to the card's full width — a
+          short label ("Lost") no longer leaves a large empty gap before its
+          value the way a `justify-between` row would. */}
+      <div className="grid w-full min-w-0 auto-rows-min grid-cols-[auto_auto] items-center gap-x-4 gap-y-1.5 text-xs sm:w-auto">
         {data.map((d) => {
           const pct = total > 0 ? (d.value / total) * 100 : 0;
           return (
-            <div key={d.name} className="flex items-center justify-between gap-2 text-xs">
+            // display:contents so this wrapper doesn't itself occupy a grid
+            // cell — its two <span> children become the grid's actual items,
+            // keeping every row's label/value columns aligned.
+            <div key={d.name} className="contents">
               <span className="flex min-w-0 items-center gap-1.5">
                 <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: d.color }} />
                 <span className="truncate" style={{ color: CHART_TEXT.secondary }}>{d.name}</span>
               </span>
-              <span className="shrink-0 font-medium tabular-nums" style={{ color: CHART_TEXT.primary }}>
+              <span className="justify-self-end font-medium tabular-nums" style={{ color: CHART_TEXT.primary }}>
                 {valueFormatter(d.value)} · {pct.toFixed(0)}%
               </span>
             </div>

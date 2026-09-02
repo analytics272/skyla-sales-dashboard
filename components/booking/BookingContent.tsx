@@ -2,7 +2,7 @@
 
 import {
   BookingStats, RoomNightsGap, RepeatBookingShare, RoomFormatStats,
-  ExpatStats, CancellationStats, CancellationLeadTime, CategoryMix,
+  ExpatStats, CancellationStats, CancellationLeadTime, CategoryMix, GuestServedAccuracyCheck,
 } from "@/lib/bigquery/queries/guestDetail";
 import type { B2bContractRanking, B2bTopAdrContract, RetentionPoint, B2bContractSummary } from "@/lib/bigquery/queries/b2bContracts";
 import StatTile from "@/components/ui/StatTile";
@@ -33,6 +33,7 @@ export default function BookingContent({
   b2bContractSummary,
   b2bTopAdr,
   b2bRetention,
+  guestServedAccuracy,
 }: {
   bookingStats: BookingStats;
   roomNightsGap: RoomNightsGap;
@@ -46,6 +47,7 @@ export default function BookingContent({
   b2bContractSummary: B2bContractSummary;
   b2bTopAdr: B2bTopAdrContract[];
   b2bRetention: RetentionPoint[];
+  guestServedAccuracy: GuestServedAccuracyCheck;
 }) {
   const roomTypeLabel = (rt: string | null) => rt ?? "Unmapped";
   const roomTypesPresent = [
@@ -95,7 +97,6 @@ export default function BookingContent({
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">Booking Details</h2>
         <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           <StatTile
             label="Total Bookings"
@@ -124,6 +125,34 @@ export default function BookingContent({
           />
         </div>
       </div>
+
+      <Card title="Guest Served — Sheet Vs BigQuery" subtitle={`One-time accuracy snapshot, ${guestServedAccuracy.label} — not scoped by the period filter above`}>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <StatTile label="BigQuery (API sync)" value={guestServedAccuracy.totalBigQuery.toLocaleString("en-IN")} />
+          <StatTile label="Sheet (manual PMS extract)" value={guestServedAccuracy.totalSheet.toLocaleString("en-IN")} />
+          <StatTile
+            label="Variance"
+            value={guestServedAccuracy.totalVariancePct !== null ? formatPercent(guestServedAccuracy.totalVariancePct, 0) : "—"}
+            delta={guestServedAccuracy.totalVariancePct !== null ? { pct: guestServedAccuracy.totalVariancePct * 100, label: "BigQuery vs Sheet", upIsGood: true } : undefined}
+          />
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800 sm:grid-cols-5">
+          {guestServedAccuracy.rows.map((r) => (
+            <div key={r.property}>
+              <p className="text-[10px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500">{r.property}</p>
+              <p className="text-xs text-zinc-700 dark:text-zinc-200">{r.bigQuery.toLocaleString("en-IN")} / {r.sheet.toLocaleString("en-IN")}</p>
+              <p className={r.variancePct !== null && r.variancePct < -0.2 ? "text-xs font-medium" : "text-xs font-medium"} style={{ color: r.variancePct !== null && r.variancePct < -0.2 ? "var(--chart-delta-bad)" : "var(--chart-delta-good)" }}>
+                {r.variancePct !== null ? formatPercent(r.variancePct, 0) : "—"}
+              </p>
+            </div>
+          ))}
+        </div>
+        <p className="mt-3 text-[11px] text-zinc-400 dark:text-zinc-500">
+          BigQuery consistently runs lower than the sheet across every property — that pattern looks more like a different Guest Served definition
+          between the two sources (e.g. total guest-nights vs. peak per-booking occupancy) than a specific number of bookings missing from the sync.
+          Shown as measured; root cause not confirmed.
+        </p>
+      </Card>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatTile label="Available Room Nights" value={roomNightsGap.availableRoomNights.toLocaleString("en-IN")} />

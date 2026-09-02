@@ -25,5 +25,7 @@ export function parseKpiFilter(searchParams: SearchParams): KpiFilter {
   const customStart = startRaw && ISO_DATE.test(startRaw) ? startRaw : undefined;
   const customEnd = endRaw && ISO_DATE.test(endRaw) ? endRaw : undefined;
 
-  return { properties, period, customStart, customEnd };
+  const compareYoY = first(searchParams.compare) === "yoy";
+
+  return { properties, period, customStart, customEnd, compareYoY };
 }

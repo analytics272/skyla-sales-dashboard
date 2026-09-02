@@ -7,7 +7,7 @@ import Expandable from "@/components/ui/Expandable";
 import EntityCard from "@/components/ui/EntityCard";
 import HorizontalBarChart from "@/components/charts/HorizontalBarChart";
 import { BarDatum } from "@/components/charts/SingleMetricBarChart";
-import GroupedBarChart from "@/components/charts/GroupedBarChart";
+import MultiSeriesLineChart from "@/components/charts/MultiSeriesLineChart";
 import DonutChart from "@/components/charts/DonutChart";
 import { formatIndianCurrency, formatPercent } from "@/lib/format/currency";
 import { TARGET_VS_ACHIEVED_COLOR } from "@/lib/design/tokens";
@@ -69,7 +69,6 @@ export default function LeadsContent({
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">Lead Tracker</h2>
         <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           <StatTile
             label="Total Leads"
@@ -112,7 +111,7 @@ export default function LeadsContent({
       </div>
 
       <Card title="Leads MoM (Total Vs Closed)">
-        <GroupedBarChart
+        <MultiSeriesLineChart
           data={momData}
           xKey="month"
           series={[

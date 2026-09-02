@@ -6,6 +6,7 @@ import { getAvailableRoomNights } from "./propertyWindows";
 import { getLpOverviewTotals, getLpRoomTypeStats, LP_PROPERTY } from "./lpMonthly";
 import { bookingCategorySqlExpr, BookingCategory } from "@/lib/reference/bookingSourceMap";
 import { roomTypeMappingSqlUnnest, roomTypeJoinCondition } from "@/lib/reference/roomTypeMapping";
+import { GUEST_SERVED_SHEET_SNAPSHOT, GUEST_SERVED_SNAPSHOT_RANGE, GUEST_SERVED_SNAPSHOT_LABEL } from "@/lib/reference/guestServedSheetSnapshot";
 import { safeDivide } from "@/lib/format/currency";
 import { ComparisonMetric } from "./overview";
 
@@ -383,4 +384,60 @@ export async function getCancellationLeadTime(filter: KpiFilter): Promise<Cancel
 
   const r = rows[0] ?? { avg_days: null, n: 0 };
   return { avgLeadTimeDays: r.avg_days, sampledCancellations: r.n };
+}
+
+// --- Guest Served: sheet-vs-BigQuery accuracy check (see lib/reference/guestServedSheetSnapshot.ts) ---
+
+export interface GuestServedAccuracyRow {
+  property: string;
+  bigQuery: number;
+  sheet: number;
+  variancePct: number | null;
+}
+
+export interface GuestServedAccuracyCheck {
+  label: string;
+  rows: GuestServedAccuracyRow[];
+  totalBigQuery: number;
+  totalSheet: number;
+  totalVariancePct: number | null;
+}
+
+/** Fixed one-time snapshot comparison (April 2026) — not scoped by the active period tab, same convention as §6.1's property targets. */
+export async function getGuestServedAccuracyCheck(): Promise<GuestServedAccuracyCheck> {
+  const properties = Object.keys(GUEST_SERVED_SHEET_SNAPSHOT);
+  const rows = await runQuery<{ property: string; guests_served: number | null }>(`
+    WITH scoped AS (
+      SELECT Property, ReservationNo, NoOfGuest
+      FROM ${table("sales_booking")}
+      WHERE Property IN UNNEST(@properties) AND CAST(StayDate AS DATE) BETWEEN @start AND @end
+    ),
+    per_booking AS (
+      SELECT Property, ReservationNo, MAX(NoOfGuest) AS guests
+      FROM scoped
+      WHERE ReservationNo IS NOT NULL
+      GROUP BY Property, ReservationNo
+    )
+    SELECT Property AS property, SUM(guests) AS guests_served
+    FROM per_booking
+    GROUP BY property
+  `, { properties, start: GUEST_SERVED_SNAPSHOT_RANGE.start, end: GUEST_SERVED_SNAPSHOT_RANGE.end });
+
+  const byProperty = new Map(rows.map((r) => [r.property, r.guests_served ?? 0]));
+  const accuracyRows: GuestServedAccuracyRow[] = properties.map((property) => {
+    const bigQuery = byProperty.get(property) ?? 0;
+    const sheet = GUEST_SERVED_SHEET_SNAPSHOT[property];
+    return { property, bigQuery, sheet, variancePct: safeDivide(bigQuery - sheet, sheet) };
+  });
+
+  const totalBigQuery = accuracyRows.reduce((s, r) => s + r.bigQuery, 0);
+  const totalSheet = accuracyRows.reduce((s, r) => s + r.sheet, 0);
+
+  return {
+    label: GUEST_SERVED_SNAPSHOT_LABEL,
+    rows: accuracyRows,
+    totalBigQuery,
+    totalSheet,
+    totalVariancePct: safeDivide(totalBigQuery - totalSheet, totalSheet),
+  };
 }

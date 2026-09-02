@@ -1,15 +1,17 @@
 "use client";
 
-// 2026-09-02 redesign, extended same day: matches the reference dashboard's
-// exact arrangement (skyla-fnb.lovable.app/?preset=fy) — period pills on the
-// left (Today / This Month / Last 7 Days / Last 30 Days / This FY / Custom
-// Range), plus "Last Year" (requested in addition, styled identically, not
-// the reference's own tab but placed alongside it) — Property + Reset on the
-// right. "Last Updated" lives in the sidebar now (§3), not here.
+// 2026-09-02 redesign, third pass: matches the reference dashboard's exact
+// arrangement (skyla-fnb.lovable.app/?preset=fy) — page title on the left,
+// everything else (period pills, Compare-to-last-year toggle, Property,
+// Reset) clustered on the right of the same bar. "Last Year" is a toggle
+// here, not a 7th tab — see lib/reference/period.ts for why. "Last Updated"
+// lives in the sidebar (§3), not here.
 import { useState } from "react";
+import { usePathname } from "next/navigation";
 import { useFilters } from "@/lib/filters/FiltersContext";
 import { ACTIVE_PROPERTY_CODES } from "@/lib/reference/propertyReference";
 import { PERIOD_OPTIONS, PeriodKey } from "@/lib/reference/period";
+import { TABS } from "@/lib/navigation";
 import MultiSelectDropdown from "@/components/ui/MultiSelectDropdown";
 import clsx from "clsx";
 
@@ -26,10 +28,14 @@ function CustomRangePopover({ onClose }: { onClose: () => void }) {
   const [end, setEnd] = useState(customEnd ?? todayIso());
 
   return (
-    <div className="absolute left-0 top-full z-30 mt-2 flex flex-col gap-2 rounded-lg border border-zinc-200 bg-white p-3 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+    <div className="absolute right-0 top-full z-30 mt-2 flex flex-col gap-2 rounded-lg border border-zinc-200 bg-white p-3 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
       <div className="flex items-center gap-2">
         <label className="text-xs text-zinc-500 dark:text-zinc-400">
           From
+          {/* No `max` here: sales_booking legitimately holds forward/advance
+              bookings with a future StayDate (see Remaining Room Nights),
+              so a custom range ending after today is a real, valid query —
+              clamping it to today was the "stopped working after Sept 2nd" bug. */}
           <input
             type="date"
             value={start}
@@ -44,7 +50,6 @@ function CustomRangePopover({ onClose }: { onClose: () => void }) {
             type="date"
             value={end}
             min={start}
-            max={todayIso()}
             onChange={(e) => setEnd(e.target.value)}
             className="ml-2 rounded border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-800 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
           />
@@ -65,8 +70,11 @@ function CustomRangePopover({ onClose }: { onClose: () => void }) {
 }
 
 export default function FilterBar() {
-  const { properties, period, setProperties, setPeriod, resetAll } = useFilters();
+  const pathname = usePathname();
+  const { properties, period, compareYoY, setProperties, setPeriod, setCompareYoY, resetAll } = useFilters();
   const [customOpen, setCustomOpen] = useState(false);
+
+  const activeTab = TABS.find((t) => pathname === `/${t.slug}`);
 
   function handlePillClick(key: PeriodKey) {
     if (key === "custom") {
@@ -79,29 +87,46 @@ export default function FilterBar() {
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-950 sm:px-6">
-      <div role="tablist" aria-label="Comparison period" className="relative flex flex-wrap items-center gap-1 rounded-full bg-zinc-100 p-1 dark:bg-zinc-900">
-        {PERIOD_OPTIONS.map((opt) => (
-          <div key={opt.key} className="relative">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={period === opt.key}
-              onClick={() => handlePillClick(opt.key)}
-              className={clsx(
-                "rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors sm:text-sm",
-                period === opt.key
-                  ? "bg-teal-700 text-white shadow-sm"
-                  : "text-zinc-600 hover:bg-white hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white"
-              )}
-            >
-              {opt.label}
-            </button>
-            {opt.key === "custom" && customOpen && <CustomRangePopover onClose={() => setCustomOpen(false)} />}
-          </div>
-        ))}
-      </div>
+      <h1 className="shrink-0 text-base font-semibold text-zinc-900 dark:text-zinc-50">{activeTab?.label ?? "Dashboard"}</h1>
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <div role="tablist" aria-label="Comparison period" className="relative flex flex-wrap items-center gap-1 rounded-full bg-zinc-100 p-1 dark:bg-zinc-900">
+          {PERIOD_OPTIONS.map((opt) => (
+            <div key={opt.key} className="relative">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={period === opt.key}
+                onClick={() => handlePillClick(opt.key)}
+                className={clsx(
+                  "rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors sm:text-sm",
+                  period === opt.key
+                    ? "bg-teal-700 text-white shadow-sm"
+                    : "text-zinc-600 hover:bg-white hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white"
+                )}
+              >
+                {opt.label}
+              </button>
+              {opt.key === "custom" && customOpen && <CustomRangePopover onClose={() => setCustomOpen(false)} />}
+            </div>
+          ))}
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setCompareYoY(!compareYoY)}
+          title="Compare the current selection to the same dates last year, instead of the preceding period"
+          className={clsx(
+            "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+            compareYoY
+              ? "border-teal-700 bg-teal-700 text-white"
+              : "border-zinc-300 text-zinc-600 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          )}
+        >
+          <span className={clsx("h-2 w-2 rounded-full", compareYoY ? "bg-white" : "bg-zinc-400")} />
+          Compare to Last Year
+        </button>
+
         <MultiSelectDropdown label="Property" options={PROPERTY_OPTIONS} selected={properties} onChange={setProperties} />
 
         <button

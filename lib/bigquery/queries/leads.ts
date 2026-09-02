@@ -183,10 +183,13 @@ export interface LeadsByGroup {
 
 export async function getLeadsByProperty(filter: LeadsFilter): Promise<LeadsByGroup[]> {
   const { clause, params } = whereForFilter(filter);
+  // Property IS NOT NULL: cross-checked 2026-09-02 — a blank/unassigned
+  // Property isn't a real property to chart alongside the actual ones, so
+  // it's excluded here rather than shown as a "null" bucket.
   const rows = await runQuery<{ key: string; count: number }>(`
     SELECT ${PROPERTY_DISPLAY_EXPR} AS key, COUNT(*) AS count
     FROM ${table("lead_tracker")}
-    WHERE ${clause}
+    WHERE ${clause} AND Property IS NOT NULL
     GROUP BY key
     ORDER BY count DESC
   `, params);
@@ -198,7 +201,7 @@ export async function getLeadsBySource(filter: LeadsFilter): Promise<LeadsByGrou
   const rows = await runQuery<{ key: string | null; count: number }>(`
     SELECT Source AS key, COUNT(*) AS count
     FROM ${table("lead_tracker")}
-    WHERE ${clause}
+    WHERE ${clause} AND Source IS NOT NULL AND TRIM(Source) != ''
     GROUP BY key
     ORDER BY count DESC
   `, params);
@@ -213,10 +216,14 @@ export interface FormatLeadsRevenue {
 
 export async function getFormatLeadsRevenue(filter: LeadsFilter): Promise<FormatLeadsRevenue[]> {
   const { clause, params } = whereForFilter(filter);
+  // Format IS NOT NULL: cross-checked 2026-09-02 — same reasoning as
+  // getLeadsByProperty above, this was showing up as the single largest
+  // "null" bar in the chart, which isn't a meaningful format to compare
+  // against the real ones.
   const rows = await runQuery<{ format: string | null; leads: number; revenue: number | null }>(`
     SELECT Format AS format, COUNT(*) AS leads, SUM(${TOTAL_EXPR}) AS revenue
     FROM ${table("lead_tracker")}
-    WHERE ${clause}
+    WHERE ${clause} AND Format IS NOT NULL AND TRIM(Format) != ''
     GROUP BY format
     ORDER BY leads DESC
   `, params);
@@ -233,7 +240,7 @@ export async function getAdrByFormat(filter: LeadsFilter): Promise<AdrByFormat[]
   const rows = await runQuery<{ format: string | null; total: number | null; nights: number | null }>(`
     SELECT Format AS format, SUM(${TOTAL_EXPR}) AS total, SUM(No_of_nights) AS nights
     FROM ${table("lead_tracker")}
-    WHERE ${clause} AND Stage = 'Closed'
+    WHERE ${clause} AND Stage = 'Closed' AND Format IS NOT NULL AND TRIM(Format) != ''
     GROUP BY format
   `, params);
   return rows.map((r) => ({ format: r.format ?? "null", adr: safeDivide(r.total ?? 0, r.nights ?? 0) }));

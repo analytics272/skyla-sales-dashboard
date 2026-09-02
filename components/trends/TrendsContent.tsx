@@ -55,7 +55,6 @@ export default function TrendsContent({
 
   return (
     <div className="space-y-6">
-      <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">Trends</h2>
 
       <Card title="Occupancy Trend">
         <MultiSeriesLineChart

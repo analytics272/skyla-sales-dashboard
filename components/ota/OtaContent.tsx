@@ -26,7 +26,6 @@ export default function OtaContent({ otaBreakdown }: { otaBreakdown: OtaBreakdow
 
   return (
     <div className="space-y-6">
-      <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">OTA Breakdown</h2>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatTile label="Total Nights" value={totalNights.toLocaleString("en-IN")} />

@@ -4,7 +4,8 @@ import { CategoryAchievement, RevenueAchievement, MonthlyRevenueTarget, MonthlyA
 import type { PropertyTargetComparisonResult } from "@/lib/bigquery/queries/propertyTargets";
 import StatTile from "@/components/ui/StatTile";
 import Card from "@/components/ui/Card";
-import EntityCard from "@/components/ui/EntityCard";
+import TabbedCard, { useTabbedCard } from "@/components/ui/TabbedCard";
+import ProgressBar from "@/components/ui/ProgressBar";
 import GroupedBarChart from "@/components/charts/GroupedBarChart";
 import MultiSeriesLineChart from "@/components/charts/MultiSeriesLineChart";
 import { formatIndianCurrency, formatPercent } from "@/lib/format/currency";
@@ -61,10 +62,13 @@ export default function TargetsContent({
     Achieved: r.achievedRevenue,
   }));
 
+  const propertyTabs = propertyTargetComparison.rows.map((r) => r.property);
+  const [activeProperty, setActiveProperty] = useTabbedCard(propertyTabs);
+  const activeRow = propertyTargetComparison.rows.find((r) => r.property === activeProperty) ?? propertyTargetComparison.rows[0];
+
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">Targets Vs Achieved</h2>
         <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-2">
           <StatTile
             label="Revenue Achievement"
@@ -100,22 +104,29 @@ export default function TargetsContent({
             valueFormatter={(v) => formatIndianCurrency(v)}
           />
         </Card>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {propertyTargetComparison.rows.map((r) => (
-            <EntityCard
-              key={r.property}
-              name={r.property}
-              headlineLabel="Achieved Revenue"
-              headline={formatIndianCurrency(r.achievedRevenue)}
-              progress={r.achievedPct !== null ? { pct: r.achievedPct, label: `${formatPercent(r.achievedPct, 0)} of ${formatIndianCurrency(r.targetRevenue)} target` } : undefined}
-              stats={[
-                { label: "Target Occ %", value: r.targetOccPct !== null ? formatPercent(r.targetOccPct, 0) : "—" },
-                { label: "Achieved Occ %", value: r.achievedOccPct !== null ? formatPercent(r.achievedOccPct, 0) : "—" },
-                { label: "Target ARR", value: r.targetArr !== null ? `₹${Math.round(r.targetArr).toLocaleString("en-IN")}` : "—" },
-                { label: "Achieved ARR", value: r.achievedArr !== null ? `₹${Math.round(r.achievedArr).toLocaleString("en-IN")}` : "—" },
-              ]}
-            />
-          ))}
+        <div className="mt-3">
+          <TabbedCard title="Property Detail" tabs={propertyTabs} active={activeProperty} onChange={setActiveProperty}>
+            {activeRow && (
+              <>
+                <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">Achieved Revenue</p>
+                <p className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">{formatIndianCurrency(activeRow.achievedRevenue)}</p>
+                {activeRow.achievedPct !== null && (
+                  <div className="mt-2">
+                    <ProgressBar pct={activeRow.achievedPct} />
+                    <p className="mt-1 text-[11px] text-zinc-400 dark:text-zinc-500">
+                      {formatPercent(activeRow.achievedPct, 0)} of {formatIndianCurrency(activeRow.targetRevenue)} target
+                    </p>
+                  </div>
+                )}
+                <div className="mt-3 grid grid-cols-2 gap-3 border-t border-zinc-100 pt-3 dark:border-zinc-800 sm:grid-cols-4">
+                  <StatTile label="Target Occ %" value={activeRow.targetOccPct !== null ? formatPercent(activeRow.targetOccPct, 0) : "—"} />
+                  <StatTile label="Achieved Occ %" value={activeRow.achievedOccPct !== null ? formatPercent(activeRow.achievedOccPct, 0) : "—"} />
+                  <StatTile label="Target ARR" value={activeRow.targetArr !== null ? `₹${Math.round(activeRow.targetArr).toLocaleString("en-IN")}` : "—"} />
+                  <StatTile label="Achieved ARR" value={activeRow.achievedArr !== null ? `₹${Math.round(activeRow.achievedArr).toLocaleString("en-IN")}` : "—"} />
+                </div>
+              </>
+            )}
+          </TabbedCard>
         </div>
       </div>
 

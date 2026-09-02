@@ -7,6 +7,7 @@ import {
   getCancellationStats,
   getCancellationLeadTime,
   getCategoryMix,
+  getGuestServedAccuracyCheck,
 } from "@/lib/bigquery/queries/guestDetail";
 import {
   getB2bContractRanking,
@@ -37,6 +38,7 @@ export default async function BookingPage({ searchParams }: { searchParams: Prom
     b2bRanking,
     b2bTopAdr,
     b2bRetention,
+    guestServedAccuracy,
   ] = await Promise.all([
     getBookingStats(filter),
     getRoomNightsGap(filter),
@@ -49,6 +51,7 @@ export default async function BookingPage({ searchParams }: { searchParams: Prom
     getB2bContractRanking(resolved.properties, b2bFy),
     getB2bTopAdrContracts(resolved.properties, b2bFy),
     getCorporateAccountRetention(resolved.properties),
+    getGuestServedAccuracyCheck(),
   ]);
 
   return (
@@ -65,6 +68,7 @@ export default async function BookingPage({ searchParams }: { searchParams: Prom
       b2bContractSummary={summarizeB2bContracts(b2bRanking)}
       b2bTopAdr={b2bTopAdr}
       b2bRetention={b2bRetention}
+      guestServedAccuracy={guestServedAccuracy}
     />
   );
 }

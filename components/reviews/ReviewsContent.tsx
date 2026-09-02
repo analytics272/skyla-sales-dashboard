@@ -3,10 +3,10 @@
 import { ReviewStats, RatingTrendPoint } from "@/lib/bigquery/queries/reviews";
 import StatTile from "@/components/ui/StatTile";
 import Card from "@/components/ui/Card";
-import SingleMetricBarChart, { BarDatum } from "@/components/charts/SingleMetricBarChart";
+import MultiSeriesLineChart from "@/components/charts/MultiSeriesLineChart";
 
 function RatingTrendCard({ title, trend }: { title: string; trend: RatingTrendPoint[] }) {
-  const data: BarDatum[] = trend.map((p) => ({ name: p.monthLabel, value: p.count, color: "var(--series-1)" }));
+  const data = trend.map((p) => ({ month: p.monthLabel, count: p.count }));
   return (
     <Card title={title}>
       {trend.length === 0 ? (
@@ -14,7 +14,7 @@ function RatingTrendCard({ title, trend }: { title: string; trend: RatingTrendPo
           No reviews for this period.
         </p>
       ) : (
-        <SingleMetricBarChart data={data} valueFormatter={(v) => v.toLocaleString("en-IN")} />
+        <MultiSeriesLineChart data={data} xKey="month" series={[{ key: "count", color: "var(--series-1)" }]} valueFormatter={(v) => v.toLocaleString("en-IN")} />
       )}
     </Card>
   );
@@ -33,7 +33,6 @@ export default function ReviewsContent({
 }) {
   return (
     <div className="space-y-6">
-      <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">Reviews</h2>
 
       <div>
         <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Google Reviews</h3>

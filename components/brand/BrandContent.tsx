@@ -29,7 +29,6 @@ export default function BrandContent({
 
   return (
     <div className="space-y-6">
-      <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">Brand</h2>
 
       <Card title="Occupancy By Brand">
         <SingleMetricBarChart data={brandData} valueFormatter={(v) => `${v.toFixed(0)}%`} />
