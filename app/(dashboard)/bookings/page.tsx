@@ -16,11 +16,14 @@ import {
   summarizeB2bContracts,
   resolveB2bFy,
 } from "@/lib/bigquery/queries/b2bContracts";
+import { getOtaBreakdown } from "@/lib/bigquery/queries/otaBreakdown";
 import { parseKpiFilter, SearchParams } from "@/lib/filters/parseSearchParams";
 import { resolveFilter } from "@/lib/bigquery/queries/filters";
-import BookingContent from "@/components/booking/BookingContent";
+import BookingsContent from "@/components/bookings/BookingsContent";
 
-export default async function BookingPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+// 2026-09-02 redesign, fifth pass — merges the old Booking Details and OTA
+// Breakdown pages (B2B already lived inside Booking Details).
+export default async function BookingsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const sp = await searchParams;
   const filter = parseKpiFilter(sp);
   const resolved = resolveFilter(filter);
@@ -39,6 +42,7 @@ export default async function BookingPage({ searchParams }: { searchParams: Prom
     b2bTopAdr,
     b2bRetention,
     guestServedAccuracy,
+    otaBreakdown,
   ] = await Promise.all([
     getBookingStats(filter),
     getRoomNightsGap(filter),
@@ -52,10 +56,11 @@ export default async function BookingPage({ searchParams }: { searchParams: Prom
     getB2bTopAdrContracts(resolved.properties, b2bFy),
     getCorporateAccountRetention(resolved.properties),
     getGuestServedAccuracyCheck(),
+    getOtaBreakdown(filter),
   ]);
 
   return (
-    <BookingContent
+    <BookingsContent
       bookingStats={bookingStats}
       roomNightsGap={roomNightsGap}
       repeatBookingShare={repeatBookingShare}
@@ -69,6 +74,7 @@ export default async function BookingPage({ searchParams }: { searchParams: Prom
       b2bTopAdr={b2bTopAdr}
       b2bRetention={b2bRetention}
       guestServedAccuracy={guestServedAccuracy}
+      otaBreakdown={otaBreakdown}
     />
   );
 }

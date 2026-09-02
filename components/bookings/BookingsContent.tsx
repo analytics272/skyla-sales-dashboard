@@ -1,17 +1,26 @@
 "use client";
 
+// 2026-09-02 redesign, fifth pass — Bookings merges the old Booking Details
+// and OTA Breakdown pages (B2B already lived inside Booking Details). Where
+// two cards showed the same shape of breakdown (a donut, or a pair of ranked
+// bar lists) for closely related data, they're folded into one TabbedCard
+// per item #11 ("group same kind of things in one card, internal tabs for
+// better minimal navigation") rather than left as separate cards.
 import {
   BookingStats, RoomNightsGap, RepeatBookingShare, RoomFormatStats,
   ExpatStats, CancellationStats, CancellationLeadTime, CategoryMix, GuestServedAccuracyCheck,
 } from "@/lib/bigquery/queries/guestDetail";
 import type { B2bContractRanking, B2bTopAdrContract, RetentionPoint, B2bContractSummary } from "@/lib/bigquery/queries/b2bContracts";
+import type { OtaBreakdownRow } from "@/lib/bigquery/queries/otaBreakdown";
 import StatTile from "@/components/ui/StatTile";
 import Card from "@/components/ui/Card";
 import Expandable from "@/components/ui/Expandable";
+import TabbedCard, { useTabbedCard } from "@/components/ui/TabbedCard";
 import SingleMetricBarChart, { BarDatum } from "@/components/charts/SingleMetricBarChart";
 import HorizontalBarChart from "@/components/charts/HorizontalBarChart";
 import DonutChart from "@/components/charts/DonutChart";
 import Treemap from "@/components/charts/Treemap";
+import GroupedBarChart from "@/components/charts/GroupedBarChart";
 import { formatIndianCurrency, formatPercent } from "@/lib/format/currency";
 import { ROOM_TYPE_COLOR, ROOM_TYPE_ORDER, CATEGORY_COLOR, CATEGORY_ORDER } from "@/lib/design/tokens";
 
@@ -20,8 +29,21 @@ const CONTRACT_STATUS_COLOR: Record<string, string> = {
   "No Contract": "#d97706",
 };
 const CONTRACT_STATUS_FALLBACK = "var(--chart-baseline)";
+const OTA_PALETTE = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--series-4)", "var(--series-5)", "var(--chart-baseline)", "#a855f7", "#0ea5e9"];
 
-export default function BookingContent({
+type MixTab = "Category" | "Room Format";
+const MIX_TABS: MixTab[] = ["Category", "Room Format"];
+
+type FormatTab = "Revenue" | "ADR";
+const FORMAT_TABS: FormatTab[] = ["Revenue", "ADR"];
+
+type B2bRankTab = "Contribution %" | "Top ADR";
+const B2B_RANK_TABS: B2bRankTab[] = ["Contribution %", "Top ADR"];
+
+type OtaTab = "Revenue Share" | "Net Revenue" | "Commission %";
+const OTA_TABS: OtaTab[] = ["Revenue Share", "Net Revenue", "Commission %"];
+
+export default function BookingsContent({
   bookingStats,
   roomNightsGap,
   repeatBookingShare,
@@ -35,6 +57,7 @@ export default function BookingContent({
   b2bTopAdr,
   b2bRetention,
   guestServedAccuracy,
+  otaBreakdown,
 }: {
   bookingStats: BookingStats;
   roomNightsGap: RoomNightsGap;
@@ -49,7 +72,13 @@ export default function BookingContent({
   b2bTopAdr: B2bTopAdrContract[];
   b2bRetention: RetentionPoint[];
   guestServedAccuracy: GuestServedAccuracyCheck;
+  otaBreakdown: OtaBreakdownRow[];
 }) {
+  const [mixTab, setMixTab] = useTabbedCard(MIX_TABS);
+  const [formatTab, setFormatTab] = useTabbedCard(FORMAT_TABS);
+  const [b2bRankTab, setB2bRankTab] = useTabbedCard(B2B_RANK_TABS);
+  const [otaTab, setOtaTab] = useTabbedCard(OTA_TABS);
+
   const roomTypeLabel = (rt: string | null) => rt ?? "Unmapped";
   const roomTypesPresent = [
     ...ROOM_TYPE_ORDER.filter((rt) => roomFormatStats.some((r) => r.roomType === rt)),
@@ -60,15 +89,19 @@ export default function BookingContent({
     const row = roomFormatStats.find((r) => roomTypeLabel(r.roomType) === rt);
     return { name: rt, value: row?.revenue ?? 0, color: ROOM_TYPE_COLOR[rt] ?? "var(--chart-baseline)" };
   });
-
   const adrByFormat: BarDatum[] = roomTypesPresent.map((rt) => {
     const row = roomFormatStats.find((r) => roomTypeLabel(r.roomType) === rt);
     return { name: rt, value: row?.adr ?? 0, color: ROOM_TYPE_COLOR[rt] ?? "var(--chart-baseline)" };
   });
-
   const nightsShareDonut = roomTypesPresent.map((rt) => {
     const row = roomFormatStats.find((r) => roomTypeLabel(r.roomType) === rt);
     return { name: rt, value: row?.nights ?? 0, color: ROOM_TYPE_COLOR[rt] ?? "var(--chart-baseline)" };
+  });
+
+  const categoriesPresent = CATEGORY_ORDER.filter((c) => categoryMix.some((m) => m.category === c));
+  const revenueDonut = categoriesPresent.map((c) => {
+    const m = categoryMix.find((x) => x.category === c);
+    return { name: c, value: m?.revenue ?? 0, color: CATEGORY_COLOR[c] };
   });
 
   const b2bRevenueData: BarDatum[] = b2bRanking.map((r) => ({
@@ -83,16 +116,23 @@ export default function BookingContent({
     .map((r) => ({ name: r.company, value: (r.contributionPct ?? 0) * 100, color: "var(--series-1)" }));
   const b2bAdrData: BarDatum[] = b2bTopAdr.map((r) => ({ name: r.company, value: r.avgAdr, color: "var(--series-4)" }));
 
-  const categoriesPresent = CATEGORY_ORDER.filter((c) => categoryMix.some((m) => m.category === c));
-  const revenueDonut = categoriesPresent.map((c) => {
-    const m = categoryMix.find((x) => x.category === c);
-    return { name: c, value: m?.revenue ?? 0, color: CATEGORY_COLOR[c] };
-  });
-
   const retentionData: BarDatum[] = b2bRetention.map((r) => ({
     name: `${r.fromFy} → ${r.toFy}`,
     value: r.retentionPct !== null ? r.retentionPct * 100 : 0,
     color: "var(--series-1)",
+  }));
+
+  const totalOtaNights = otaBreakdown.reduce((s, r) => s + r.nights, 0);
+  const totalOtaRevenue = otaBreakdown.reduce((s, r) => s + r.totalRevenue, 0);
+  const netOtaRevenue = otaBreakdown.reduce((s, r) => s + r.netRevenue, 0);
+  const blendedCommissionPct = totalOtaRevenue > 0 ? (1 - netOtaRevenue / totalOtaRevenue) * 100 : 0;
+  const otaRevenueDonut = otaBreakdown.map((r, i) => ({ name: r.otaName, value: r.totalRevenue, color: OTA_PALETTE[i % OTA_PALETTE.length] }));
+  const otaNetRevenueData: BarDatum[] = otaBreakdown.map((r, i) => ({ name: r.otaName, value: r.netRevenue, color: OTA_PALETTE[i % OTA_PALETTE.length] }));
+  const otaCommissionData: BarDatum[] = otaBreakdown.map((r, i) => ({ name: r.otaName, value: r.avgCommissionPct, color: OTA_PALETTE[i % OTA_PALETTE.length] }));
+  const otaAdrData = otaBreakdown.map((r) => ({
+    ota: r.otaName,
+    "Before Commission": r.adrBeforeCommission ?? 0,
+    "After Commission": r.adrAfterCommission ?? 0,
   }));
 
   return (
@@ -142,7 +182,7 @@ export default function BookingContent({
             <div key={r.property}>
               <p className="text-[10px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500">{r.property}</p>
               <p className="text-xs text-zinc-700 dark:text-zinc-200">{r.bigQuery.toLocaleString("en-IN")} / {r.sheet.toLocaleString("en-IN")}</p>
-              <p className={r.variancePct !== null && r.variancePct < -0.2 ? "text-xs font-medium" : "text-xs font-medium"} style={{ color: r.variancePct !== null && r.variancePct < -0.2 ? "var(--chart-delta-bad)" : "var(--chart-delta-good)" }}>
+              <p className="text-xs font-medium" style={{ color: r.variancePct !== null && r.variancePct < -0.2 ? "var(--chart-delta-bad)" : "var(--chart-delta-good)" }}>
                 {r.variancePct !== null ? formatPercent(r.variancePct, 0) : "—"}
               </p>
             </div>
@@ -176,22 +216,21 @@ export default function BookingContent({
         </div>
       </div>
 
-      <Card title="Night/Revenue Mix By Category">
-        <DonutChart data={revenueDonut} valueFormatter={(v) => formatIndianCurrency(v)} />
-      </Card>
+      <TabbedCard title="Revenue Mix" tabs={MIX_TABS} active={mixTab} onChange={setMixTab}>
+        {mixTab === "Category" ? (
+          <DonutChart data={revenueDonut} valueFormatter={(v) => formatIndianCurrency(v)} />
+        ) : (
+          <DonutChart data={nightsShareDonut} valueFormatter={(v) => v.toLocaleString("en-IN")} />
+        )}
+      </TabbedCard>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card title="Revenue By Room Format">
+      <TabbedCard title="By Room Format" tabs={FORMAT_TABS} active={formatTab} onChange={setFormatTab}>
+        {formatTab === "Revenue" ? (
           <HorizontalBarChart data={revenueByFormat} valueFormatter={(v) => formatIndianCurrency(v)} />
-        </Card>
-        <Card title="ADR By Room Format">
+        ) : (
           <HorizontalBarChart data={adrByFormat} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} />
-        </Card>
-      </div>
-
-      <Card title="Nights Share By Room Format">
-        <DonutChart data={nightsShareDonut} valueFormatter={(v) => v.toLocaleString("en-IN")} />
-      </Card>
+        )}
+      </TabbedCard>
 
       <div>
         <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">B2B Contracts</h3>
@@ -212,14 +251,47 @@ export default function BookingContent({
           </Card>
         </div>
 
-        <div className="mt-3 grid gap-4 lg:grid-cols-2">
-          <Card title="Top Contribution % By Company" subtitle="Share of Skyla's total revenue, top 15">
-            <HorizontalBarChart data={b2bContributionData} valueFormatter={(v) => `${v.toFixed(0)}%`} labelWidth={140} />
-          </Card>
-          <Card title="Top ADR Contracts" subtitle="Minimum 1 night">
-            <Expandable collapsedHeight={420} label={`Show all ${b2bTopAdr.length}`}>
-              <HorizontalBarChart data={b2bAdrData} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} labelWidth={140} />
-            </Expandable>
+        <div className="mt-3">
+          <TabbedCard title="Company Rankings" tabs={B2B_RANK_TABS} active={b2bRankTab} onChange={setB2bRankTab}>
+            {b2bRankTab === "Contribution %" ? (
+              <HorizontalBarChart data={b2bContributionData} valueFormatter={(v) => `${v.toFixed(0)}%`} labelWidth={140} />
+            ) : (
+              <Expandable collapsedHeight={420} label={`Show all ${b2bTopAdr.length}`}>
+                <HorizontalBarChart data={b2bAdrData} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} labelWidth={140} />
+              </Expandable>
+            )}
+          </TabbedCard>
+        </div>
+      </div>
+
+      <div>
+        <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">OTA Breakdown</h3>
+        <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <StatTile label="Total Nights" value={totalOtaNights.toLocaleString("en-IN")} />
+          <StatTile label="Total Revenue" value={formatIndianCurrency(totalOtaRevenue)} />
+          <StatTile label="Net Revenue" value={formatIndianCurrency(netOtaRevenue)} />
+          <StatTile label="Blended Commission %" value={`${blendedCommissionPct.toFixed(1)}%`} />
+        </div>
+
+        <div className="mt-3">
+          <TabbedCard title="By OTA Site" tabs={OTA_TABS} active={otaTab} onChange={setOtaTab}>
+            {otaTab === "Revenue Share" && <DonutChart data={otaRevenueDonut} valueFormatter={(v) => formatIndianCurrency(v)} />}
+            {otaTab === "Net Revenue" && <HorizontalBarChart data={otaNetRevenueData} valueFormatter={(v) => formatIndianCurrency(v)} />}
+            {otaTab === "Commission %" && <HorizontalBarChart data={otaCommissionData} valueFormatter={(v) => `${v.toFixed(1)}%`} />}
+          </TabbedCard>
+        </div>
+
+        <div className="mt-3">
+          <Card title="ADR Before / After Commission By OTA Site">
+            <GroupedBarChart
+              data={otaAdrData}
+              xKey="ota"
+              series={[
+                { key: "Before Commission", color: "var(--series-1)" },
+                { key: "After Commission", color: "var(--series-3)" },
+              ]}
+              valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`}
+            />
           </Card>
         </div>
       </div>
