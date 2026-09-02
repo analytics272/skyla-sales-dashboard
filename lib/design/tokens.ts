@@ -47,12 +47,6 @@ export const REVENUE_ROLLOVER_COLOR = {
   achieved: "var(--series-6)",
 };
 
-export const FY_COLOR: Record<string, string> = {
-  "FY 24-25": "var(--series-1)",
-  "FY 25-26": "var(--series-2)",
-  "FY 26-27": "var(--series-3)",
-};
-
 export const ROOM_TYPE_COLOR: Record<string, string> = {
   "Executive Room": "var(--series-1)",
   "Studio Room": "var(--series-2)",

@@ -1,16 +1,19 @@
-// PRD §6.3 — Trends (by Financial Year), monthly x-axis.
+// PRD §6.3 — Trends, monthly x-axis.
+// 2026-09-02: rewritten for the Today/This FY/Last Year period-tabs model —
+// instead of "one line per selected FY", Trends now shows a single line for
+// the active period's months, grouped by calendar month within
+// resolved.period.current (naturally a single point under "Today").
 import { runQuery, table } from "../client";
 import { KpiFilter, resolveFilter } from "./filters";
 import { getAvailableRoomNightsByProperty } from "./propertyWindows";
-import { getLpMonthlyPoints, getLpCategoryByFy, LP_PROPERTY } from "./lpMonthly";
+import { getLpMonthlyPoints, getLpCategoryMix, LP_PROPERTY } from "./lpMonthly";
 import { bookingCategorySqlExpr, BookingCategory } from "@/lib/reference/bookingSourceMap";
-import { fyLabelSqlExpr, fyMonthBounds } from "@/lib/reference/financialYear";
+import { DateRange } from "@/lib/reference/financialYear";
 import { safeDivide } from "@/lib/format/currency";
 
 export interface MonthlyTrendPoint {
-  fy: string;
-  month: number; // calendar month, 1-12
-  monthName: string;
+  monthStartDate: string; // ISO date, 1st of month — sort/x-axis key
+  monthLabel: string; // e.g. "Apr 2025"
   soldRoomNights: number;
   revenue: number;
   availableRoomNights: number;
@@ -20,75 +23,61 @@ export interface MonthlyTrendPoint {
 }
 
 interface RawTrendRow {
-  fy: string;
-  month: number;
-  month_name: string;
+  month_start: string;
   nights: number;
   revenue: number | null;
 }
 
 const MONTH_NAMES = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
 
-export async function getMonthlyTrends(
-  filter: Pick<KpiFilter, "properties">
-): Promise<MonthlyTrendPoint[]> {
-  const resolved = resolveFilter(filter);
-  // LP (LP Integration PRD Addendum, 2026-08-26) has zero sales_booking rows —
-  // merged in from sales_booking_lp_monthly when selected. Not scoped by FY
-  // here (getLpMonthlyPoints([]) = every FY LP has data for), matching this
-  // function's own "always all FYs, Month filter doesn't apply" convention.
-  const includeLp = resolved.properties.includes(LP_PROPERTY);
+function monthLabelOf(iso: string): string {
+  const d = new Date(`${iso}T00:00:00`);
+  return `${MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}`;
+}
 
+async function fetchMonthlyPoints(properties: string[], range: DateRange, includeLp: boolean): Promise<MonthlyTrendPoint[]> {
   const [rows, lpPoints] = await Promise.all([
     runQuery<RawTrendRow>(`
       SELECT
-        ${fyLabelSqlExpr("CAST(StayDate AS DATE)")} AS fy,
-        EXTRACT(MONTH FROM CAST(StayDate AS DATE)) AS month,
-        FORMAT_DATE('%B', CAST(StayDate AS DATE)) AS month_name,
+        CAST(DATE_TRUNC(CAST(StayDate AS DATE), MONTH) AS STRING) AS month_start,
         COUNT(*) AS nights,
         SUM(DailyRevenue) AS revenue
       FROM ${table("sales_booking")}
-      WHERE Property IN UNNEST(@properties)
-      GROUP BY fy, month, month_name
-      ORDER BY fy, month
-    `, { properties: resolved.properties }),
-    includeLp ? getLpMonthlyPoints([]) : Promise.resolve([]),
+      WHERE Property IN UNNEST(@properties) AND CAST(StayDate AS DATE) BETWEEN @start AND @end
+      GROUP BY month_start
+      ORDER BY month_start
+    `, { properties, start: range.start, end: range.end }),
+    includeLp ? getLpMonthlyPoints(range) : Promise.resolve([]),
   ]);
 
-  const merged = new Map<string, { fy: string; month: number; monthName: string; nights: number; revenue: number }>();
-  for (const r of rows) {
-    merged.set(`${r.fy}|${r.month}`, {
-      fy: r.fy,
-      month: r.month,
-      monthName: r.month_name ?? MONTH_NAMES[r.month - 1],
-      nights: r.nights,
-      revenue: r.revenue ?? 0,
-    });
-  }
+  const merged = new Map<string, { nights: number; revenue: number }>();
+  for (const r of rows) merged.set(r.month_start, { nights: r.nights, revenue: r.revenue ?? 0 });
   for (const lp of lpPoints) {
-    const key = `${lp.fy}|${lp.month}`;
-    const existing = merged.get(key);
+    const existing = merged.get(lp.monthStartDate);
     if (existing) {
       existing.nights += lp.soldRoomNights;
       existing.revenue += lp.revenue;
     } else {
-      merged.set(key, { fy: lp.fy, month: lp.month, monthName: MONTH_NAMES[lp.month - 1], nights: lp.soldRoomNights, revenue: lp.revenue });
+      merged.set(lp.monthStartDate, { nights: lp.soldRoomNights, revenue: lp.revenue });
     }
   }
 
   const points: MonthlyTrendPoint[] = [];
-  for (const m of merged.values()) {
-    const bounds = fyMonthBounds(m.fy, m.month);
-    const byProperty = await getAvailableRoomNightsByProperty(resolved.properties, [bounds]);
+  for (const [monthStart, m] of merged) {
+    const monthEnd = new Date(`${monthStart}T00:00:00`);
+    monthEnd.setMonth(monthEnd.getMonth() + 1);
+    monthEnd.setDate(0);
+    const clampedEnd = monthEnd.toISOString().slice(0, 10) < range.end ? monthEnd.toISOString().slice(0, 10) : range.end;
+    const clampedStart = monthStart > range.start ? monthStart : range.start;
+    const byProperty = await getAvailableRoomNightsByProperty(properties, { start: clampedStart, end: clampedEnd });
     const availableRoomNights = Object.values(byProperty).reduce((s, n) => s + n, 0);
 
     points.push({
-      fy: m.fy,
-      month: m.month,
-      monthName: m.monthName,
+      monthStartDate: monthStart,
+      monthLabel: monthLabelOf(monthStart),
       soldRoomNights: m.nights,
       revenue: m.revenue,
       availableRoomNights,
@@ -97,50 +86,59 @@ export async function getMonthlyTrends(
       revPar: safeDivide(m.revenue, availableRoomNights),
     });
   }
-  return points.sort((a, b) => (a.fy === b.fy ? a.month - b.month : a.fy.localeCompare(b.fy)));
+  return points.sort((a, b) => a.monthStartDate.localeCompare(b.monthStartDate));
 }
 
-export interface CategoryAdrPoint {
-  fy: string;
+export interface TrendSeries {
+  current: MonthlyTrendPoint[];
+  previous: MonthlyTrendPoint[];
+}
+
+export async function getMonthlyTrends(filter: KpiFilter): Promise<TrendSeries> {
+  const resolved = resolveFilter(filter);
+  const includeLp = resolved.properties.includes(LP_PROPERTY);
+  const [current, previous] = await Promise.all([
+    fetchMonthlyPoints(resolved.properties, resolved.period.current, includeLp),
+    fetchMonthlyPoints(resolved.properties, resolved.period.previous, includeLp),
+  ]);
+  return { current, previous };
+}
+
+export interface CategoryAdrStat {
   category: BookingCategory;
   nights: number;
   revenue: number;
   adr: number | null;
 }
 
-export async function getBusinessCategoryAdrTrend(
-  filter: Pick<KpiFilter, "properties">
-): Promise<CategoryAdrPoint[]> {
-  const resolved = resolveFilter(filter);
-  const includeLp = resolved.properties.includes(LP_PROPERTY);
-
-  const [rows, lpCategoryRows] = await Promise.all([
-    runQuery<{ fy: string; category: BookingCategory; nights: number; revenue: number | null }>(`
-      SELECT
-        ${fyLabelSqlExpr("CAST(StayDate AS DATE)")} AS fy,
-        ${bookingCategorySqlExpr("Source")} AS category,
-        COUNT(*) AS nights,
-        SUM(DailyRevenue) AS revenue
+async function fetchCategoryMix(properties: string[], range: DateRange, includeLp: boolean): Promise<CategoryAdrStat[]> {
+  const [rows, lpRows] = await Promise.all([
+    runQuery<{ category: BookingCategory; nights: number; revenue: number | null }>(`
+      SELECT ${bookingCategorySqlExpr("Source")} AS category, COUNT(*) AS nights, SUM(DailyRevenue) AS revenue
       FROM ${table("sales_booking")}
-      WHERE Property IN UNNEST(@properties)
-      GROUP BY fy, category
-      ORDER BY fy, category
-    `, { properties: resolved.properties }),
-    includeLp ? getLpCategoryByFy([]) : Promise.resolve([]),
+      WHERE Property IN UNNEST(@properties) AND CAST(StayDate AS DATE) BETWEEN @start AND @end
+      GROUP BY category
+    `, { properties, start: range.start, end: range.end }),
+    includeLp ? getLpCategoryMix(range) : Promise.resolve([]),
   ]);
 
-  const merged = new Map<string, { fy: string; category: BookingCategory; nights: number; revenue: number }>();
-  for (const r of rows) merged.set(`${r.fy}|${r.category}`, { fy: r.fy, category: r.category, nights: r.nights, revenue: r.revenue ?? 0 });
-  for (const lp of lpCategoryRows) {
-    const key = `${lp.fy}|${lp.category}`;
-    const existing = merged.get(key);
+  const merged = new Map<BookingCategory, { nights: number; revenue: number }>();
+  for (const r of rows) merged.set(r.category, { nights: r.nights, revenue: r.revenue ?? 0 });
+  for (const lp of lpRows) {
+    const existing = merged.get(lp.category);
     if (existing) {
       existing.nights += lp.nights;
       existing.revenue += lp.revenue;
     } else {
-      merged.set(key, { fy: lp.fy, category: lp.category, nights: lp.nights, revenue: lp.revenue });
+      merged.set(lp.category, { nights: lp.nights, revenue: lp.revenue });
     }
   }
+  return [...merged.entries()].map(([category, v]) => ({ category, ...v, adr: safeDivide(v.revenue, v.nights) }));
+}
 
-  return [...merged.values()].map((m) => ({ ...m, adr: safeDivide(m.revenue, m.nights) }));
+/** Business-category (B2B/B2C/OTA) revenue/nights/ADR for the active period only — used for Trends' category chart. */
+export async function getBusinessCategoryAdr(filter: KpiFilter): Promise<CategoryAdrStat[]> {
+  const resolved = resolveFilter(filter);
+  const includeLp = resolved.properties.includes(LP_PROPERTY);
+  return fetchCategoryMix(resolved.properties, resolved.period.current, includeLp);
 }

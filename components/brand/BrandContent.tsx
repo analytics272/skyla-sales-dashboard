@@ -1,19 +1,19 @@
 "use client";
 
-import { BrandOccupancy, CategoryRevenueByFy } from "@/lib/bigquery/queries/brandCategory";
+import { BrandOccupancy } from "@/lib/bigquery/queries/brandCategory";
+import { CategoryAdrStat } from "@/lib/bigquery/queries/trends";
 import Card from "@/components/ui/Card";
 import SingleMetricBarChart, { BarDatum } from "@/components/charts/SingleMetricBarChart";
-import GroupedBarChart from "@/components/charts/GroupedBarChart";
-import FyComparisonStrip from "@/components/charts/FyComparisonStrip";
+import DonutChart from "@/components/charts/DonutChart";
 import { formatIndianCurrency } from "@/lib/format/currency";
 import { CATEGORY_COLOR, CATEGORY_ORDER, BRAND_COLOR, BRAND_ORDER } from "@/lib/design/tokens";
 
 export default function BrandContent({
   brandOccupancy,
-  categoryRevenueByFy,
+  categoryAdr,
 }: {
   brandOccupancy: BrandOccupancy[];
-  categoryRevenueByFy: CategoryRevenueByFy[];
+  categoryAdr: CategoryAdrStat[];
 }) {
   const brandData: BarDatum[] = BRAND_ORDER.filter((b) => brandOccupancy.some((r) => r.brand === b)).map((b) => ({
     name: b,
@@ -21,20 +21,11 @@ export default function BrandContent({
     color: BRAND_COLOR[b],
   }));
 
-  const fyOrder = [...new Set(categoryRevenueByFy.map((r) => r.fy))].sort();
-  const categoriesPresent = CATEGORY_ORDER.filter((c) => categoryRevenueByFy.some((r) => r.category === c));
-  const revenueByFyData = fyOrder.map((fy) => {
-    const row: Record<string, unknown> = { fy };
-    for (const c of categoriesPresent) {
-      row[c] = categoryRevenueByFy.find((r) => r.fy === fy && r.category === c)?.revenue ?? 0;
-    }
-    return row;
+  const categoriesPresent = CATEGORY_ORDER.filter((c) => categoryAdr.some((r) => r.category === c));
+  const revenueDonut = categoriesPresent.map((c) => {
+    const r = categoryAdr.find((x) => x.category === c)!;
+    return { name: c, value: r.revenue, color: CATEGORY_COLOR[c] };
   });
-
-  const revenueFyTotals = fyOrder.map((fy) => ({
-    fy,
-    value: categoryRevenueByFy.filter((r) => r.fy === fy).reduce((s, r) => s + r.revenue, 0),
-  }));
 
   return (
     <div className="space-y-6">
@@ -44,15 +35,8 @@ export default function BrandContent({
         <SingleMetricBarChart data={brandData} valueFormatter={(v) => `${v.toFixed(0)}%`} />
       </Card>
 
-      <Card title="Revenue By Business Category & FY">
-        <FyComparisonStrip points={revenueFyTotals} valueFormatter={(v) => formatIndianCurrency(v)} />
-        <GroupedBarChart
-          data={revenueByFyData}
-          xKey="fy"
-          series={categoriesPresent.map((c) => ({ key: c, color: CATEGORY_COLOR[c] }))}
-          valueFormatter={(v) => formatIndianCurrency(v)}
-          height={320}
-        />
+      <Card title="Revenue By Business Category">
+        <DonutChart data={revenueDonut} valueFormatter={(v) => formatIndianCurrency(v)} />
       </Card>
     </div>
   );

@@ -19,7 +19,22 @@
 // to avoid two redundant company tables on the same dashboard tab.
 import { runQuery, table } from "../client";
 import { safeDivide } from "@/lib/format/currency";
-import { fyLabelSqlExpr } from "@/lib/reference/financialYear";
+import { currentFYLabel, fyLabelSqlExpr } from "@/lib/reference/financialYear";
+import { PeriodKey, resolvePeriod } from "@/lib/reference/period";
+
+/**
+ * b2b_bills is keyed by its own Financial_Year STRING column, not a date
+ * column (and per HANDOVER, that column uses a slightly different FY-boundary
+ * convention than the standard Apr-Mar rule — trusted as-is, not recomputed).
+ * So instead of a date-range filter, the active period tab resolves to a
+ * single governing FY label the same way Targets does: the FY containing
+ * period.current.start ("Today"/"This FY" -> the current FY, "Last Year" ->
+ * the prior completed FY).
+ */
+export function resolveB2bFy(period?: PeriodKey): string {
+  const p = resolvePeriod(period ?? "this_fy");
+  return currentFYLabel(new Date(`${p.current.start}T00:00:00`));
+}
 
 export interface B2bContractRanking {
   company: string; // Bills_due_from
@@ -32,16 +47,16 @@ export interface B2bContractRanking {
 }
 
 /** Total revenue across every channel (B2B+B2C+OTA) for the same property+FY scope, from sales_booking — the "overall sales revenue" denominator for Contribution %. */
-async function getOverallRevenue(properties: string[], fys: string[]): Promise<number> {
+async function getOverallRevenue(properties: string[], fy: string): Promise<number> {
   const rows = await runQuery<{ revenue: number | null }>(`
     SELECT SUM(DailyRevenue) AS revenue
     FROM ${table("sales_booking")}
-    WHERE Property IN UNNEST(@properties) AND ${fyLabelSqlExpr("CAST(StayDate AS DATE)")} IN UNNEST(@fys)
-  `, { properties, fys });
+    WHERE Property IN UNNEST(@properties) AND ${fyLabelSqlExpr("CAST(StayDate AS DATE)")} = @fy
+  `, { properties, fy });
   return rows[0]?.revenue ?? 0;
 }
 
-export async function getB2bContractRanking(properties: string[], fys: string[]): Promise<B2bContractRanking[]> {
+export async function getB2bContractRanking(properties: string[], fy: string): Promise<B2bContractRanking[]> {
   const [rows, overallRevenue] = await Promise.all([
     runQuery<{ company: string; contractStatus: string | null; roomRevenue: number | null; nights: number }>(`
       SELECT
@@ -51,11 +66,11 @@ export async function getB2bContractRanking(properties: string[], fys: string[])
         SUM(Nights) AS nights
       FROM ${table("b2b_bills")}
       WHERE Bills_due_from IS NOT NULL AND Financial_Year != 'FY 99-00'
-        AND Property IN UNNEST(@properties) AND Financial_Year IN UNNEST(@fys)
+        AND Property IN UNNEST(@properties) AND Financial_Year = @fy
       GROUP BY company
       ORDER BY roomRevenue DESC
-    `, { properties, fys }),
-    getOverallRevenue(properties, fys),
+    `, { properties, fy }),
+    getOverallRevenue(properties, fy),
   ]);
 
   // Each company's share of TOTAL company-wide sales revenue — B2B + B2C +
@@ -93,7 +108,7 @@ export interface B2bTopAdrContract {
 }
 
 /** Ranked by AVG(ADR), filtered to meaningful volume (Nights > 0) per PRD. */
-export async function getB2bTopAdrContracts(properties: string[], fys: string[]): Promise<B2bTopAdrContract[]> {
+export async function getB2bTopAdrContracts(properties: string[], fy: string): Promise<B2bTopAdrContract[]> {
   // total_nights (not "nights"): BigQuery resolves HAVING identifiers
   // case-insensitively against SELECT aliases first, so an alias merely
   // differing in case from the source column (nights vs Nights) gets matched to
@@ -102,11 +117,11 @@ export async function getB2bTopAdrContracts(properties: string[], fys: string[])
     SELECT Bills_due_from AS company, AVG(ADR) AS avgAdr, SUM(Nights) AS total_nights
     FROM ${table("b2b_bills")}
     WHERE Bills_due_from IS NOT NULL AND Financial_Year != 'FY 99-00'
-      AND Property IN UNNEST(@properties) AND Financial_Year IN UNNEST(@fys)
+      AND Property IN UNNEST(@properties) AND Financial_Year = @fy
     GROUP BY company
     HAVING total_nights > 0
     ORDER BY avgAdr DESC
-  `, { properties, fys });
+  `, { properties, fy });
   return rows.map((r) => ({ company: r.company, avgAdr: r.avgAdr, nights: r.total_nights }));
 }
 

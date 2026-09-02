@@ -1,25 +1,25 @@
 "use client";
 
 import {
-  BookingStats, RoomNightsGap, RepeatBookingShare, RoomFormatStats, RoomFormatByFy,
+  BookingStats, RoomNightsGap, RepeatBookingShare, RoomFormatStats,
   ExpatStats, CancellationStats, CancellationLeadTime, CategoryMix,
 } from "@/lib/bigquery/queries/guestDetail";
 import type { B2bContractRanking, B2bTopAdrContract, RetentionPoint, B2bContractSummary } from "@/lib/bigquery/queries/b2bContracts";
 import StatTile from "@/components/ui/StatTile";
 import Card from "@/components/ui/Card";
 import Table, { TableColumn } from "@/components/ui/Table";
+import Expandable from "@/components/ui/Expandable";
 import SingleMetricBarChart, { BarDatum } from "@/components/charts/SingleMetricBarChart";
-import GroupedBarChart from "@/components/charts/GroupedBarChart";
-import FyComparisonStrip from "@/components/charts/FyComparisonStrip";
+import HorizontalBarChart from "@/components/charts/HorizontalBarChart";
+import DonutChart from "@/components/charts/DonutChart";
 import { formatIndianCurrency, formatPercent } from "@/lib/format/currency";
-import { ROOM_TYPE_COLOR, ROOM_TYPE_ORDER, FY_COLOR, CATEGORY_COLOR, CATEGORY_ORDER } from "@/lib/design/tokens";
+import { ROOM_TYPE_COLOR, ROOM_TYPE_ORDER, CATEGORY_COLOR, CATEGORY_ORDER } from "@/lib/design/tokens";
 
 export default function BookingContent({
   bookingStats,
   roomNightsGap,
   repeatBookingShare,
   roomFormatStats,
-  roomFormatByFy,
   expatStats,
   cancellationStats,
   cancellationLeadTime,
@@ -33,7 +33,6 @@ export default function BookingContent({
   roomNightsGap: RoomNightsGap;
   repeatBookingShare: RepeatBookingShare;
   roomFormatStats: RoomFormatStats[];
-  roomFormatByFy: RoomFormatByFy[];
   expatStats: ExpatStats;
   cancellationStats: CancellationStats;
   cancellationLeadTime: CancellationLeadTime;
@@ -49,35 +48,20 @@ export default function BookingContent({
     ...(roomFormatStats.some((r) => r.roomType === null) ? ["Unmapped" as const] : []),
   ];
 
+  const revenueByFormat: BarDatum[] = roomTypesPresent.map((rt) => {
+    const row = roomFormatStats.find((r) => roomTypeLabel(r.roomType) === rt);
+    return { name: rt, value: row?.revenue ?? 0, color: ROOM_TYPE_COLOR[rt] ?? "var(--chart-baseline)" };
+  });
+
   const adrByFormat: BarDatum[] = roomTypesPresent.map((rt) => {
     const row = roomFormatStats.find((r) => roomTypeLabel(r.roomType) === rt);
     return { name: rt, value: row?.adr ?? 0, color: ROOM_TYPE_COLOR[rt] ?? "var(--chart-baseline)" };
   });
 
-  const nightsShareByFormat: BarDatum[] = roomTypesPresent.map((rt) => {
+  const nightsShareDonut = roomTypesPresent.map((rt) => {
     const row = roomFormatStats.find((r) => roomTypeLabel(r.roomType) === rt);
-    return { name: rt, value: (row?.nightsSharePct ?? 0) * 100, color: ROOM_TYPE_COLOR[rt] ?? "var(--chart-baseline)" };
+    return { name: rt, value: row?.nights ?? 0, color: ROOM_TYPE_COLOR[rt] ?? "var(--chart-baseline)" };
   });
-
-  // Room type on the x-axis, one bar per FY within each cluster — reads as
-  // "how did this room type do year over year", and caps clusters at however
-  // many FYs are selected (usually 1-3) instead of a 7-room-type cluster
-  // repeated per FY. Replaces an earlier stacked-bar version per user
-  // feedback (2026-08-24): stacking makes cross-FY comparison harder, not
-  // easier, since only the top segment of each stack has a readable baseline.
-  const fyOrder = [...new Set(roomFormatByFy.map((r) => r.fy))].sort();
-  const formatsInFyData = ROOM_TYPE_ORDER.filter((rt) => roomFormatByFy.some((r) => r.roomType === rt));
-  const revenueByFormatByFy = formatsInFyData.map((rt) => {
-    const row: Record<string, unknown> = { roomType: rt };
-    for (const fy of fyOrder) {
-      row[fy] = roomFormatByFy.find((r) => r.fy === fy && r.roomType === rt)?.revenue ?? 0;
-    }
-    return row;
-  });
-  const roomFormatFyTotals = fyOrder.map((fy) => ({
-    fy,
-    value: roomFormatByFy.filter((r) => r.fy === fy).reduce((s, r) => s + r.revenue, 0),
-  }));
 
   const rankingColumns: TableColumn<B2bContractRanking>[] = [
     { key: "company", header: "Company", render: (r) => r.company },
@@ -95,18 +79,9 @@ export default function BookingContent({
   ];
 
   const categoriesPresent = CATEGORY_ORDER.filter((c) => categoryMix.some((m) => m.category === c));
-  const revenueByCategory: BarDatum[] = categoriesPresent.map((c) => {
+  const revenueDonut = categoriesPresent.map((c) => {
     const m = categoryMix.find((x) => x.category === c);
     return { name: c, value: m?.revenue ?? 0, color: CATEGORY_COLOR[c] };
-  });
-  const nightsByCategory: BarDatum[] = categoriesPresent.map((c) => {
-    const m = categoryMix.find((x) => x.category === c);
-    return { name: c, value: m?.nights ?? 0, color: CATEGORY_COLOR[c] };
-  });
-  const adrByCategory: BarDatum[] = categoriesPresent.map((c) => {
-    const m = categoryMix.find((x) => x.category === c);
-    const adr = m && m.nights > 0 ? m.revenue / m.nights : 0;
-    return { name: c, value: adr, color: CATEGORY_COLOR[c] };
   });
 
   const retentionData: BarDatum[] = b2bRetention.map((r) => ({
@@ -120,8 +95,16 @@ export default function BookingContent({
       <div>
         <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">Booking Details</h2>
         <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-          <StatTile label="Total Bookings" value={bookingStats.totalBookings.toLocaleString("en-IN")} />
-          <StatTile label="Guests Served" value={bookingStats.guestsServed.toLocaleString("en-IN")} />
+          <StatTile
+            label="Total Bookings"
+            value={bookingStats.totalBookings.toLocaleString("en-IN")}
+            delta={bookingStats.comparison.totalBookings.pctChange !== null ? { pct: bookingStats.comparison.totalBookings.pctChange * 100, label: "vs previous" } : undefined}
+          />
+          <StatTile
+            label="Guests Served"
+            value={bookingStats.guestsServed.toLocaleString("en-IN")}
+            delta={bookingStats.comparison.guestsServed.pctChange !== null ? { pct: bookingStats.comparison.guestsServed.pctChange * 100, label: "vs previous" } : undefined}
+          />
           <StatTile label="ALOS" value={bookingStats.alos !== null ? `${bookingStats.alos.toFixed(1)} nights` : "—"} />
           <StatTile
             label="Revenue Per Guest"
@@ -161,39 +144,21 @@ export default function BookingContent({
         </div>
       </div>
 
-      <div>
-        <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Night/Revenue Mix By Category</h3>
-        <div className="mt-2 grid gap-4 lg:grid-cols-3">
-          <Card title="Revenue By Category">
-            <SingleMetricBarChart data={revenueByCategory} valueFormatter={(v) => formatIndianCurrency(v)} />
-          </Card>
-          <Card title="Nights By Category">
-            <SingleMetricBarChart data={nightsByCategory} valueFormatter={(v) => v.toLocaleString("en-IN")} />
-          </Card>
-          <Card title="ADR By Category">
-            <SingleMetricBarChart data={adrByCategory} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} />
-          </Card>
-        </div>
-      </div>
+      <Card title="Night/Revenue Mix By Category">
+        <DonutChart data={revenueDonut} valueFormatter={(v) => formatIndianCurrency(v)} />
+      </Card>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card title="ADR By Room Format">
-          <SingleMetricBarChart data={adrByFormat} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} />
+        <Card title="Revenue By Room Format">
+          <HorizontalBarChart data={revenueByFormat} valueFormatter={(v) => formatIndianCurrency(v)} />
         </Card>
-        <Card title="Nights Share By Room Format">
-          <SingleMetricBarChart data={nightsShareByFormat} valueFormatter={(v) => `${v.toFixed(0)}%`} />
+        <Card title="ADR By Room Format">
+          <HorizontalBarChart data={adrByFormat} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} />
         </Card>
       </div>
 
-      <Card title="Revenue By Room Format & FY">
-        <FyComparisonStrip points={roomFormatFyTotals} valueFormatter={(v) => formatIndianCurrency(v)} />
-        <GroupedBarChart
-          data={revenueByFormatByFy}
-          xKey="roomType"
-          series={fyOrder.map((fy) => ({ key: fy, color: FY_COLOR[fy] ?? "var(--chart-baseline)" }))}
-          valueFormatter={(v) => formatIndianCurrency(v)}
-          height={320}
-        />
+      <Card title="Nights Share By Room Format">
+        <DonutChart data={nightsShareDonut} valueFormatter={(v) => v.toLocaleString("en-IN")} />
       </Card>
 
       <div>
@@ -211,13 +176,17 @@ export default function BookingContent({
               <StatTile label="Contract Revenue Achieved" value={formatIndianCurrency(b2bContractSummary.totalContractRevenue)} sub="Contract_Status = Contract only, not total company revenue" />
               <StatTile label="Companies Under Contract" value={b2bContractSummary.contractCompanyCount.toLocaleString("en-IN")} />
             </div>
-            <Table columns={rankingColumns} rows={b2bRanking.slice(0, 20)} rowKey={(r) => r.company} />
+            <Expandable collapsedHeight={420} label={`Show all ${b2bRanking.length} companies`}>
+              <Table columns={rankingColumns} rows={b2bRanking} rowKey={(r) => r.company} />
+            </Expandable>
           </Card>
         </div>
 
         <div className="mt-3">
           <Card title="Top ADR Contracts (Min. 1 Night)">
-            <Table columns={adrColumns} rows={b2bTopAdr.slice(0, 15)} rowKey={(r) => r.company} />
+            <Expandable collapsedHeight={420} label={`Show all ${b2bTopAdr.length}`}>
+              <Table columns={adrColumns} rows={b2bTopAdr} rowKey={(r) => r.company} />
+            </Expandable>
           </Card>
         </div>
       </div>

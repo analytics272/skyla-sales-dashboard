@@ -1,4 +1,5 @@
-import { getBrandOccupancy, getCategoryRevenueByFy } from "@/lib/bigquery/queries/brandCategory";
+import { getBrandOccupancy } from "@/lib/bigquery/queries/brandCategory";
+import { getBusinessCategoryAdr } from "@/lib/bigquery/queries/trends";
 import { parseKpiFilter, SearchParams } from "@/lib/filters/parseSearchParams";
 import BrandContent from "@/components/brand/BrandContent";
 
@@ -6,10 +7,10 @@ export default async function BrandPage({ searchParams }: { searchParams: Promis
   const sp = await searchParams;
   const filter = parseKpiFilter(sp);
 
-  const [brandOccupancy, categoryRevenueByFy] = await Promise.all([
+  const [brandOccupancy, categoryAdr] = await Promise.all([
     getBrandOccupancy(filter),
-    getCategoryRevenueByFy({ properties: filter.properties }),
+    getBusinessCategoryAdr(filter),
   ]);
 
-  return <BrandContent brandOccupancy={brandOccupancy} categoryRevenueByFy={categoryRevenueByFy} />;
+  return <BrandContent brandOccupancy={brandOccupancy} categoryAdr={categoryAdr} />;
 }

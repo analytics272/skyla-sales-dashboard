@@ -1,30 +1,29 @@
-import { DateFilter, resolveSelectedFYs, resolveSelectedMonths, fyLabelSqlExpr } from "@/lib/reference/financialYear";
+import { PeriodKey, PeriodDef, resolvePeriod } from "@/lib/reference/period";
 import { ACTIVE_PROPERTY_CODES } from "@/lib/reference/propertyReference";
 
-export interface KpiFilter extends DateFilter {
+export interface KpiFilter {
   /** Property codes to include. Omit/empty = all active properties (includes LP as of the 2026-08-26 re-integration — see the LP PRD addendum). */
   properties?: string[];
+  /** Which comparison-period tab is active. Omit = "this_fy" (the old default-to-current-FY behavior). */
+  period?: PeriodKey;
 }
 
 export interface ResolvedFilter {
   properties: string[];
-  fys: string[]; // always at least one (defaults to current FY)
-  months: number[]; // [] = whole FY, otherwise an explicit, possibly non-contiguous, set
+  period: PeriodDef;
 }
 
 export function resolveFilter(filter: KpiFilter): ResolvedFilter {
   return {
     properties: filter.properties && filter.properties.length > 0 ? filter.properties : ACTIVE_PROPERTY_CODES,
-    fys: resolveSelectedFYs(filter),
-    months: resolveSelectedMonths(filter),
+    period: resolvePeriod(filter.period ?? "this_fy"),
   };
 }
 
 /**
- * WHERE-clause fragment + params for scoping a date-bearing table by property
- * list + (possibly multi-select) FY + (possibly non-contiguous) month set.
- * Filters by FY-label IN(...) and EXTRACT(MONTH...) IN UNNEST(...) rather than
- * a BETWEEN range, since neither selection is guaranteed contiguous.
+ * WHERE-clause fragment + params scoping a date-bearing table by property
+ * list + the active period's CURRENT date range. Use `buildPreviousScopeClause`
+ * for the comparison side of a current-vs-previous KPI.
  */
 export function buildScopeClause(
   propertyCol: string,
@@ -32,19 +31,31 @@ export function buildScopeClause(
   resolved: ResolvedFilter,
   paramPrefix: string
 ): { clause: string; params: Record<string, unknown> } {
-  const params: Record<string, unknown> = {};
-  const conditions: string[] = [];
+  return scopeClauseForRange(propertyCol, dateColAsDate, resolved.properties, resolved.period.current, paramPrefix);
+}
 
-  params[`${paramPrefix}Properties`] = resolved.properties;
-  conditions.push(`${propertyCol} IN UNNEST(@${paramPrefix}Properties)`);
+/** Same as `buildScopeClause` but scoped to the period's PREVIOUS (comparison) range. */
+export function buildPreviousScopeClause(
+  propertyCol: string,
+  dateColAsDate: string,
+  resolved: ResolvedFilter,
+  paramPrefix: string
+): { clause: string; params: Record<string, unknown> } {
+  return scopeClauseForRange(propertyCol, dateColAsDate, resolved.properties, resolved.period.previous, paramPrefix);
+}
 
-  params[`${paramPrefix}Fys`] = resolved.fys;
-  conditions.push(`${fyLabelSqlExpr(dateColAsDate)} IN UNNEST(@${paramPrefix}Fys)`);
-
-  if (resolved.months.length > 0) {
-    params[`${paramPrefix}Months`] = resolved.months;
-    conditions.push(`EXTRACT(MONTH FROM ${dateColAsDate}) IN UNNEST(@${paramPrefix}Months)`);
-  }
-
-  return { clause: conditions.join(" AND "), params };
+function scopeClauseForRange(
+  propertyCol: string,
+  dateColAsDate: string,
+  properties: string[],
+  range: { start: string; end: string },
+  paramPrefix: string
+): { clause: string; params: Record<string, unknown> } {
+  const params: Record<string, unknown> = {
+    [`${paramPrefix}Properties`]: properties,
+    [`${paramPrefix}Start`]: range.start,
+    [`${paramPrefix}End`]: range.end,
+  };
+  const clause = `${propertyCol} IN UNNEST(@${paramPrefix}Properties) AND ${dateColAsDate} BETWEEN @${paramPrefix}Start AND @${paramPrefix}End`;
+  return { clause, params };
 }

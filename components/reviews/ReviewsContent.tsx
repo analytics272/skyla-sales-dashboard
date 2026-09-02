@@ -4,21 +4,12 @@ import { ReviewStats, RatingTrendPoint } from "@/lib/bigquery/queries/reviews";
 import StatTile from "@/components/ui/StatTile";
 import Card from "@/components/ui/Card";
 import SingleMetricBarChart, { BarDatum } from "@/components/charts/SingleMetricBarChart";
-import { FISCAL_MONTH_ORDER, MONTH_ABBR } from "@/lib/charts/pivotByFiscalMonth";
 
-// Fiscal months for the selected FY(s) — summed across FYs when more than one
-// is selected (blended, same aggregation convention as every other multi-select
-// filter here), not a multi-year comparison with separate lines.
 function RatingTrendCard({ title, trend }: { title: string; trend: RatingTrendPoint[] }) {
-  const totalCount = trend.reduce((s, p) => s + p.count, 0);
-  const data: BarDatum[] = FISCAL_MONTH_ORDER.map((month) => ({
-    name: MONTH_ABBR[month],
-    value: trend.filter((p) => p.monthNumber === month).reduce((s, p) => s + p.count, 0),
-    color: "var(--series-1)",
-  }));
+  const data: BarDatum[] = trend.map((p) => ({ name: p.monthLabel, value: p.count, color: "var(--series-1)" }));
   return (
     <Card title={title}>
-      {totalCount === 0 ? (
+      {trend.length === 0 ? (
         <p className="py-8 text-center text-sm text-zinc-400 dark:text-zinc-600">
           No reviews for this period.
         </p>
@@ -47,8 +38,16 @@ export default function ReviewsContent({
       <div>
         <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Google Reviews</h3>
         <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <StatTile label="Overall Avg Rating" value={googleStats.avgRating !== null ? googleStats.avgRating.toFixed(2) : "—"} />
-          <StatTile label="Total Reviews" value={googleStats.totalReviews.toLocaleString("en-IN")} />
+          <StatTile
+            label="Overall Avg Rating"
+            value={googleStats.avgRating !== null ? googleStats.avgRating.toFixed(2) : "—"}
+            delta={googleStats.comparison.avgRating.pctChange !== null ? { pct: googleStats.comparison.avgRating.pctChange * 100, label: "vs previous" } : undefined}
+          />
+          <StatTile
+            label="Total Reviews"
+            value={googleStats.totalReviews.toLocaleString("en-IN")}
+            delta={googleStats.comparison.totalReviews.pctChange !== null ? { pct: googleStats.comparison.totalReviews.pctChange * 100, label: "vs previous" } : undefined}
+          />
         </div>
         <div className="mt-3">
           <RatingTrendCard title="Rating Count Trend" trend={googleTrend} />
@@ -58,8 +57,16 @@ export default function ReviewsContent({
       <div>
         <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">OTA Reviews</h3>
         <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <StatTile label="Overall Avg Rating" value={otaStats.avgRating !== null ? otaStats.avgRating.toFixed(2) : "—"} />
-          <StatTile label="Total Reviews" value={otaStats.totalReviews.toLocaleString("en-IN")} />
+          <StatTile
+            label="Overall Avg Rating"
+            value={otaStats.avgRating !== null ? otaStats.avgRating.toFixed(2) : "—"}
+            delta={otaStats.comparison.avgRating.pctChange !== null ? { pct: otaStats.comparison.avgRating.pctChange * 100, label: "vs previous" } : undefined}
+          />
+          <StatTile
+            label="Total Reviews"
+            value={otaStats.totalReviews.toLocaleString("en-IN")}
+            delta={otaStats.comparison.totalReviews.pctChange !== null ? { pct: otaStats.comparison.totalReviews.pctChange * 100, label: "vs previous" } : undefined}
+          />
         </div>
         <div className="mt-3">
           <RatingTrendCard title="Rating Count Trend" trend={otaTrend} />

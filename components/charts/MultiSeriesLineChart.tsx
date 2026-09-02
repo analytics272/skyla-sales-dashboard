@@ -64,9 +64,9 @@ export default function MultiSeriesLineChart({
             strokeWidth={2}
             dot={{ r: 3, fill: s.color, stroke: "var(--chart-surface)", strokeWidth: 2 }}
             activeDot={{ r: 5, fill: s.color, stroke: "var(--chart-surface)", strokeWidth: 2 }}
-            // No connectNulls: a null means "hasn't happened yet" (see
-            // pivotByFiscalMonth), and the line should visibly stop there
-            // rather than bridge a false diagonal across to the next FY's data.
+            // No connectNulls: a null means "hasn't happened yet" (a future
+            // month with no real data), and the line should visibly stop
+            // there rather than bridge a false diagonal to the next point.
           />
         ))}
       </LineChart>

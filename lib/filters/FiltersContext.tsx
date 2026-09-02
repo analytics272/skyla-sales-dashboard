@@ -1,27 +1,21 @@
 "use client";
 
-// Global Property / FY / Quarter / Month filters (PRD §5), synced to the URL so
-// they survive refresh, are shareable, and persist across tab navigation without
-// needing a separate store. Property, FY, and Month are all multi-select;
-// Quarter is single-select (a convenience shortcut for its 3 months).
+// Global Property filter + the Today/This FY/Last Year comparison-period tab
+// (2026-09-02 redesign), synced to the URL so they survive refresh, are
+// shareable, and persist across tab navigation without needing a separate
+// store. Property stays multi-select; the period is a single active tab.
 import { createContext, useContext, useMemo, useCallback, ReactNode, Suspense } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { currentFYLabel } from "@/lib/reference/financialYear";
+import { PeriodKey, isPeriodKey } from "@/lib/reference/period";
 
 export interface FiltersState {
   properties: string[]; // empty = all active properties
-  fys: string[]; // empty = default to the current FY
-  quarter?: 1 | 2 | 3 | 4;
-  months: number[]; // empty = whole FY, no narrowing
+  period: PeriodKey;
 }
 
 interface FiltersContextValue extends FiltersState {
   setProperties: (properties: string[]) => void;
-  setFys: (fys: string[]) => void;
-  setQuarter: (quarter?: 1 | 2 | 3 | 4) => void;
-  setMonths: (months: number[]) => void;
-  toggleMonth: (month: number) => void;
-  clearQuarterAndMonths: () => void;
+  setPeriod: (period: PeriodKey) => void;
   resetAll: () => void;
 }
 
@@ -37,18 +31,8 @@ function FiltersProviderInner({ children }: { children: ReactNode }) {
     return raw ? raw.split(",").filter(Boolean) : [];
   }, [searchParams]);
 
-  const fys = useMemo(() => {
-    const raw = searchParams.get("fy");
-    return raw ? raw.split(",").filter(Boolean) : [];
-  }, [searchParams]);
-
-  const quarterRaw = searchParams.get("quarter");
-  const quarter = quarterRaw ? (Number(quarterRaw) as 1 | 2 | 3 | 4) : undefined;
-
-  const months = useMemo(() => {
-    const raw = searchParams.get("months");
-    return raw ? raw.split(",").map(Number).filter((n) => !Number.isNaN(n)) : [];
-  }, [searchParams]);
+  const periodRaw = searchParams.get("period");
+  const period: PeriodKey = isPeriodKey(periodRaw) ? periodRaw : "this_fy";
 
   const updateParams = useCallback(
     (updates: Record<string, string | undefined>) => {
@@ -64,24 +48,11 @@ function FiltersProviderInner({ children }: { children: ReactNode }) {
 
   const value: FiltersContextValue = {
     properties,
-    fys: fys.length > 0 ? fys : [currentFYLabel()],
-    quarter,
-    months,
+    period,
     setProperties: (p) => updateParams({ property: p.length ? p.join(",") : undefined }),
-    setFys: (v) => updateParams({ fy: v.length ? v.join(",") : undefined }),
-    // Changing quarter drops a stale month selection from a different quarter.
-    setQuarter: (q) => updateParams({ quarter: q ? String(q) : undefined, months: undefined }),
-    setMonths: (m) => updateParams({ months: m.length ? m.join(",") : undefined, quarter: undefined }),
-    toggleMonth: (m) => {
-      const next = months.includes(m) ? months.filter((x) => x !== m) : [...months, m];
-      updateParams({ months: next.length ? next.join(",") : undefined, quarter: undefined });
-    },
-    clearQuarterAndMonths: () => updateParams({ quarter: undefined, months: undefined }),
-    // Back to defaults: all properties, no month/quarter narrowing, and FY
-    // falls back to currentFYLabel() (see `fys` above) rather than being
-    // pinned — so a reset always lands on "this financial year", whichever
-    // one that is at the time, not a stale hardcoded year.
-    resetAll: () => updateParams({ property: undefined, fy: undefined, quarter: undefined, months: undefined }),
+    setPeriod: (p) => updateParams({ period: p === "this_fy" ? undefined : p }),
+    // Back to defaults: all properties, "This FY".
+    resetAll: () => updateParams({ property: undefined, period: undefined }),
   };
 
   return <FiltersContext.Provider value={value}>{children}</FiltersContext.Provider>;

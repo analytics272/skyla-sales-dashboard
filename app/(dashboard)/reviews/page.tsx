@@ -8,7 +8,7 @@ export default async function ReviewsPage({ searchParams }: { searchParams: Prom
   // Reviews tables aren't restricted to "active properties" (§2.6 keeps FO in
   // scope, and LP has historical rows) — only apply a property filter when the
   // user explicitly picked one.
-  const reviewsFilter = { properties: filter.properties, fys: filter.fys, quarter: filter.quarter, months: filter.months };
+  const reviewsFilter = { properties: filter.properties, period: filter.period };
 
   const [googleStats, googleTrend, otaStats, otaTrend] = await Promise.all([
     getGoogleReviewStats(reviewsFilter),
