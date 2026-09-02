@@ -1,13 +1,15 @@
 // PRD §3.5 — Financial Year is April-March, formatted "FY YY-YY".
-// User-confirmed: Quarter filter is fiscal-aligned (Q1=Apr-Jun ... Q4=Jan-Mar).
+//
+// 2026-09-02: the old multi-select FY/Quarter/Month filter model (DateFilter,
+// resolveSelectedFYs/Months, resolveMonthRanges, fiscalQuarterBounds, etc.)
+// was removed as part of the period-tabs redesign — see `lib/reference/period.ts`
+// for the new Today/This FY/Last Year model everything now scopes by. The
+// pure FY-math helpers below are kept: they're still needed for FY *labels*
+// (period.ts builds on fyBounds/fyLabel/fyStartYearOf) and for two tables
+// that are natively keyed by fiscal month number rather than a date
+// (`leadership_targets.Month_Number`, `sales_booking_lp_monthly.MonthNumber`).
 
 export const FY_START_MONTH = 4; // April
-
-export interface DateFilter {
-  fys?: string[]; // ["FY 25-26", ...] — multi-select; [] or undefined = default to the current FY
-  quarter?: 1 | 2 | 3 | 4; // fiscal quarter (convenience shortcut for its 3 months)
-  months?: number[]; // calendar months, 1-12, multi-select — narrows within each selected FY
-}
 
 export interface DateRange {
   start: string; // ISO date, inclusive
@@ -28,14 +30,6 @@ export function fyLabel(startYear: number): string {
 
 export function currentFYLabel(asOf: Date = new Date()): string {
   return fyLabel(fyStartYearOf(asOf));
-}
-
-/** Fiscal quarter (1-4) for a calendar month (1-12): Q1=Apr-Jun, Q2=Jul-Sep, Q3=Oct-Dec, Q4=Jan-Mar. */
-export function fiscalQuarterOfMonth(calendarMonth: number): 1 | 2 | 3 | 4 {
-  if (calendarMonth >= 4 && calendarMonth <= 6) return 1;
-  if (calendarMonth >= 7 && calendarMonth <= 9) return 2;
-  if (calendarMonth >= 10 && calendarMonth <= 12) return 3;
-  return 4;
 }
 
 export function parseFyLabel(fy: string): number {
@@ -61,42 +55,7 @@ export function fyBounds(fy: string): DateRange {
   return { start: `${startYear}-04-01`, end: `${startYear + 1}-03-31` };
 }
 
-const QUARTER_MONTHS: Record<1 | 2 | 3 | 4, number[]> = {
-  1: [4, 5, 6],
-  2: [7, 8, 9],
-  3: [10, 11, 12],
-  4: [1, 2, 3],
-};
-
-/** Bounds for a fiscal quarter within a given FY. Q4 (Jan-Mar) falls in the FY's end calendar year. */
-export function fiscalQuarterBounds(fy: string, quarter: 1 | 2 | 3 | 4): DateRange {
-  const startYear = parseFyLabel(fy);
-  const calendarYear = quarter === 4 ? startYear + 1 : startYear;
-  const months = QUARTER_MONTHS[quarter];
-  const firstMonth = months[0];
-  const lastMonth = months[months.length - 1];
-  return {
-    start: `${calendarYear}-${pad(firstMonth)}-01`,
-    end: `${calendarYear}-${pad(lastMonth)}-${pad(lastDayOfMonth(calendarYear, lastMonth))}`,
-  };
-}
-
-/** Fiscal month number (1-12, Apr=1...Mar=12, as used by leadership_targets.Month_Number) -> calendar month (1-12). */
-export function calendarMonthFromFiscal(fiscalMonth: number): number {
-  return fiscalMonth <= 9 ? fiscalMonth + 3 : fiscalMonth - 9;
-}
-
-/** Calendar month (1-12) -> fiscal month number (1-12, Apr=1...Mar=12) — the inverse of calendarMonthFromFiscal. */
-export function fiscalMonthNumber(calendarMonth: number): number {
-  return calendarMonth >= 4 ? calendarMonth - 3 : calendarMonth + 9;
-}
-
-/** True once a fiscal month's start date is still ahead of today — hasn't happened yet, nothing to plot as "actual". */
-export function isFutureFiscalMonth(fy: string, calendarMonth: number, today: Date = new Date()): boolean {
-  return fyMonthBounds(fy, calendarMonth).start > today.toISOString().slice(0, 10);
-}
-
-/** Bounds for a single calendar month within a given FY (month determines which side of the FY boundary it falls on). */
+/** Bounds for a single calendar month within a given FY (month determines which side of the FY boundary it falls on). Still used by Targets' monthly charts, which are inherently one-row-per-fiscal-month. */
 export function fyMonthBounds(fy: string, calendarMonth: number): DateRange {
   const startYear = parseFyLabel(fy);
   const calendarYear = calendarMonth >= FY_START_MONTH ? startYear : startYear + 1;
@@ -106,40 +65,19 @@ export function fyMonthBounds(fy: string, calendarMonth: number): DateRange {
   };
 }
 
-/** FYs selected by the filter — always at least one (defaults to the current FY when none are explicitly selected, same as the old single-select behavior). */
-export function resolveSelectedFYs(filter: DateFilter): string[] {
-  if (filter.fys && filter.fys.length > 0) return [...new Set(filter.fys)];
-  return [currentFYLabel()];
+/** True once a fiscal month's start date is still ahead of today — hasn't happened yet, nothing to plot as "actual". Still needed for the Targets tab's "This FY" view, whose governing FY can extend past today even though the new period model's own date ranges never do. */
+export function isFutureFiscalMonth(fy: string, calendarMonth: number, today: Date = new Date()): boolean {
+  return fyMonthBounds(fy, calendarMonth).start > today.toISOString().slice(0, 10);
 }
 
-/** The most recent of the selected FYs — for charts that are inherently single-FY (a 12-month x-axis) even though the global filter now allows selecting several. */
-export function latestSelectedFy(filter: DateFilter): string {
-  return [...resolveSelectedFYs(filter)].sort().at(-1)!;
+/** Fiscal month number (1-12, Apr=1...Mar=12, as used by leadership_targets.Month_Number and sales_booking_lp_monthly.MonthNumber) -> calendar month (1-12). */
+export function calendarMonthFromFiscal(fiscalMonth: number): number {
+  return fiscalMonth <= 9 ? fiscalMonth + 3 : fiscalMonth - 9;
 }
 
-/** Calendar months (1-12) selected by the filter; [] means "whole FY, no narrowing". Explicit `months` wins over `quarter` if both are set. */
-export function resolveSelectedMonths(filter: DateFilter): number[] {
-  if (filter.months && filter.months.length > 0) return [...new Set(filter.months)];
-  if (filter.quarter) return QUARTER_MONTHS[filter.quarter];
-  return [];
-}
-
-/**
- * One DateRange per (selected FY × selected month) combination — never
- * collapsed to an outer span, since neither the FY set nor the month set is
- * guaranteed contiguous (e.g. FY24-25 + FY26-27 skips FY25-26; Apr + Dec skips
- * May-Nov). Needed anywhere a "sum across the selection" calculation depends
- * on which specific days are included (Available Room Nights).
- */
-export function resolveMonthRanges(filter: DateFilter): DateRange[] {
-  const fys = resolveSelectedFYs(filter);
-  const months = resolveSelectedMonths(filter);
-  const ranges: DateRange[] = [];
-  for (const fy of fys) {
-    if (months.length === 0) ranges.push(fyBounds(fy));
-    else for (const m of months) ranges.push(fyMonthBounds(fy, m));
-  }
-  return ranges;
+/** Calendar month (1-12) -> fiscal month number (1-12, Apr=1...Mar=12) — the inverse of calendarMonthFromFiscal. */
+export function fiscalMonthNumber(calendarMonth: number): number {
+  return calendarMonth >= 4 ? calendarMonth - 3 : calendarMonth + 9;
 }
 
 // --- SQL expression builders (dateExpr must already evaluate to a DATE) ---
@@ -151,15 +89,6 @@ export function fyStartYearSqlExpr(dateExpr: string): string {
 export function fyLabelSqlExpr(dateExpr: string): string {
   const start = fyStartYearSqlExpr(dateExpr);
   return `CONCAT('FY ', LPAD(CAST(MOD(${start}, 100) AS STRING), 2, '0'), '-', LPAD(CAST(MOD(${start} + 1, 100) AS STRING), 2, '0'))`;
-}
-
-export function fiscalQuarterSqlExpr(dateExpr: string): string {
-  return `CASE
-    WHEN EXTRACT(MONTH FROM ${dateExpr}) IN (4,5,6) THEN 1
-    WHEN EXTRACT(MONTH FROM ${dateExpr}) IN (7,8,9) THEN 2
-    WHEN EXTRACT(MONTH FROM ${dateExpr}) IN (10,11,12) THEN 3
-    ELSE 4
-  END`;
 }
 
 export function monthNameSqlExpr(dateExpr: string): string {

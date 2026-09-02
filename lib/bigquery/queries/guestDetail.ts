@@ -1,12 +1,17 @@
 // PRD §6.2 — Guest & Revenue Detail.
+// 2026-09-02: rewritten for the Today/This FY/Last Year period-tabs model.
 import { runQuery, table } from "../client";
-import { KpiFilter, resolveFilter, buildScopeClause } from "./filters";
-import { getAvailableRoomNights, rangesForFysAndMonths } from "./propertyWindows";
-import { getLpOverviewTotals, getLpRoomTypeStats, getLpRoomTypeByFy, LP_PROPERTY } from "./lpMonthly";
+import { KpiFilter, resolveFilter, buildScopeClause, buildPreviousScopeClause } from "./filters";
+import { getAvailableRoomNights } from "./propertyWindows";
+import { getLpOverviewTotals, getLpRoomTypeStats, LP_PROPERTY } from "./lpMonthly";
 import { bookingCategorySqlExpr, BookingCategory } from "@/lib/reference/bookingSourceMap";
-import { fyLabelSqlExpr } from "@/lib/reference/financialYear";
 import { roomTypeMappingSqlUnnest, roomTypeJoinCondition } from "@/lib/reference/roomTypeMapping";
 import { safeDivide } from "@/lib/format/currency";
+import { ComparisonMetric } from "./overview";
+
+function comparisonMetric(current: number | null, previous: number | null): ComparisonMetric {
+  return { current, previous, pctChange: current !== null && previous !== null ? safeDivide(current - previous, previous) : null };
+}
 
 // --- Total Bookings / Guests Served / ALOS ---
 
@@ -15,6 +20,10 @@ export interface BookingStats {
   guestsServed: number;
   alos: number | null;
   revenuePerGuest: number | null;
+  comparison: {
+    totalBookings: ComparisonMetric;
+    guestsServed: ComparisonMetric;
+  };
 }
 
 interface BookingStatsRow {
@@ -24,36 +33,41 @@ interface BookingStatsRow {
   room_revenue: number | null;
 }
 
+const BOOKING_STATS_SQL = (where: string) => `
+  WITH scoped AS (
+    SELECT Property, ReservationNo, NoOfGuest, DailyRevenue
+    FROM ${table("sales_booking")}
+    WHERE ${where}
+  ),
+  per_booking AS (
+    -- ReservationNo IS NOT NULL matches the PRD's own booking-count formula
+    -- (COUNT(DISTINCT CONCAT(Property, ReservationNo))), which drops null-keyed
+    -- rows since CONCAT(..., NULL) is NULL and excluded from COUNT DISTINCT.
+    -- Grouping by a NULL ReservationNo would otherwise collapse many unrelated
+    -- rows into one phantom booking per property (confirmed against real data).
+    SELECT Property, ReservationNo, MAX(NoOfGuest) AS guests
+    FROM scoped
+    WHERE ReservationNo IS NOT NULL
+    GROUP BY Property, ReservationNo
+  )
+  SELECT
+    (SELECT COUNT(*) FROM per_booking) AS total_bookings,
+    (SELECT SUM(guests) FROM per_booking) AS guests_served,
+    (SELECT COUNT(*) FROM scoped) AS sold_room_nights,
+    (SELECT SUM(DailyRevenue) FROM scoped) AS room_revenue
+`;
+
 export async function getBookingStats(filter: KpiFilter): Promise<BookingStats> {
   const resolved = resolveFilter(filter);
   const includeLp = resolved.properties.includes(LP_PROPERTY);
   const { clause: where, params } = buildScopeClause("Property", "CAST(StayDate AS DATE)", resolved, "");
+  const { clause: prevWhere, params: prevParams } = buildPreviousScopeClause("Property", "CAST(StayDate AS DATE)", resolved, "prev");
 
-  const [rows, lpTotals] = await Promise.all([
-    runQuery<BookingStatsRow>(`
-      WITH scoped AS (
-        SELECT Property, ReservationNo, NoOfGuest, DailyRevenue
-        FROM ${table("sales_booking")}
-        WHERE ${where}
-      ),
-      per_booking AS (
-        -- ReservationNo IS NOT NULL matches the PRD's own booking-count formula
-        -- (COUNT(DISTINCT CONCAT(Property, ReservationNo))), which drops null-keyed
-        -- rows since CONCAT(..., NULL) is NULL and excluded from COUNT DISTINCT.
-        -- Grouping by a NULL ReservationNo would otherwise collapse many unrelated
-        -- rows into one phantom booking per property (confirmed against real data).
-        SELECT Property, ReservationNo, MAX(NoOfGuest) AS guests
-        FROM scoped
-        WHERE ReservationNo IS NOT NULL
-        GROUP BY Property, ReservationNo
-      )
-      SELECT
-        (SELECT COUNT(*) FROM per_booking) AS total_bookings,
-        (SELECT SUM(guests) FROM per_booking) AS guests_served,
-        (SELECT COUNT(*) FROM scoped) AS sold_room_nights,
-        (SELECT SUM(DailyRevenue) FROM scoped) AS room_revenue
-    `, params),
-    includeLp ? getLpOverviewTotals(resolved.fys, resolved.months) : Promise.resolve(null),
+  const [rows, prevRows, lpTotals, lpPrevTotals] = await Promise.all([
+    runQuery<BookingStatsRow>(BOOKING_STATS_SQL(where), params),
+    runQuery<BookingStatsRow>(BOOKING_STATS_SQL(prevWhere), prevParams),
+    includeLp ? getLpOverviewTotals(resolved.period.current) : Promise.resolve(null),
+    includeLp ? getLpOverviewTotals(resolved.period.previous) : Promise.resolve(null),
   ]);
 
   const r = rows[0] ?? { total_bookings: 0, guests_served: 0, sold_room_nights: 0, room_revenue: 0 };
@@ -61,11 +75,20 @@ export async function getBookingStats(filter: KpiFilter): Promise<BookingStats> 
   const guestsServed = (r.guests_served ?? 0) + (lpTotals?.guestsServed ?? 0);
   const soldRoomNights = r.sold_room_nights + (lpTotals?.soldRoomNights ?? 0);
   const roomRevenue = (r.room_revenue ?? 0) + (lpTotals?.roomRevenue ?? 0);
+
+  const pr = prevRows[0] ?? { total_bookings: 0, guests_served: 0, sold_room_nights: 0, room_revenue: 0 };
+  const prevTotalBookings = pr.total_bookings + (lpPrevTotals?.bookingsCount ?? 0);
+  const prevGuestsServed = (pr.guests_served ?? 0) + (lpPrevTotals?.guestsServed ?? 0);
+
   return {
     totalBookings,
     guestsServed,
     alos: safeDivide(soldRoomNights, totalBookings),
     revenuePerGuest: safeDivide(roomRevenue, guestsServed),
+    comparison: {
+      totalBookings: comparisonMetric(totalBookings, prevTotalBookings),
+      guestsServed: comparisonMetric(guestsServed, prevGuestsServed),
+    },
   };
 }
 
@@ -84,7 +107,7 @@ export interface RoomNightsGap {
 export async function getRoomNightsGap(filter: KpiFilter): Promise<RoomNightsGap> {
   const resolved = resolveFilter(filter);
   const includeLp = resolved.properties.includes(LP_PROPERTY);
-  const available = await getAvailableRoomNights(resolved.properties, rangesForFysAndMonths(resolved.fys, resolved.months));
+  const available = await getAvailableRoomNights(resolved.properties, resolved.period.current);
 
   const { clause: where, params } = buildScopeClause("Property", "CAST(StayDate AS DATE)", resolved, "");
   // `available` already includes LP's contribution (getAvailableRoomNights is
@@ -97,23 +120,21 @@ export async function getRoomNightsGap(filter: KpiFilter): Promise<RoomNightsGap
       SELECT COUNT(*) AS n FROM ${table("sales_booking")}
       WHERE ${where}
     `, params),
-    includeLp ? getLpOverviewTotals(resolved.fys, resolved.months) : Promise.resolve(null),
+    includeLp ? getLpOverviewTotals(resolved.period.current) : Promise.resolve(null),
   ]);
   const sold = (soldRows[0]?.n ?? 0) + (lpTotals?.soldRoomNights ?? 0);
   const unsoldRoomNights = Math.max(0, available - sold);
 
   const today = new Date().toISOString().slice(0, 10);
-  const ranges = rangesForFysAndMonths(resolved.fys, resolved.months);
-  const scopeEnd = ranges.reduce((max, r) => (r.end > max ? r.end : max), ranges[0].end);
+  const scopeEnd = resolved.period.current.end;
   let remainingRoomNights = 0;
-  if (!scopeEnd || scopeEnd >= today) {
-    const forwardRange = { start: today, end: scopeEnd ?? "2999-12-31" };
-    const forwardAvailable = await getAvailableRoomNights(resolved.properties, [forwardRange]);
+  if (scopeEnd >= today) {
+    const forwardRange = { start: today, end: scopeEnd };
+    const forwardAvailable = await getAvailableRoomNights(resolved.properties, forwardRange);
     const forwardSoldRows = await runQuery<{ n: number }>(`
       SELECT COUNT(*) AS n FROM ${table("sales_booking")}
-      WHERE Property IN UNNEST(@properties) AND CAST(StayDate AS DATE) >= @today
-        ${scopeEnd ? "AND CAST(StayDate AS DATE) <= @scopeEnd" : ""}
-    `, { properties: resolved.properties, today, ...(scopeEnd ? { scopeEnd } : {}) });
+      WHERE Property IN UNNEST(@properties) AND CAST(StayDate AS DATE) >= @today AND CAST(StayDate AS DATE) <= @scopeEnd
+    `, { properties: resolved.properties, today, scopeEnd });
     remainingRoomNights = Math.max(0, forwardAvailable - (forwardSoldRows[0]?.n ?? 0));
   }
 
@@ -139,7 +160,7 @@ export async function getCategoryMix(filter: KpiFilter): Promise<CategoryMix[]> 
       WHERE ${where}
       GROUP BY category
     `, params),
-    includeLp ? getLpOverviewTotals(resolved.fys, resolved.months) : Promise.resolve(null),
+    includeLp ? getLpOverviewTotals(resolved.period.current) : Promise.resolve(null),
   ]);
 
   const merged = new Map<BookingCategory, CategoryMix>();
@@ -230,7 +251,7 @@ export async function getRoomFormatStats(filter: KpiFilter): Promise<RoomFormatS
       WHERE ${where}
       GROUP BY rt.room_type
     `, params),
-    includeLp ? getLpRoomTypeStats(resolved.fys, resolved.months) : Promise.resolve([]),
+    includeLp ? getLpRoomTypeStats(resolved.period.current) : Promise.resolve([]),
   ]);
 
   const merged = new Map<string | null, { nights: number; revenue: number }>();
@@ -255,41 +276,6 @@ export async function getRoomFormatStats(filter: KpiFilter): Promise<RoomFormatS
       nightsSharePct: safeDivide(v.nights, totalNights),
     }))
     .sort((a, b) => b.nights - a.nights);
-}
-
-// --- Revenue by Room Format & FY ---
-
-export interface RoomFormatByFy {
-  roomType: string | null;
-  fy: string;
-  revenue: number;
-}
-
-export async function getRoomFormatByFy(filter: KpiFilter): Promise<RoomFormatByFy[]> {
-  const resolved = resolveFilter(filter);
-  const includeLp = resolved.properties.includes(LP_PROPERTY);
-  const { clause: where, params } = buildScopeClause("b.Property", "CAST(b.StayDate AS DATE)", resolved, "");
-
-  const [rows, lpRows] = await Promise.all([
-    runQuery<RoomFormatByFy>(`
-      SELECT rt.room_type AS roomType, ${fyLabelSqlExpr("CAST(b.StayDate AS DATE)")} AS fy, SUM(b.DailyRevenue) AS revenue
-      FROM ${table("sales_booking")} b
-      LEFT JOIN ${roomTypeMappingSqlUnnest()} AS rt ON ${roomTypeJoinCondition("b")}
-      WHERE ${where}
-      GROUP BY roomType, fy
-    `, params),
-    includeLp ? getLpRoomTypeByFy(resolved.fys, resolved.months) : Promise.resolve([]),
-  ]);
-
-  const merged = new Map<string, RoomFormatByFy>();
-  for (const r of rows) merged.set(`${r.roomType}|${r.fy}`, r);
-  for (const lp of lpRows) {
-    const key = `${lp.roomType}|${lp.fy}`;
-    const existing = merged.get(key);
-    if (existing) existing.revenue += lp.revenue;
-    else merged.set(key, { roomType: lp.roomType, fy: lp.fy, revenue: lp.revenue });
-  }
-  return [...merged.values()].sort((a, b) => (a.fy === b.fy ? b.revenue - a.revenue : a.fy.localeCompare(b.fy)));
 }
 
 // --- Expats (§3.6: Country IS NOT NULL AND Country != 'India') ---
@@ -398,4 +384,3 @@ export async function getCancellationLeadTime(filter: KpiFilter): Promise<Cancel
   const r = rows[0] ?? { avg_days: null, n: 0 };
   return { avgLeadTimeDays: r.avg_days, sampledCancellations: r.n };
 }
-

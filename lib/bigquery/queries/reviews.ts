@@ -7,104 +7,105 @@
 // and rating_sheet/ota both carry historical LP rows too. Leaving `properties`
 // undefined means "no property filter" (everything, FO included) rather than
 // "all active hotel properties" — only an explicit property selection narrows it.
+//
+// 2026-09-02: rewritten for the Today/This FY/Last Year period-tabs model.
 import { runQuery, table } from "../client";
-import { fyLabelSqlExpr, DateFilter, resolveSelectedFYs, resolveSelectedMonths } from "@/lib/reference/financialYear";
+import { DateRange } from "@/lib/reference/financialYear";
+import { PeriodKey, resolvePeriod } from "@/lib/reference/period";
+import { safeDivide } from "@/lib/format/currency";
+import { ComparisonMetric } from "./overview";
 
-export interface ReviewsFilter extends DateFilter {
+export interface ReviewsFilter {
   properties?: string[];
+  period?: PeriodKey;
 }
 
-// FY-equality + EXTRACT(MONTH...) IN UNNEST(...), not a BETWEEN range — a
-// non-contiguous month selection (e.g. Apr + Dec) isn't a single span.
-function scopeClause(
-  filter: ReviewsFilter,
-  dateExprAsDate: string,
-  propertyCol = "Property"
-): { clause: string; params: Record<string, unknown> } {
-  const conditions: string[] = [];
-  const params: Record<string, unknown> = {};
+function comparisonMetric(current: number | null, previous: number | null): ComparisonMetric {
+  return { current, previous, pctChange: current !== null && previous !== null ? safeDivide(current - previous, previous) : null };
+}
 
-  const fys = resolveSelectedFYs(filter);
-  params.fys = fys;
-  conditions.push(`${fyLabelSqlExpr(dateExprAsDate)} IN UNNEST(@fys)`);
-  const months = resolveSelectedMonths(filter);
-  if (months.length > 0) {
-    params.months = months;
-    conditions.push(`EXTRACT(MONTH FROM ${dateExprAsDate}) IN UNNEST(@months)`);
-  }
-  if (filter.properties && filter.properties.length > 0) {
-    params.properties = filter.properties;
+function scopeClause(range: DateRange, dateExprAsDate: string, properties: string[] | undefined, propertyCol = "Property"): { clause: string; params: Record<string, unknown> } {
+  const conditions: string[] = [`${dateExprAsDate} BETWEEN @start AND @end`];
+  const params: Record<string, unknown> = { start: range.start, end: range.end };
+  if (properties && properties.length > 0) {
+    params.properties = properties;
     conditions.push(`${propertyCol} IN UNNEST(@properties)`);
   }
-
-  return { clause: conditions.length > 0 ? conditions.join(" AND ") : "TRUE", params };
+  return { clause: conditions.join(" AND "), params };
 }
 
 export interface ReviewStats {
   avgRating: number | null;
   totalReviews: number;
+  comparison: {
+    totalReviews: ComparisonMetric;
+    avgRating: ComparisonMetric;
+  };
+}
+
+async function ratingStats(tableName: string, ratingExpr: string, dateExprAsDate: string, filter: ReviewsFilter): Promise<ReviewStats> {
+  const period = resolvePeriod(filter.period ?? "this_fy");
+  const { clause, params } = scopeClause(period.current, dateExprAsDate, filter.properties);
+  const { clause: prevClause, params: prevParams } = scopeClause(period.previous, dateExprAsDate, filter.properties);
+
+  const [rows, prevRows] = await Promise.all([
+    runQuery<{ avg_rating: number | null; total: number }>(`SELECT AVG(${ratingExpr}) AS avg_rating, COUNT(*) AS total FROM ${table(tableName)} WHERE ${clause}`, params),
+    runQuery<{ avg_rating: number | null; total: number }>(`SELECT AVG(${ratingExpr}) AS avg_rating, COUNT(*) AS total FROM ${table(tableName)} WHERE ${prevClause}`, prevParams),
+  ]);
+
+  const avgRating = rows[0]?.avg_rating ?? null;
+  const totalReviews = rows[0]?.total ?? 0;
+  return {
+    avgRating,
+    totalReviews,
+    comparison: {
+      totalReviews: comparisonMetric(totalReviews, prevRows[0]?.total ?? 0),
+      avgRating: comparisonMetric(avgRating, prevRows[0]?.avg_rating ?? null),
+    },
+  };
 }
 
 export async function getGoogleReviewStats(filter: ReviewsFilter): Promise<ReviewStats> {
-  const { clause, params } = scopeClause(filter, "CAST(Date AS DATE)");
-  const rows = await runQuery<{ avg_rating: number | null; total: number }>(`
-    SELECT AVG(Rating) AS avg_rating, COUNT(*) AS total
-    FROM ${table("rating_sheet")}
-    WHERE ${clause}
-  `, params);
-  return { avgRating: rows[0]?.avg_rating ?? null, totalReviews: rows[0]?.total ?? 0 };
-}
-
-export interface RatingTrendPoint {
-  fy: string;
-  monthNumber: number; // calendar month, 1-12
-  monthName: string;
-  count: number;
-}
-
-// Scoped by the full filter (including FY), same as every other section on
-// this tab — §6.8 says "monthly x-axis" only, not "one series per FY" the way
-// §6.3's trends explicitly are, so this is one FY's 12 months, not a multi-year
-// comparison. (Reviews history predates the booking system by a decade —
-// leaving FY unscoped here produced a 15-series chart spanning 2013-2027.)
-export async function getGoogleRatingTrend(filter: ReviewsFilter): Promise<RatingTrendPoint[]> {
-  const { clause, params } = scopeClause(filter, "CAST(Date AS DATE)");
-  const rows = await runQuery<{ fy: string; month_number: number; month_name: string; count: number }>(`
-    SELECT
-      ${fyLabelSqlExpr("CAST(Date AS DATE)")} AS fy,
-      EXTRACT(MONTH FROM CAST(Date AS DATE)) AS month_number,
-      FORMAT_DATE('%B', CAST(Date AS DATE)) AS month_name,
-      COUNT(*) AS count
-    FROM ${table("rating_sheet")}
-    WHERE ${clause}
-    GROUP BY fy, month_number, month_name
-    ORDER BY fy, month_number
-  `, params);
-  return rows.map((r) => ({ fy: r.fy, monthNumber: r.month_number, monthName: r.month_name, count: r.count }));
+  return ratingStats("rating_sheet", "Rating", "CAST(Date AS DATE)", filter);
 }
 
 export async function getOtaReviewStats(filter: ReviewsFilter): Promise<ReviewStats> {
-  const { clause, params } = scopeClause(filter, "CAST(DATE AS DATE)");
-  const rows = await runQuery<{ avg_rating: number | null; total: number }>(`
-    SELECT AVG(SAFE_CAST(Rating AS FLOAT64)) AS avg_rating, COUNT(*) AS total
-    FROM ${table("ota")}
+  return ratingStats("ota", "SAFE_CAST(Rating AS FLOAT64)", "CAST(DATE AS DATE)", filter);
+}
+
+export interface RatingTrendPoint {
+  monthStartDate: string;
+  monthLabel: string;
+  count: number;
+}
+
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function monthLabelOf(iso: string): string {
+  const d = new Date(`${iso}T00:00:00`);
+  return `${MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+// Scoped to the active period's current range only — §6.8 says "monthly
+// x-axis", not a multi-year comparison. (Reviews history predates the
+// booking system by a decade — an unscoped trend would produce a 15-series
+// chart spanning 2013-2027.)
+async function ratingTrend(tableName: string, dateExprAsDate: string, filter: ReviewsFilter): Promise<RatingTrendPoint[]> {
+  const period = resolvePeriod(filter.period ?? "this_fy");
+  const { clause, params } = scopeClause(period.current, dateExprAsDate, filter.properties);
+  const rows = await runQuery<{ month_start: string; count: number }>(`
+    SELECT CAST(DATE_TRUNC(${dateExprAsDate}, MONTH) AS STRING) AS month_start, COUNT(*) AS count
+    FROM ${table(tableName)}
     WHERE ${clause}
+    GROUP BY month_start
+    ORDER BY month_start
   `, params);
-  return { avgRating: rows[0]?.avg_rating ?? null, totalReviews: rows[0]?.total ?? 0 };
+  return rows.map((r) => ({ monthStartDate: r.month_start, monthLabel: monthLabelOf(r.month_start), count: r.count }));
+}
+
+export async function getGoogleRatingTrend(filter: ReviewsFilter): Promise<RatingTrendPoint[]> {
+  return ratingTrend("rating_sheet", "CAST(Date AS DATE)", filter);
 }
 
 export async function getOtaRatingTrend(filter: ReviewsFilter): Promise<RatingTrendPoint[]> {
-  const { clause, params } = scopeClause(filter, "CAST(DATE AS DATE)");
-  const rows = await runQuery<{ fy: string; month_number: number; month_name: string; count: number }>(`
-    SELECT
-      ${fyLabelSqlExpr("CAST(DATE AS DATE)")} AS fy,
-      EXTRACT(MONTH FROM CAST(DATE AS DATE)) AS month_number,
-      FORMAT_DATE('%B', CAST(DATE AS DATE)) AS month_name,
-      COUNT(*) AS count
-    FROM ${table("ota")}
-    WHERE ${clause}
-    GROUP BY fy, month_number, month_name
-    ORDER BY fy, month_number
-  `, params);
-  return rows.map((r) => ({ fy: r.fy, monthNumber: r.month_number, monthName: r.month_name, count: r.count }));
+  return ratingTrend("ota", "CAST(DATE AS DATE)", filter);
 }

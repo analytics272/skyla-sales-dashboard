@@ -1,10 +1,14 @@
 // PRD §6.1 — Revenue & Occupancy Overview (sales_booking).
+// 2026-09-02: rewritten for the Today/This FY/Last Year period-tabs model —
+// every KPI is now computed for both the active period's `current` and
+// `previous` range in one pass, replacing the old FY-multi-select + separate
+// getYoyComparison() call (comparison is no longer specifically "vs last
+// FY" — it's "vs whatever the active tab's previous range is").
 import { runQuery, table } from "../client";
-import { KpiFilter, resolveFilter, buildScopeClause } from "./filters";
-import { getAvailableRoomNights, rangesForFysAndMonths } from "./propertyWindows";
+import { KpiFilter, resolveFilter, buildScopeClause, buildPreviousScopeClause } from "./filters";
+import { getAvailableRoomNights } from "./propertyWindows";
 import { getLpOverviewTotals, getLpAdr, LP_PROPERTY } from "./lpMonthly";
 import { bookingCategorySqlExpr, BookingCategory } from "@/lib/reference/bookingSourceMap";
-import { fyBounds, currentFYLabel, parseFyLabel, fyLabel } from "@/lib/reference/financialYear";
 import { safeDivide } from "@/lib/format/currency";
 
 export interface SourceBreakdown {
@@ -13,21 +17,19 @@ export interface SourceBreakdown {
   revenue: number;
 }
 
-export interface YoyMetric {
+export interface ComparisonMetric {
   current: number | null;
-  prior: number | null;
+  previous: number | null;
   pctChange: number | null;
 }
 
-export interface YoyComparison {
-  currentFY: string;
-  currentRevenue: number;
-  priorFY: string;
-  priorRevenue: number;
-  pctChange: number | null;
-  adr: YoyMetric;
-  occupancyPct: YoyMetric;
-  revPar: YoyMetric;
+export interface PeriodComparison {
+  currentLabel: string;
+  previousLabel: string;
+  revenue: ComparisonMetric;
+  adr: ComparisonMetric;
+  occupancyPct: ComparisonMetric;
+  revPar: ComparisonMetric;
 }
 
 export interface OverviewKpis {
@@ -39,7 +41,7 @@ export interface OverviewKpis {
   occupancyPct: number | null;
   revPar: number | null;
   bySource: SourceBreakdown[];
-  yoy: YoyComparison;
+  comparison: PeriodComparison;
 }
 
 interface AggRow {
@@ -54,40 +56,41 @@ interface SourceRow {
   revenue: number | null;
 }
 
-interface YoyRow {
-  fy: string;
-  revenue: number | null;
+function comparisonMetric(current: number | null, previous: number | null): ComparisonMetric {
+  return { current, previous, pctChange: current !== null && previous !== null ? safeDivide(current - previous, previous) : null };
 }
 
 export async function getOverviewKpis(filter: KpiFilter): Promise<OverviewKpis> {
   const resolved = resolveFilter(filter);
   const { clause: where, params } = buildScopeClause("Property", "CAST(StayDate AS DATE)", resolved, "");
+  const { clause: prevWhere, params: prevParams } = buildPreviousScopeClause("Property", "CAST(StayDate AS DATE)", resolved, "prev");
   // LP (LP Integration PRD Addendum, 2026-08-26) has zero sales_booking rows —
   // its real numbers come from sales_booking_lp_monthly and are merged in
   // here additively when it's in the selected properties.
   const includeLp = resolved.properties.includes(LP_PROPERTY);
 
-  const [aggRows, sourceRows, availableRoomNights, lpTotals] = await Promise.all([
+  const [aggRows, prevAggRows, sourceRows, availableRoomNights, prevAvailableRoomNights, lpCurrent, lpPrevious] = await Promise.all([
     runQuery<AggRow>(`
-      SELECT
-        SUM(DailyRevenue) AS room_revenue,
-        SUM(DailyOtherRevenueExclusiveTax) AS extras_revenue,
-        COUNT(*) AS sold_room_nights
+      SELECT SUM(DailyRevenue) AS room_revenue, SUM(DailyOtherRevenueExclusiveTax) AS extras_revenue, COUNT(*) AS sold_room_nights
       FROM ${table("sales_booking")}
       WHERE ${where}
     `, params),
+    runQuery<AggRow>(`
+      SELECT SUM(DailyRevenue) AS room_revenue, SUM(DailyOtherRevenueExclusiveTax) AS extras_revenue, COUNT(*) AS sold_room_nights
+      FROM ${table("sales_booking")}
+      WHERE ${prevWhere}
+    `, prevParams),
     runQuery<SourceRow>(`
-      SELECT
-        ${bookingCategorySqlExpr("Source")} AS category,
-        COUNT(*) AS nights,
-        SUM(DailyRevenue) AS revenue
+      SELECT ${bookingCategorySqlExpr("Source")} AS category, COUNT(*) AS nights, SUM(DailyRevenue) AS revenue
       FROM ${table("sales_booking")}
       WHERE ${where}
       GROUP BY category
       ORDER BY revenue DESC
     `, params),
-    getAvailableRoomNights(resolved.properties, rangesForFysAndMonths(resolved.fys, resolved.months)),
-    includeLp ? getLpOverviewTotals(resolved.fys, resolved.months) : null,
+    getAvailableRoomNights(resolved.properties, resolved.period.current),
+    getAvailableRoomNights(resolved.properties, resolved.period.previous),
+    includeLp ? getLpOverviewTotals(resolved.period.current) : null,
+    includeLp ? getLpOverviewTotals(resolved.period.previous) : null,
   ]);
 
   const agg = aggRows[0] ?? { room_revenue: 0, extras_revenue: 0, sold_room_nights: 0 };
@@ -95,37 +98,55 @@ export async function getOverviewKpis(filter: KpiFilter): Promise<OverviewKpis> 
   let extrasRevenue = agg.extras_revenue ?? 0;
   let soldRoomNights = agg.sold_room_nights ?? 0;
 
+  const prevAgg = prevAggRows[0] ?? { room_revenue: 0, extras_revenue: 0, sold_room_nights: 0 };
+  let prevRoomRevenue = prevAgg.room_revenue ?? 0;
+  let prevSoldRoomNights = prevAgg.sold_room_nights ?? 0;
+
   const bySourceMap = new Map<BookingCategory, { nights: number; revenue: number }>();
   for (const r of sourceRows) bySourceMap.set(r.category, { nights: r.nights, revenue: r.revenue ?? 0 });
 
-  if (lpTotals) {
-    roomRevenue += lpTotals.roomRevenue;
-    extrasRevenue += lpTotals.extrasRevenue;
-    soldRoomNights += lpTotals.soldRoomNights;
-    for (const s of lpTotals.bySource) {
+  if (lpCurrent) {
+    roomRevenue += lpCurrent.roomRevenue;
+    extrasRevenue += lpCurrent.extrasRevenue;
+    soldRoomNights += lpCurrent.soldRoomNights;
+    for (const s of lpCurrent.bySource) {
       const existing = bySourceMap.get(s.category) ?? { nights: 0, revenue: 0 };
       bySourceMap.set(s.category, { nights: existing.nights + s.nights, revenue: existing.revenue + s.revenue });
     }
+  }
+  if (lpPrevious) {
+    prevRoomRevenue += lpPrevious.roomRevenue;
+    prevSoldRoomNights += lpPrevious.soldRoomNights;
   }
 
   const bySource = [...bySourceMap.entries()]
     .map(([category, v]) => ({ category, ...v }))
     .sort((a, b) => b.revenue - a.revenue);
 
-  // With multiple FYs selected, YoY compares the latest selected FY against the year before it.
-  const latestSelectedFy = [...resolved.fys].sort().at(-1);
-  const yoy = await getYoyComparison(resolved.properties, latestSelectedFy);
+  const adr = safeDivide(roomRevenue, soldRoomNights);
+  const occupancyPct = safeDivide(soldRoomNights, availableRoomNights);
+  const revPar = safeDivide(roomRevenue, availableRoomNights);
+  const prevAdr = safeDivide(prevRoomRevenue, prevSoldRoomNights);
+  const prevOccupancyPct = safeDivide(prevSoldRoomNights, prevAvailableRoomNights);
+  const prevRevPar = safeDivide(prevRoomRevenue, prevAvailableRoomNights);
 
   return {
     roomRevenue,
     extrasRevenue,
     soldRoomNights,
     availableRoomNights,
-    adr: safeDivide(roomRevenue, soldRoomNights),
-    occupancyPct: safeDivide(soldRoomNights, availableRoomNights),
-    revPar: safeDivide(roomRevenue, availableRoomNights),
+    adr,
+    occupancyPct,
+    revPar,
     bySource,
-    yoy,
+    comparison: {
+      currentLabel: resolved.period.currentLabel,
+      previousLabel: resolved.period.previousLabel,
+      revenue: comparisonMetric(roomRevenue, prevRoomRevenue),
+      adr: comparisonMetric(adr, prevAdr),
+      occupancyPct: comparisonMetric(occupancyPct, prevOccupancyPct),
+      revPar: comparisonMetric(revPar, prevRevPar),
+    },
   };
 }
 
@@ -151,7 +172,7 @@ export async function getAdrByProperty(filter: KpiFilter): Promise<PropertyAdr[]
 
   // LP has zero sales_booking rows — its own row comes from sales_booking_lp_monthly instead.
   if (resolved.properties.includes(LP_PROPERTY)) {
-    const lp = await getLpAdr(resolved.fys, resolved.months);
+    const lp = await getLpAdr(resolved.period.current);
     if (lp.nights > 0 || lp.revenue > 0) result.push({ property: LP_PROPERTY, revenue: lp.revenue, nights: lp.nights, adr: lp.adr });
   }
 
@@ -181,12 +202,12 @@ function monthLabel(d: Date): string {
 
 /**
  * A real-time "where do we stand right now" pace indicator — always relative
- * to today's actual date, independent of the FY/Month filter (which is about
- * historical reporting periods, not "right now"). Only the Property filter
- * applies. Implementation call: the PRD doesn't define this metric; this
- * mirrors a standard hotel revenue-management pace view: last month (single,
- * finished), this month (in progress, whole-month basis), next month (early
- * pickup) — three consecutive, non-overlapping calendar months.
+ * to today's actual date, independent of the active period tab (which is
+ * about historical reporting periods, not "right now"). Only the Property
+ * filter applies. Implementation call: the PRD doesn't define this metric;
+ * this mirrors a standard hotel revenue-management pace view: last month
+ * (single, finished), this month (in progress, whole-month basis), next
+ * month (early pickup) — three consecutive, non-overlapping calendar months.
  */
 export async function getOccupancyPace(properties: string[]): Promise<OccupancyPace> {
   const today = new Date();
@@ -195,14 +216,12 @@ export async function getOccupancyPace(properties: string[]): Promise<OccupancyP
   const lastMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
   const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
   const presentMonthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-  const presentMonthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
   const nextMonthStart = new Date(today.getFullYear(), today.getMonth() + 1, 1);
-  const nextMonthEnd = new Date(today.getFullYear(), today.getMonth() + 2, 0);
 
   const [lastMonth, presentMonth, nextMonth] = await Promise.all([
     occupancyForRange(properties, iso(lastMonthStart), iso(lastMonthEnd)),
-    occupancyForRange(properties, iso(presentMonthStart), iso(presentMonthEnd)),
-    occupancyForRange(properties, iso(nextMonthStart), iso(nextMonthEnd)),
+    occupancyForRange(properties, iso(presentMonthStart), iso(new Date(today.getFullYear(), today.getMonth() + 1, 0))),
+    occupancyForRange(properties, iso(nextMonthStart), iso(new Date(today.getFullYear(), today.getMonth() + 2, 0))),
   ]);
 
   return {
@@ -221,89 +240,7 @@ async function occupancyForRange(properties: string[], start: string, end: strin
       SELECT COUNT(*) AS n FROM ${table("sales_booking")}
       WHERE Property IN UNNEST(@properties) AND CAST(StayDate AS DATE) BETWEEN @start AND @end
     `, { properties, start, end }),
-    getAvailableRoomNights(properties, [{ start, end }]),
+    getAvailableRoomNights(properties, { start, end }),
   ]);
   return safeDivide(soldRows[0]?.n ?? 0, available);
-}
-
-export interface LastMonthCategorySnapshot {
-  label: string; // e.g. "July 2026"
-  items: SourceBreakdown[];
-  totalRevenue: number;
-}
-
-/**
- * B2B/B2C/OTA revenue split for last calendar month specifically (not the
- * filter's FY/Month scope) — a "how did we do recently" read that sits above
- * the period-total hero figure, same real-time convention as getOccupancyPace.
- */
-export async function getLastMonthCategoryBreakdown(properties: string[]): Promise<LastMonthCategorySnapshot> {
-  const today = new Date();
-  const start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-  const end = new Date(today.getFullYear(), today.getMonth(), 0);
-  const iso = (d: Date) => d.toISOString().slice(0, 10);
-
-  const rows = await runQuery<SourceRow>(`
-    SELECT ${bookingCategorySqlExpr("Source")} AS category, COUNT(*) AS nights, SUM(DailyRevenue) AS revenue
-    FROM ${table("sales_booking")}
-    WHERE Property IN UNNEST(@properties) AND CAST(StayDate AS DATE) BETWEEN @start AND @end
-    GROUP BY category
-    ORDER BY revenue DESC
-  `, { properties, start: iso(start), end: iso(end) });
-
-  const items = rows.map((r) => ({ category: r.category, nights: r.nights, revenue: r.revenue ?? 0 }));
-  return { label: monthLabel(start), items, totalRevenue: items.reduce((s, i) => s + i.revenue, 0) };
-}
-
-function yoyMetric(current: number | null, prior: number | null): YoyMetric {
-  return { current, prior, pctChange: current !== null && prior !== null ? safeDivide(current - prior, prior) : null };
-}
-
-async function getYoyComparison(properties: string[], fy?: string): Promise<YoyComparison> {
-  const currentFY = fy ?? currentFYLabel();
-  const priorFY = fyLabel(parseFyLabel(currentFY) - 1);
-
-  const current = fyBounds(currentFY);
-  const prior = fyBounds(priorFY);
-  const dateExpr = "CAST(StayDate AS DATE)";
-  const includeLp = properties.includes(LP_PROPERTY);
-
-  const [rows, currentAvailable, priorAvailable, lpCurrent, lpPrior] = await Promise.all([
-    runQuery<YoyRow & { nights: number }>(`
-      SELECT 'current' AS fy, SUM(DailyRevenue) AS revenue, COUNT(*) AS nights
-      FROM ${table("sales_booking")}
-      WHERE Property IN UNNEST(@properties) AND ${dateExpr} BETWEEN @curStart AND @curEnd
-      UNION ALL
-      SELECT 'prior' AS fy, SUM(DailyRevenue) AS revenue, COUNT(*) AS nights
-      FROM ${table("sales_booking")}
-      WHERE Property IN UNNEST(@properties) AND ${dateExpr} BETWEEN @priorStart AND @priorEnd
-    `, {
-      properties,
-      curStart: current.start,
-      curEnd: current.end,
-      priorStart: prior.start,
-      priorEnd: prior.end,
-    }),
-    getAvailableRoomNights(properties, [current]),
-    getAvailableRoomNights(properties, [prior]),
-    includeLp ? getLpOverviewTotals([currentFY], []) : null,
-    includeLp ? getLpOverviewTotals([priorFY], []) : null,
-  ]);
-
-  const currentRevenue = (rows.find((r) => r.fy === "current")?.revenue ?? 0) + (lpCurrent?.roomRevenue ?? 0);
-  const priorRevenue = (rows.find((r) => r.fy === "prior")?.revenue ?? 0) + (lpPrior?.roomRevenue ?? 0);
-  const currentNights = (rows.find((r) => r.fy === "current")?.nights ?? 0) + (lpCurrent?.soldRoomNights ?? 0);
-  const priorNights = (rows.find((r) => r.fy === "prior")?.nights ?? 0) + (lpPrior?.soldRoomNights ?? 0);
-  const pctChange = safeDivide(currentRevenue - priorRevenue, priorRevenue);
-
-  return {
-    currentFY,
-    currentRevenue,
-    priorFY,
-    priorRevenue,
-    pctChange,
-    adr: yoyMetric(safeDivide(currentRevenue, currentNights), safeDivide(priorRevenue, priorNights)),
-    occupancyPct: yoyMetric(safeDivide(currentNights, currentAvailable), safeDivide(priorNights, priorAvailable)),
-    revPar: yoyMetric(safeDivide(currentRevenue, currentAvailable), safeDivide(priorRevenue, priorAvailable)),
-  };
 }

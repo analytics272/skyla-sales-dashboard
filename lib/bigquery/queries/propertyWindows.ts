@@ -1,16 +1,6 @@
 import { runQuery, table } from "../client";
 import { ALL_PROPERTY_CODES, roomCountOf } from "@/lib/reference/propertyReference";
-import { DateRange, fyBounds, fyMonthBounds } from "@/lib/reference/financialYear";
-
-/** Builds the DateRange[] (one per FY x month combination) for getAvailableRoomNights(By Property) from a resolved fys+months pair. Mirrors resolveMonthRanges() but avoids importing ResolvedFilter here to keep this module filter-shape-agnostic. */
-export function rangesForFysAndMonths(fys: string[], months: number[]): DateRange[] {
-  const ranges: DateRange[] = [];
-  for (const fy of fys) {
-    if (months.length === 0) ranges.push(fyBounds(fy));
-    else for (const m of months) ranges.push(fyMonthBounds(fy, m));
-  }
-  return ranges;
-}
+import { DateRange } from "@/lib/reference/financialYear";
 
 export interface PropertyWindow {
   property: string;
@@ -102,15 +92,15 @@ export function daysBetweenInclusive(start: string, end: string): number {
 }
 
 /**
- * Available Room Nights (§3.3/§6.1), per property, summed across one or more
- * date ranges (one range per selected month when the Month filter is a
- * non-contiguous multi-select, so a gap month's days are never counted), each
- * clamped against that property's actual active window. `ranges: null` (no FY
- * selected) uses each property's full active window unclamped.
+ * Available Room Nights (§3.3/§6.1), per property, for a single date range
+ * (the active period's `current` or `previous` span — always contiguous
+ * since the 2026-09-02 period-tabs redesign), clamped against each
+ * property's actual active window. `range: null` uses each property's full
+ * active window unclamped (its entire history).
  */
 export async function getAvailableRoomNightsByProperty(
   properties: string[],
-  ranges: DateRange[] | null
+  range: DateRange | null
 ): Promise<Record<string, number>> {
   const windows = await getPropertyActiveWindows();
   const result: Record<string, number> = {};
@@ -123,19 +113,15 @@ export async function getAvailableRoomNightsByProperty(
       continue;
     }
 
-    const effectiveRanges = ranges ?? [{ start: window.minStay, end: window.maxStay }];
-    let nights = 0;
-    for (const range of effectiveRanges) {
-      const clamped = clampToActiveWindow(range.start, range.end, window);
-      if (clamped) nights += roomCount * daysBetweenInclusive(clamped.start, clamped.end);
-    }
-    result[code] = nights;
+    const effectiveRange = range ?? { start: window.minStay, end: window.maxStay };
+    const clamped = clampToActiveWindow(effectiveRange.start, effectiveRange.end, window);
+    result[code] = clamped ? roomCount * daysBetweenInclusive(clamped.start, clamped.end) : 0;
   }
 
   return result;
 }
 
-export async function getAvailableRoomNights(properties: string[], ranges: DateRange[] | null): Promise<number> {
-  const byProperty = await getAvailableRoomNightsByProperty(properties, ranges);
+export async function getAvailableRoomNights(properties: string[], range: DateRange | null): Promise<number> {
+  const byProperty = await getAvailableRoomNightsByProperty(properties, range);
   return Object.values(byProperty).reduce((sum, n) => sum + n, 0);
 }

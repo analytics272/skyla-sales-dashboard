@@ -2,7 +2,6 @@
 
 import { CategoryAchievement, RevenueAchievement, MonthlyRevenueTarget, MonthlyAdrTarget, MonthlyOccupancyTarget } from "@/lib/bigquery/queries/targets";
 import type { PropertyTargetComparison, PropertyTargetComparisonResult } from "@/lib/bigquery/queries/propertyTargets";
-import { PROPERTY_TARGETS_FY } from "@/lib/reference/propertyTargets";
 import StatTile from "@/components/ui/StatTile";
 import Card from "@/components/ui/Card";
 import Table, { TableColumn } from "@/components/ui/Table";
@@ -34,18 +33,20 @@ function shouldHideAchieved(fy: string, monthNumber: number, achieved: number) {
 }
 
 export default function TargetsContent({
+  fy,
   categoryAchievement,
   revenueAchievement,
-  monthlyRevenueTargetsByFy,
-  adrTargetVsAchievedByFy,
-  occupancyTargetVsAchievedByFy,
+  monthlyRevenueTargets,
+  adrTargetVsAchieved,
+  occupancyTargetVsAchieved,
   propertyTargetComparison,
 }: {
+  fy: string;
   categoryAchievement: CategoryAchievement[];
   revenueAchievement: RevenueAchievement;
-  monthlyRevenueTargetsByFy: { fy: string; data: MonthlyRevenueTarget[] }[];
-  adrTargetVsAchievedByFy: { fy: string; data: MonthlyAdrTarget[] }[];
-  occupancyTargetVsAchievedByFy: { fy: string; data: MonthlyOccupancyTarget[] }[];
+  monthlyRevenueTargets: MonthlyRevenueTarget[];
+  adrTargetVsAchieved: MonthlyAdrTarget[];
+  occupancyTargetVsAchieved: MonthlyOccupancyTarget[];
   propertyTargetComparison: PropertyTargetComparisonResult;
 }) {
   const categoryData = categoryAchievement.map((c) => ({
@@ -74,16 +75,17 @@ export default function TargetsContent({
             label="Revenue Achievement"
             value={revenueAchievement.achievedPct !== null ? formatPercent(revenueAchievement.achievedPct) : "—"}
             sub={`${formatIndianCurrency(revenueAchievement.achieved)} of ${formatIndianCurrency(revenueAchievement.target)}`}
+            progress={revenueAchievement.achievedPct !== null ? { pct: revenueAchievement.achievedPct } : undefined}
           />
           <StatTile label="Target" value={formatIndianCurrency(revenueAchievement.target)} />
         </div>
       </div>
 
-      <Card title={`Revenue Targets By Property (${PROPERTY_TARGETS_FY})`}>
+      <Card title="Revenue Targets By Property" subtitle={`Fixed reference plan — ${fy}`}>
         <Table columns={propertyColumns} rows={propertyTargetComparison.rows} rowKey={(r) => r.property} footerRow={propertyTargetComparison.total} />
       </Card>
 
-      <Card title="B2B / B2C / OTA Achievement (Target Vs Achieved)">
+      <Card title="B2B / B2C / OTA Achievement">
         <GroupedBarChart data={categoryData} xKey="category" series={TA_SERIES} valueFormatter={(v) => formatIndianCurrency(v)} />
         <div className="mt-3 grid grid-cols-3 gap-3 text-center">
           {categoryAchievement.map((c) => (
@@ -97,65 +99,46 @@ export default function TargetsContent({
         </div>
       </Card>
 
-      <Card title="Revenue Targets With Roll Over (Monthly)">
-        <div className="space-y-6">
-          {monthlyRevenueTargetsByFy.map(({ fy, data }) => (
-            <div key={fy}>
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">{fy}</p>
-              <MultiSeriesLineChart
-                data={data.map((r) => ({
-                  month: r.month,
-                  deptTarget: r.deptTarget,
-                  targetWithRollOver: r.targetWithRollOver,
-                  achieved: shouldHideAchieved(fy, r.monthNumber, r.achievedRevenue) ? null : r.achievedRevenue,
-                }))}
-                xKey="month"
-                series={ROLLOVER_SERIES}
-                valueFormatter={(v) => formatIndianCurrency(v)}
-                height={220}
-              />
-            </div>
-          ))}
-        </div>
+      <Card title="Revenue Targets With Roll Over">
+        <MultiSeriesLineChart
+          data={monthlyRevenueTargets.map((r) => ({
+            month: r.month,
+            deptTarget: r.deptTarget,
+            targetWithRollOver: r.targetWithRollOver,
+            achieved: shouldHideAchieved(fy, r.monthNumber, r.achievedRevenue) ? null : r.achievedRevenue,
+          }))}
+          xKey="month"
+          series={ROLLOVER_SERIES}
+          valueFormatter={(v) => formatIndianCurrency(v)}
+          height={260}
+        />
       </Card>
 
-      <Card title="ADR: Target Vs Achieved (Monthly)">
-        <div className="space-y-6">
-          {adrTargetVsAchievedByFy.map(({ fy, data }) => (
-            <div key={fy}>
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">{fy}</p>
-              <MultiSeriesLineChart
-                data={data.map((r) => ({ month: r.month, target: r.targetAdr, achieved: shouldHideAchieved(fy, r.monthNumber, r.achievedAdr) ? null : r.achievedAdr }))}
-                xKey="month"
-                series={TA_SERIES}
-                valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`}
-                height={220}
-              />
-            </div>
-          ))}
-        </div>
-      </Card>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card title="ADR: Target Vs Achieved">
+          <MultiSeriesLineChart
+            data={adrTargetVsAchieved.map((r) => ({ month: r.month, target: r.targetAdr, achieved: shouldHideAchieved(fy, r.monthNumber, r.achievedAdr) ? null : r.achievedAdr }))}
+            xKey="month"
+            series={TA_SERIES}
+            valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`}
+            height={240}
+          />
+        </Card>
 
-      <Card title="Occupancy: Target Vs Achieved (Monthly)">
-        <div className="space-y-6">
-          {occupancyTargetVsAchievedByFy.map(({ fy, data }) => (
-            <div key={fy}>
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">{fy}</p>
-              <MultiSeriesLineChart
-                data={data.map((r) => ({
-                  month: r.month,
-                  target: r.targetOccupancyPct * 100,
-                  achieved: shouldHideAchieved(fy, r.monthNumber, r.achievedOccupancyPct) ? null : r.achievedOccupancyPct * 100,
-                }))}
-                xKey="month"
-                series={TA_SERIES}
-                valueFormatter={(v) => `${v.toFixed(0)}%`}
-                height={220}
-              />
-            </div>
-          ))}
-        </div>
-      </Card>
+        <Card title="Occupancy: Target Vs Achieved">
+          <MultiSeriesLineChart
+            data={occupancyTargetVsAchieved.map((r) => ({
+              month: r.month,
+              target: r.targetOccupancyPct * 100,
+              achieved: shouldHideAchieved(fy, r.monthNumber, r.achievedOccupancyPct) ? null : r.achievedOccupancyPct * 100,
+            }))}
+            xKey="month"
+            series={TA_SERIES}
+            valueFormatter={(v) => `${v.toFixed(0)}%`}
+            height={240}
+          />
+        </Card>
+      </div>
     </div>
   );
 }

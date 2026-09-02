@@ -1,18 +1,22 @@
 // PRD §6.6 — Leads (lead_tracker). Every query starts from the §2.4 baseline
 // filter (WHERE Name IS NOT NULL AND TRIM(Name) != '') — without it every KPI
 // here is inflated ~8x by BigQuery-side sync padding (45,282 raw rows vs 5,694
-// real). FY/Quarter/Month scoping uses the `date` column (lead capture date,
-// confirmed aligned with the sheet's own Month/Month_Number fiscal numbering,
-// e.g. calendar August -> Month_Number 5), not Check_in_date_2 (the guest's
-// future stay date) — Total/Closed/Conversion Leads are about lead-generation
-// activity over time, not the eventual stay.
+// real). Scoping uses the `date` column (lead capture date, confirmed aligned
+// with the sheet's own Month/Month_Number fiscal numbering), not
+// Check_in_date_2 (the guest's future stay date) — Total/Closed/Conversion
+// Leads are about lead-generation activity over time, not the eventual stay.
 //
 // User-confirmed property remap (2026-08-19): lead_tracker has two Property
 // codes outside the 6-property reference table. KOND -> KDP (Kondapur), JH44 ->
 // JHS (Jubilee Hills). NULL Property displays as the literal "null" bucket.
+//
+// 2026-09-02: rewritten for the Today/This FY/Last Year period-tabs model —
+// scoped by a plain date range instead of FY-label/fiscal-month matching.
 import { runQuery, table } from "../client";
-import { currentFYLabel, fyLabelSqlExpr, resolveSelectedFYs, resolveSelectedMonths, DateFilter } from "@/lib/reference/financialYear";
+import { DateRange } from "@/lib/reference/financialYear";
+import { PeriodKey, resolvePeriod } from "@/lib/reference/period";
 import { safeDivide } from "@/lib/format/currency";
+import { ComparisonMetric } from "./overview";
 
 const BASELINE_FILTER = "Name IS NOT NULL AND TRIM(Name) != ''";
 
@@ -25,28 +29,28 @@ END`;
 
 const TOTAL_EXPR = "SAFE_CAST(REPLACE(Total, ',', '') AS FLOAT64)";
 
-export interface LeadsFilter extends DateFilter {
+export interface LeadsFilter {
   properties?: string[]; // matched against the remapped display property
+  period?: PeriodKey;
+}
+
+function comparisonMetric(current: number | null, previous: number | null): ComparisonMetric {
+  return { current, previous, pctChange: current !== null && previous !== null ? safeDivide(current - previous, previous) : null };
+}
+
+function whereForRange(range: DateRange, properties?: string[]): { clause: string; params: Record<string, unknown> } {
+  const conditions = [BASELINE_FILTER, "date BETWEEN @start AND @end"];
+  const params: Record<string, unknown> = { start: range.start, end: range.end };
+  if (properties && properties.length > 0) {
+    params.properties = properties;
+    conditions.push(`${PROPERTY_DISPLAY_EXPR} IN UNNEST(@properties)`);
+  }
+  return { clause: conditions.join(" AND "), params };
 }
 
 function whereForFilter(filter: LeadsFilter): { clause: string; params: Record<string, unknown> } {
-  const conditions = [BASELINE_FILTER];
-  const params: Record<string, unknown> = {};
-
-  const fys = resolveSelectedFYs(filter);
-  params.fys = fys;
-  conditions.push(`${fyLabelSqlExpr("date")} IN UNNEST(@fys)`);
-  const months = resolveSelectedMonths(filter);
-  if (months.length > 0) {
-    params.months = months;
-    conditions.push("EXTRACT(MONTH FROM date) IN UNNEST(@months)");
-  }
-  if (filter.properties && filter.properties.length > 0) {
-    params.properties = filter.properties;
-    conditions.push(`${PROPERTY_DISPLAY_EXPR} IN UNNEST(@properties)`);
-  }
-
-  return { clause: conditions.join(" AND "), params };
+  const period = resolvePeriod(filter.period ?? "this_fy");
+  return whereForRange(period.current, filter.properties);
 }
 
 // B2C acquisition channels: Exotel (phone), Business WA (WhatsApp), Website.
@@ -67,34 +71,52 @@ export interface LeadsSummary {
   referenceClosedLeads: number;
   revenue: number;
   conversionRate: number | null;
+  comparison: {
+    totalLeads: ComparisonMetric;
+    revenue: ComparisonMetric;
+    conversionRate: ComparisonMetric;
+  };
 }
 
-export async function getLeadsSummary(filter: LeadsFilter): Promise<LeadsSummary> {
-  const { clause, params } = whereForFilter(filter);
-  const rows = await runQuery<{
-    total_leads: number;
-    closed_leads: number;
-    new_leads: number;
-    b2c_leads_closed: number;
-    existing_closed_leads: number;
-    reference_closed_leads: number;
-    revenue: number | null;
-  }>(`
-    SELECT
-      COUNT(*) AS total_leads,
-      COUNTIF(Stage = 'Closed') AS closed_leads,
-      COUNTIF(${B2C_SOURCES_SQL}) AS new_leads,
-      COUNTIF(${B2C_SOURCES_SQL} AND Stage = 'Closed') AS b2c_leads_closed,
-      COUNTIF(Source = 'Existing' AND Stage = 'Closed') AS existing_closed_leads,
-      COUNTIF(Source = 'Reference' AND Stage = 'Closed') AS reference_closed_leads,
-      SUM(${TOTAL_EXPR}) AS revenue
-    FROM ${table("lead_tracker")}
-    WHERE ${clause}
-  `, params);
+interface LeadsSummaryRow {
+  total_leads: number;
+  closed_leads: number;
+  new_leads: number;
+  b2c_leads_closed: number;
+  existing_closed_leads: number;
+  reference_closed_leads: number;
+  revenue: number | null;
+}
 
-  const r = rows[0] ?? {
-    total_leads: 0, closed_leads: 0, new_leads: 0, b2c_leads_closed: 0, existing_closed_leads: 0, reference_closed_leads: 0, revenue: 0,
-  };
+const LEADS_SUMMARY_SQL = (where: string) => `
+  SELECT
+    COUNT(*) AS total_leads,
+    COUNTIF(Stage = 'Closed') AS closed_leads,
+    COUNTIF(${B2C_SOURCES_SQL}) AS new_leads,
+    COUNTIF(${B2C_SOURCES_SQL} AND Stage = 'Closed') AS b2c_leads_closed,
+    COUNTIF(Source = 'Existing' AND Stage = 'Closed') AS existing_closed_leads,
+    COUNTIF(Source = 'Reference' AND Stage = 'Closed') AS reference_closed_leads,
+    SUM(${TOTAL_EXPR}) AS revenue
+  FROM ${table("lead_tracker")}
+  WHERE ${where}
+`;
+
+export async function getLeadsSummary(filter: LeadsFilter): Promise<LeadsSummary> {
+  const period = resolvePeriod(filter.period ?? "this_fy");
+  const { clause, params } = whereForRange(period.current, filter.properties);
+  const { clause: prevClause, params: prevParams } = whereForRange(period.previous, filter.properties);
+
+  const [rows, prevRows] = await Promise.all([
+    runQuery<LeadsSummaryRow>(LEADS_SUMMARY_SQL(clause), params),
+    runQuery<LeadsSummaryRow>(LEADS_SUMMARY_SQL(prevClause), prevParams),
+  ]);
+
+  const empty: LeadsSummaryRow = { total_leads: 0, closed_leads: 0, new_leads: 0, b2c_leads_closed: 0, existing_closed_leads: 0, reference_closed_leads: 0, revenue: 0 };
+  const r = rows[0] ?? empty;
+  const pr = prevRows[0] ?? empty;
+  const conversionRate = safeDivide(r.closed_leads, r.total_leads);
+  const prevConversionRate = safeDivide(pr.closed_leads, pr.total_leads);
+
   return {
     totalLeads: r.total_leads,
     closedLeads: r.closed_leads,
@@ -104,37 +126,55 @@ export async function getLeadsSummary(filter: LeadsFilter): Promise<LeadsSummary
     existingClosedLeads: r.existing_closed_leads,
     referenceClosedLeads: r.reference_closed_leads,
     revenue: r.revenue ?? 0,
-    conversionRate: safeDivide(r.closed_leads, r.total_leads),
+    conversionRate,
+    comparison: {
+      totalLeads: comparisonMetric(r.total_leads, pr.total_leads),
+      revenue: comparisonMetric(r.revenue ?? 0, pr.revenue ?? 0),
+      conversionRate: comparisonMetric(conversionRate, prevConversionRate),
+    },
   };
 }
 
 export interface LeadsMoMPoint {
-  monthNumber: number;
+  monthStartDate: string;
+  monthLabel: string;
   totalLeads: number;
   closedLeads: number;
 }
 
-export async function getLeadsMoM(fy: string | undefined, properties?: string[]): Promise<LeadsMoMPoint[]> {
-  const resolvedFy = fy ?? currentFYLabel();
-  const conditions = [BASELINE_FILTER, `${fyLabelSqlExpr("date")} = @fy`, "Month_Number IS NOT NULL"];
-  const params: Record<string, unknown> = { fy: resolvedFy };
-  if (properties && properties.length > 0) {
-    params.properties = properties;
-    conditions.push(`${PROPERTY_DISPLAY_EXPR} IN UNNEST(@properties)`);
-  }
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function monthLabelOf(iso: string): string {
+  const d = new Date(`${iso}T00:00:00`);
+  return `${MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}`;
+}
 
-  const rows = await runQuery<{ month_number: number; total_leads: number; closed_leads: number }>(`
+async function leadsMoMForRange(range: DateRange, properties?: string[]): Promise<LeadsMoMPoint[]> {
+  const { clause, params } = whereForRange(range, properties);
+  const rows = await runQuery<{ month_start: string; total_leads: number; closed_leads: number }>(`
     SELECT
-      Month_Number AS month_number,
+      CAST(DATE_TRUNC(date, MONTH) AS STRING) AS month_start,
       COUNT(*) AS total_leads,
       COUNTIF(Stage = 'Closed') AS closed_leads
     FROM ${table("lead_tracker")}
-    WHERE ${conditions.join(" AND ")}
-    GROUP BY month_number
-    ORDER BY month_number
+    WHERE ${clause}
+    GROUP BY month_start
+    ORDER BY month_start
   `, params);
+  return rows.map((r) => ({ monthStartDate: r.month_start, monthLabel: monthLabelOf(r.month_start), totalLeads: r.total_leads, closedLeads: r.closed_leads }));
+}
 
-  return rows.map((r) => ({ monthNumber: r.month_number, totalLeads: r.total_leads, closedLeads: r.closed_leads }));
+export interface LeadsMoMSeries {
+  current: LeadsMoMPoint[];
+  previous: LeadsMoMPoint[];
+}
+
+export async function getLeadsMoM(filter: LeadsFilter): Promise<LeadsMoMSeries> {
+  const period = resolvePeriod(filter.period ?? "this_fy");
+  const [current, previous] = await Promise.all([
+    leadsMoMForRange(period.current, filter.properties),
+    leadsMoMForRange(period.previous, filter.properties),
+  ]);
+  return { current, previous };
 }
 
 export interface LeadsByGroup {
@@ -203,6 +243,7 @@ export async function getAdrByFormat(filter: LeadsFilter): Promise<AdrByFormat[]
 export interface LostLeadReason {
   stage: string;
   count: number;
+  pct: number | null;
 }
 
 export async function getLostLeadReasons(filter: LeadsFilter): Promise<LostLeadReason[]> {
@@ -217,7 +258,8 @@ export async function getLostLeadReasons(filter: LeadsFilter): Promise<LostLeadR
     GROUP BY stage
     ORDER BY count DESC
   `, params);
-  return rows.map((r) => ({ stage: r.stage ?? "(open/in-progress)", count: r.count }));
+  const total = rows.reduce((s, r) => s + r.count, 0);
+  return rows.map((r) => ({ stage: r.stage ?? "(open/in-progress)", count: r.count, pct: safeDivide(r.count, total) }));
 }
 
 export async function getBookingPace(filter: LeadsFilter): Promise<number | null> {

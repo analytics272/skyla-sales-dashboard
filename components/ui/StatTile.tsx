@@ -1,13 +1,16 @@
 import { CHART_DELTA_BAD, CHART_DELTA_GOOD } from "@/lib/design/tokens";
+import ProgressBar from "./ProgressBar";
 
 export interface StatTileProps {
   label: string;
   value: string;
   delta?: { pct: number; label: string; upIsGood?: boolean };
   sub?: string;
+  /** Compact benchmark/achievement bar under the value (redesign §12) — e.g. "97% of target". `good`/`warn` set the color thresholds (fraction 0-1, default 0.9/0.6). */
+  progress?: { pct: number; label?: string; good?: number; warn?: number };
 }
 
-export default function StatTile({ label, value, delta, sub }: StatTileProps) {
+export default function StatTile({ label, value, delta, sub, progress }: StatTileProps) {
   const deltaColor = delta
     ? (delta.pct >= 0) === (delta.upIsGood ?? true)
       ? CHART_DELTA_GOOD
@@ -24,6 +27,12 @@ export default function StatTile({ label, value, delta, sub }: StatTileProps) {
         </p>
       )}
       {sub && <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">{sub}</p>}
+      {progress && (
+        <div className="mt-2.5">
+          <ProgressBar pct={progress.pct} good={progress.good} warn={progress.warn} />
+          {progress.label && <p className="mt-1 text-[11px] text-zinc-400 dark:text-zinc-500">{progress.label}</p>}
+        </div>
+      )}
     </div>
   );
 }

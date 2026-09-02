@@ -1,85 +1,89 @@
 "use client";
 
-import { MonthlyTrendPoint, CategoryAdrPoint } from "@/lib/bigquery/queries/trends";
+// 2026-09-02 redesign: one line per FY replaced with current-vs-previous
+// (matching the active period tab), since there's no more FY multi-select.
+import { TrendSeries, CategoryAdrStat } from "@/lib/bigquery/queries/trends";
 import Card from "@/components/ui/Card";
 import MultiSeriesLineChart from "@/components/charts/MultiSeriesLineChart";
-import GroupedBarChart from "@/components/charts/GroupedBarChart";
-import FyComparisonStrip from "@/components/charts/FyComparisonStrip";
-import { FY_COLOR, CATEGORY_COLOR, CATEGORY_ORDER } from "@/lib/design/tokens";
-import { pivotByFiscalMonth } from "@/lib/charts/pivotByFiscalMonth";
+import SingleMetricBarChart, { BarDatum } from "@/components/charts/SingleMetricBarChart";
+import DonutChart from "@/components/charts/DonutChart";
+import { CATEGORY_COLOR, CATEGORY_ORDER } from "@/lib/design/tokens";
+
+function mergeTrend(
+  series: TrendSeries,
+  pick: (p: TrendSeries["current"][number]) => number | null,
+  currentKey: string,
+  previousKey: string
+) {
+  const len = Math.max(series.current.length, series.previous.length);
+  const rows: Record<string, unknown>[] = [];
+  for (let i = 0; i < len; i++) {
+    const c = series.current[i];
+    const p = series.previous[i];
+    rows.push({ label: c?.monthLabel ?? p?.monthLabel ?? `#${i + 1}`, [currentKey]: c ? pick(c) : null, [previousKey]: p ? pick(p) : null });
+  }
+  return rows;
+}
 
 export default function TrendsContent({
   monthlyTrends,
-  categoryAdrTrend,
+  categoryAdr,
 }: {
-  monthlyTrends: MonthlyTrendPoint[];
-  categoryAdrTrend: CategoryAdrPoint[];
+  monthlyTrends: TrendSeries;
+  categoryAdr: CategoryAdrStat[];
 }) {
-  const fyList = [...new Set(monthlyTrends.map((p) => p.fy))].sort();
-  const fySeries = fyList.map((fy) => ({ key: fy, color: FY_COLOR[fy] ?? "var(--chart-baseline)" }));
+  const currentKey = "This period";
+  const previousKey = "Previous period";
+  const series = [
+    { key: currentKey, color: "var(--series-1)" },
+    { key: previousKey, color: "var(--chart-baseline)" },
+  ];
 
-  const occupancyData = pivotByFiscalMonth(monthlyTrends, fyList, (p) => p.month, (p) => (p.occupancyPct !== null ? p.occupancyPct * 100 : null));
-  const revParData = pivotByFiscalMonth(monthlyTrends, fyList, (p) => p.month, (p) => p.revPar);
-  const adrData = pivotByFiscalMonth(monthlyTrends, fyList, (p) => p.month, (p) => p.adr);
+  const occupancyData = mergeTrend(monthlyTrends, (p) => (p.occupancyPct !== null ? p.occupancyPct * 100 : null), currentKey, previousKey);
+  const revParData = mergeTrend(monthlyTrends, (p) => p.revPar, currentKey, previousKey);
+  const adrData = mergeTrend(monthlyTrends, (p) => p.adr, currentKey, previousKey);
 
-  // Whole-FY totals for the comparison strip above each chart — same "FY
-  // label, value, vs-prior-FY badge" pattern shown in the Looker reference.
-  const fyTotals = fyList.map((fy) => {
-    const rows = monthlyTrends.filter((p) => p.fy === fy);
-    return {
-      fy,
-      nights: rows.reduce((s, r) => s + r.soldRoomNights, 0),
-      revenue: rows.reduce((s, r) => s + r.revenue, 0),
-      available: rows.reduce((s, r) => s + r.availableRoomNights, 0),
-    };
+  const categoriesPresent = CATEGORY_ORDER.filter((c) => categoryAdr.some((r) => r.category === c));
+  const revenueDonut = categoriesPresent.map((c) => {
+    const r = categoryAdr.find((x) => x.category === c)!;
+    return { name: c, value: r.revenue, color: CATEGORY_COLOR[c] };
   });
-  const occupancyFyPoints = fyTotals.map((t) => ({ fy: t.fy, value: t.available > 0 ? (t.nights / t.available) * 100 : null }));
-  const revParFyPoints = fyTotals.map((t) => ({ fy: t.fy, value: t.available > 0 ? t.revenue / t.available : null }));
-  const adrFyPoints = fyTotals.map((t) => ({ fy: t.fy, value: t.nights > 0 ? t.revenue / t.nights : null }));
-
-  const categoriesPresent = CATEGORY_ORDER.filter((c) => categoryAdrTrend.some((r) => r.category === c));
-  const categoryAdrByFy = [...new Set(categoryAdrTrend.map((r) => r.fy))].sort().map((fy) => {
-    const row: Record<string, unknown> = { fy };
-    for (const c of categoriesPresent) {
-      row[c] = categoryAdrTrend.find((r) => r.fy === fy && r.category === c)?.adr ?? 0;
-    }
-    return row;
+  const adrBars: BarDatum[] = categoriesPresent.map((c) => {
+    const r = categoryAdr.find((x) => x.category === c)!;
+    return { name: c, value: r.adr ?? 0, color: CATEGORY_COLOR[c] };
   });
 
   return (
     <div className="space-y-6">
       <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">Trends</h2>
 
-      <Card title="Occupancy Trend (By FY)">
-        <FyComparisonStrip points={occupancyFyPoints} valueFormatter={(v) => `${v.toFixed(0)}%`} />
+      <Card title="Occupancy Trend">
         <MultiSeriesLineChart
           data={occupancyData}
-          xKey="monthLabel"
-          series={fySeries}
+          xKey="label"
+          series={series}
           valueFormatter={(v) => `${v.toFixed(0)}%`}
           yDomain={[0, 100]}
-          yTicks={[0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100]}
+          yTicks={[0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]}
         />
       </Card>
 
-      <Card title="RevPAR Trend (By FY)">
-        <FyComparisonStrip points={revParFyPoints} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} />
-        <MultiSeriesLineChart data={revParData} xKey="monthLabel" series={fySeries} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} />
+      <Card title="RevPAR Trend">
+        <MultiSeriesLineChart data={revParData} xKey="label" series={series} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} />
       </Card>
 
-      <Card title="Month-Wise ADR (By FY)">
-        <FyComparisonStrip points={adrFyPoints} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} />
-        <MultiSeriesLineChart data={adrData} xKey="monthLabel" series={fySeries} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} />
+      <Card title="Month-Wise ADR">
+        <MultiSeriesLineChart data={adrData} xKey="label" series={series} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} />
       </Card>
 
-      <Card title="Business Category ADR (By FY)">
-        <GroupedBarChart
-          data={categoryAdrByFy}
-          xKey="fy"
-          series={categoriesPresent.map((c) => ({ key: c, color: CATEGORY_COLOR[c] }))}
-          valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`}
-        />
-      </Card>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card title="Business Category Revenue Mix">
+          <DonutChart data={revenueDonut} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} />
+        </Card>
+        <Card title="Business Category ADR">
+          <SingleMetricBarChart data={adrBars} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} />
+        </Card>
+      </div>
     </div>
   );
 }

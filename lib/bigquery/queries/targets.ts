@@ -1,27 +1,31 @@
 // PRD §6.5 — Targets vs Achieved (leadership_targets). Company-wide, not
-// property-scoped (no Property column on this table) — global Property filter
-// doesn't apply here. Month_Number is already FY-relative (Apr=1 ... Mar=12),
-// matching fiscal quarters directly: Q1=1-3, Q2=4-6, Q3=7-9, Q4=10-12.
+// property-scoped (no Property column on this table) — the Property filter
+// doesn't apply here. Month_Number is already FY-relative (Apr=1 ... Mar=12).
+//
+// 2026-09-02: rewritten for the Today/This FY/Last Year period-tabs model.
+// leadership_targets is FY+fiscal-month grain, not date grain, so instead of
+// a date-range WHERE clause this resolves a single governing FY from the
+// active period tab (the FY containing period.current.start — "Today" and
+// "This FY" both resolve to the current FY, "Last Year" to the prior
+// completed FY) and always sums that FY's full 12 months, exactly as before
+// — Target sums the whole planned year, Achieved is naturally 0 for any
+// month that hasn't happened yet, so the ratio is already the right
+// to-date-vs-full-year-plan reading without any elapsed-months filtering.
 import { runQuery, table } from "../client";
-import { currentFYLabel, DateFilter, resolveSelectedFYs, resolveSelectedMonths, fyLabel, parseFyLabel, calendarMonthFromFiscal, isFutureFiscalMonth, fiscalMonthNumber } from "@/lib/reference/financialYear";
+import { currentFYLabel, fyLabel, parseFyLabel, calendarMonthFromFiscal, isFutureFiscalMonth, fiscalMonthNumber } from "@/lib/reference/financialYear";
+import { PeriodKey, resolvePeriod } from "@/lib/reference/period";
 import { safeDivide } from "@/lib/format/currency";
 
-export type TargetsFilter = DateFilter;
+export interface TargetsFilter {
+  period?: PeriodKey;
+}
 
 export { fiscalMonthNumber };
 
-function whereForFilter(filter: TargetsFilter): { clause: string; params: Record<string, unknown> } {
-  const fys = resolveSelectedFYs(filter);
-  const params: Record<string, unknown> = { fys };
-  const conditions = ["Financial_Year IN UNNEST(@fys)"];
-
-  const months = resolveSelectedMonths(filter);
-  if (months.length > 0) {
-    params.monthNums = months.map(fiscalMonthNumber);
-    conditions.push("Month_Number IN UNNEST(@monthNums)");
-  }
-
-  return { clause: conditions.join(" AND "), params };
+/** The single FY leadership_targets should be read from for the active period tab. */
+export function resolveTargetsFy(filter: TargetsFilter): string {
+  const period = resolvePeriod(filter.period ?? "this_fy");
+  return currentFYLabel(new Date(`${period.current.start}T00:00:00`));
 }
 
 export interface CategoryAchievement {
@@ -41,15 +45,15 @@ interface CategoryAchievementRow {
 }
 
 export async function getCategoryAchievement(filter: TargetsFilter): Promise<CategoryAchievement[]> {
-  const { clause, params } = whereForFilter(filter);
+  const fy = resolveTargetsFy(filter);
   const rows = await runQuery<CategoryAchievementRow>(`
     SELECT
       SUM(B2B_Target) AS b2b_target, SUM(B2B_Achieved) AS b2b_achieved,
       SUM(B2C_Target) AS b2c_target, SUM(B2C_Achieved) AS b2c_achieved,
       SUM(OTA_Target) AS ota_target, SUM(OTA_Achieved) AS ota_achieved
     FROM ${table("leadership_targets")}
-    WHERE ${clause}
-  `, params);
+    WHERE Financial_Year = @fy
+  `, { fy });
 
   const r = rows[0] ?? {
     b2b_target: 0, b2b_achieved: 0, b2c_target: 0, b2c_achieved: 0, ota_target: 0, ota_achieved: 0,
@@ -130,7 +134,11 @@ async function getPriorMarchShortfall(fy: string): Promise<number> {
  * live data 2026-08-24 (28.00 Cr flat target vs 43.71 Cr summed rollover
  * before this fix; ~28.45 Cr after, which is the sane relationship). Once a
  * month is future, its own targetWithRollOver is just its flat dept target,
- * and it carries nothing forward to the month after it either.
+ * and it carries nothing forward to the month after it either. Under the
+ * period-tabs model this still matters for "This FY" (the governing FY can
+ * extend past today even though the period's own date range never does) —
+ * "Last Year" resolves to a fully-elapsed FY, so the guard is simply always
+ * false there and does nothing.
  */
 function computeRollover(fy: string, rows: RawTargetMonthRow[], seedShortfall: number): MonthlyRevenueTarget[] {
   const result: MonthlyRevenueTarget[] = [];
@@ -157,33 +165,28 @@ export async function getMonthlyRevenueTargets(fy?: string): Promise<MonthlyReve
   return computeRollover(resolvedFy, rows, seedShortfall);
 }
 
-/** Pure aggregation over already-fetched per-FY monthly rows — no BigQuery call. Callers that already fetched `getMonthlyRevenueTargets` per FY (e.g. for the monthly chart) should use this instead of `getRevenueAchievement`, which re-fetches the same data. */
-export function summarizeRevenueAchievement(
-  perFy: { fy: string; data: MonthlyRevenueTarget[] }[],
-  months: number[] // calendar months, [] = whole FY
-): RevenueAchievement {
-  const fiscalMonthNums = months.length > 0 ? months.map(fiscalMonthNumber) : null;
-
+function summarize(data: MonthlyRevenueTarget[]): RevenueAchievement {
   let target = 0;
   let achieved = 0;
   let targetWithRollOver = 0;
-  for (const { data } of perFy) {
-    for (const r of data) {
-      if (fiscalMonthNums && !fiscalMonthNums.includes(r.monthNumber)) continue;
-      target += r.deptTarget;
-      achieved += r.achievedRevenue;
-      targetWithRollOver += r.targetWithRollOver;
-    }
+  for (const r of data) {
+    target += r.deptTarget;
+    achieved += r.achievedRevenue;
+    targetWithRollOver += r.targetWithRollOver;
   }
   return { target, achieved, achievedPct: safeDivide(achieved, target), targetWithRollOver };
 }
 
-/** Convenience wrapper that fetches its own data — prefer `summarizeRevenueAchievement` when the per-FY monthly rows are already being fetched for something else (avoids duplicate BigQuery calls). */
+/** Whole-FY summary — target sums the full planned year, achieved is naturally 0 for any month that hasn't happened, so this is already a "to-date vs full-year-plan" reading. Prefer this over re-fetching when `getMonthlyRevenueTargets` was already called for the chart. */
+export function summarizeRevenueAchievement(data: MonthlyRevenueTarget[]): RevenueAchievement {
+  return summarize(data);
+}
+
+/** Convenience wrapper that fetches its own data. */
 export async function getRevenueAchievement(filter: TargetsFilter): Promise<RevenueAchievement> {
-  const fys = resolveSelectedFYs(filter);
-  const months = resolveSelectedMonths(filter);
-  const perFy = await Promise.all(fys.map(async (fy) => ({ fy, data: await getMonthlyRevenueTargets(fy) })));
-  return summarizeRevenueAchievement(perFy, months);
+  const fy = resolveTargetsFy(filter);
+  const data = await getMonthlyRevenueTargets(fy);
+  return summarize(data);
 }
 
 export interface MonthlyAdrTarget {

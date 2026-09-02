@@ -1,10 +1,12 @@
 // PRD §6.4 — Brand & Business Category.
+// 2026-09-02: rewritten for the Today/This FY/Last Year period-tabs model.
+// getCategoryRevenueByFy was folded into trends.ts's getBusinessCategoryAdr()
+// (both computed the same B2B/B2C/OTA current-period breakdown) — Brand's
+// page reuses that instead of duplicating the query.
 import { runQuery, table } from "../client";
 import { KpiFilter, resolveFilter, buildScopeClause } from "./filters";
-import { getAvailableRoomNightsByProperty, rangesForFysAndMonths } from "./propertyWindows";
-import { getLpSoldRoomNights, getLpCategoryByFy, LP_PROPERTY } from "./lpMonthly";
-import { bookingCategorySqlExpr, BookingCategory } from "@/lib/reference/bookingSourceMap";
-import { fyLabelSqlExpr } from "@/lib/reference/financialYear";
+import { getAvailableRoomNightsByProperty } from "./propertyWindows";
+import { getLpSoldRoomNights, LP_PROPERTY } from "./lpMonthly";
 import { Brand, brandOf } from "@/lib/reference/propertyReference";
 import { safeDivide } from "@/lib/format/currency";
 
@@ -31,8 +33,8 @@ export async function getBrandOccupancy(filter: KpiFilter): Promise<BrandOccupan
       WHERE ${where}
       GROUP BY property
     `, params),
-    getAvailableRoomNightsByProperty(resolved.properties, rangesForFysAndMonths(resolved.fys, resolved.months)),
-    includeLp ? getLpSoldRoomNights(resolved.fys, resolved.months) : 0,
+    getAvailableRoomNightsByProperty(resolved.properties, resolved.period.current),
+    includeLp ? getLpSoldRoomNights(resolved.period.current) : 0,
   ]);
 
   const byBrand = new Map<Brand, { sold: number; available: number }>();
@@ -58,42 +60,4 @@ export async function getBrandOccupancy(filter: KpiFilter): Promise<BrandOccupan
     availableRoomNights: v.available,
     occupancyPct: safeDivide(v.sold, v.available),
   }));
-}
-
-export interface CategoryRevenueByFy {
-  fy: string;
-  category: BookingCategory;
-  revenue: number;
-}
-
-export async function getCategoryRevenueByFy(
-  filter: Pick<KpiFilter, "properties">
-): Promise<CategoryRevenueByFy[]> {
-  const resolved = resolveFilter(filter);
-  const includeLp = resolved.properties.includes(LP_PROPERTY);
-
-  const [rows, lpRows] = await Promise.all([
-    runQuery<CategoryRevenueByFy>(`
-      SELECT
-        ${fyLabelSqlExpr("CAST(StayDate AS DATE)")} AS fy,
-        ${bookingCategorySqlExpr("Source")} AS category,
-        SUM(DailyRevenue) AS revenue
-      FROM ${table("sales_booking")}
-      WHERE Property IN UNNEST(@properties)
-      GROUP BY fy, category
-      ORDER BY fy, category
-    `, { properties: resolved.properties }),
-    includeLp ? getLpCategoryByFy([]) : Promise.resolve([]),
-  ]);
-
-  const merged = new Map<string, CategoryRevenueByFy>();
-  for (const r of rows) merged.set(`${r.fy}|${r.category}`, r);
-  for (const lp of lpRows) {
-    const key = `${lp.fy}|${lp.category}`;
-    const existing = merged.get(key);
-    if (existing) existing.revenue += lp.revenue;
-    else merged.set(key, { fy: lp.fy, category: lp.category, revenue: lp.revenue });
-  }
-
-  return [...merged.values()].sort((a, b) => (a.fy === b.fy ? a.category.localeCompare(b.category) : a.fy.localeCompare(b.fy)));
 }

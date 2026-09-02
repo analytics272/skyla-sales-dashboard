@@ -3,7 +3,6 @@ import {
   getRoomNightsGap,
   getRepeatBookingShare,
   getRoomFormatStats,
-  getRoomFormatByFy,
   getExpatStats,
   getCancellationStats,
   getCancellationLeadTime,
@@ -14,6 +13,7 @@ import {
   getB2bTopAdrContracts,
   getCorporateAccountRetention,
   summarizeB2bContracts,
+  resolveB2bFy,
 } from "@/lib/bigquery/queries/b2bContracts";
 import { parseKpiFilter, SearchParams } from "@/lib/filters/parseSearchParams";
 import { resolveFilter } from "@/lib/bigquery/queries/filters";
@@ -23,13 +23,13 @@ export default async function BookingPage({ searchParams }: { searchParams: Prom
   const sp = await searchParams;
   const filter = parseKpiFilter(sp);
   const resolved = resolveFilter(filter);
+  const b2bFy = resolveB2bFy(filter.period);
 
   const [
     bookingStats,
     roomNightsGap,
     repeatBookingShare,
     roomFormatStats,
-    roomFormatByFy,
     expatStats,
     cancellationStats,
     cancellationLeadTime,
@@ -42,13 +42,12 @@ export default async function BookingPage({ searchParams }: { searchParams: Prom
     getRoomNightsGap(filter),
     getRepeatBookingShare(filter),
     getRoomFormatStats(filter),
-    getRoomFormatByFy({ properties: filter.properties }),
     getExpatStats(filter),
     getCancellationStats(filter),
     getCancellationLeadTime(filter),
     getCategoryMix(filter),
-    getB2bContractRanking(resolved.properties, resolved.fys),
-    getB2bTopAdrContracts(resolved.properties, resolved.fys),
+    getB2bContractRanking(resolved.properties, b2bFy),
+    getB2bTopAdrContracts(resolved.properties, b2bFy),
     getCorporateAccountRetention(resolved.properties),
   ]);
 
@@ -58,7 +57,6 @@ export default async function BookingPage({ searchParams }: { searchParams: Prom
       roomNightsGap={roomNightsGap}
       repeatBookingShare={repeatBookingShare}
       roomFormatStats={roomFormatStats}
-      roomFormatByFy={roomFormatByFy}
       expatStats={expatStats}
       cancellationStats={cancellationStats}
       cancellationLeadTime={cancellationLeadTime}

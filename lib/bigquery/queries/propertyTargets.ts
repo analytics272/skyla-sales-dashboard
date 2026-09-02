@@ -5,8 +5,8 @@
 // always live BigQuery.
 import { runQuery, table } from "../client";
 import { PROPERTY_TARGETS_FY27, PROPERTY_TARGETS_FY } from "@/lib/reference/propertyTargets";
-import { fyLabelSqlExpr } from "@/lib/reference/financialYear";
-import { getAvailableRoomNightsByProperty, rangesForFysAndMonths } from "./propertyWindows";
+import { fyLabelSqlExpr, fyBounds } from "@/lib/reference/financialYear";
+import { getAvailableRoomNightsByProperty } from "./propertyWindows";
 import { safeDivide } from "@/lib/format/currency";
 
 export interface PropertyTargetComparison {
@@ -38,29 +38,25 @@ interface AchievedRow {
 }
 
 /**
- * `months` are calendar months (1-12, matching the global Month filter);
- * empty = the whole FY. FY selection from the global filter is intentionally
- * ignored — these fixed targets only exist for FY 26-27, so this section
- * always compares against FY 26-27 regardless of what FY is selected
+ * The active period tab is intentionally ignored — these fixed targets only
+ * exist for FY 26-27, so this section always compares against the whole of
+ * FY 26-27 regardless of which tab (Today/This FY/Last Year) is selected
  * elsewhere on the page (same convention as the real-time "pace" cards).
  * `properties` fully respects the global Property filter, unlike the rest of
  * the Targets tab (leadership_targets has no Property column to filter by —
  * a genuine data constraint) — this section's target side comes from the
  * fixed per-property reference data instead, so it can be, and is, scoped.
  */
-export async function getPropertyTargetComparison(properties: string[], months: number[]): Promise<PropertyTargetComparisonResult> {
-  const scopedMonths = months.length > 0 ? months : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-
+export async function getPropertyTargetComparison(properties: string[]): Promise<PropertyTargetComparisonResult> {
   const [achievedRows, availableByProperty] = await Promise.all([
     runQuery<AchievedRow>(`
       SELECT Property AS property, SUM(DailyRevenue) AS revenue, COUNT(*) AS nights
       FROM ${table("sales_booking")}
       WHERE Property IN UNNEST(@properties)
         AND ${fyLabelSqlExpr("CAST(StayDate AS DATE)")} = @fy
-        AND EXTRACT(MONTH FROM CAST(StayDate AS DATE)) IN UNNEST(@months)
       GROUP BY property
-    `, { properties, fy: PROPERTY_TARGETS_FY, months: scopedMonths }),
-    getAvailableRoomNightsByProperty(properties, rangesForFysAndMonths([PROPERTY_TARGETS_FY], months)),
+    `, { properties, fy: PROPERTY_TARGETS_FY }),
+    getAvailableRoomNightsByProperty(properties, fyBounds(PROPERTY_TARGETS_FY)),
   ]);
 
   let totalTargetRevenue = 0;
@@ -71,7 +67,7 @@ export async function getPropertyTargetComparison(properties: string[], months: 
   let totalAvailable = 0;
 
   const rows = properties.map((code) => {
-    const targets = (PROPERTY_TARGETS_FY27[code] ?? []).filter((t) => scopedMonths.includes(t.calendarMonth));
+    const targets = PROPERTY_TARGETS_FY27[code] ?? [];
     const targetRevenue = targets.reduce((s, t) => s + t.revenue, 0);
     const targetSoldNights = targets.reduce((s, t) => s + t.available * t.occPct, 0);
     const targetAvailable = targets.reduce((s, t) => s + t.available, 0);

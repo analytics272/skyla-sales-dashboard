@@ -3,7 +3,10 @@
 import { OtaBreakdownRow } from "@/lib/bigquery/queries/otaBreakdown";
 import Card from "@/components/ui/Card";
 import Table, { TableColumn } from "@/components/ui/Table";
+import DonutChart from "@/components/charts/DonutChart";
 import { formatIndianCurrency } from "@/lib/format/currency";
+
+const OTA_PALETTE = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--series-4)", "var(--series-5)", "var(--chart-baseline)", "#a855f7", "#0ea5e9"];
 
 export default function OtaContent({ otaBreakdown }: { otaBreakdown: OtaBreakdownRow[] }) {
   const otaColumns: TableColumn<OtaBreakdownRow>[] = [
@@ -32,9 +35,15 @@ export default function OtaContent({ otaBreakdown }: { otaBreakdown: OtaBreakdow
     adrAfterCommission: totalNights > 0 ? netRevenue / totalNights : null,
   };
 
+  const revenueDonut = otaBreakdown.map((r, i) => ({ name: r.otaName, value: r.totalRevenue, color: OTA_PALETTE[i % OTA_PALETTE.length] }));
+
   return (
     <div className="space-y-6">
       <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">OTA Breakdown</h2>
+
+      <Card title="Revenue Share By OTA Site">
+        <DonutChart data={revenueDonut} valueFormatter={(v) => formatIndianCurrency(v)} />
+      </Card>
 
       <Card title="Commission, Revenue & ADR By OTA Site">
         <Table columns={otaColumns} rows={otaBreakdown} rowKey={(r) => r.otaName} footerRow={grandTotalRow} />

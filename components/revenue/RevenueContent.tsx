@@ -1,43 +1,25 @@
 "use client";
 
-import { OverviewKpis, PropertyAdr, OccupancyPace, LastMonthCategorySnapshot } from "@/lib/bigquery/queries/overview";
-import { MonthlyTrendPoint } from "@/lib/bigquery/queries/trends";
+// 2026-09-02 redesign: hero KPI cards now use StatTile's delta (value + %
+// vs the active period's comparison range, colored green/red) instead of a
+// bespoke YoY line; the two monthly line charts show "current vs previous"
+// instead of one line per selected FY (there's no more FY multi-select).
+// Titles carry no time-period text — the period pill above already says
+// which range is active.
+import { OverviewKpis, PropertyAdr, OccupancyPace } from "@/lib/bigquery/queries/overview";
+import { TrendSeries } from "@/lib/bigquery/queries/trends";
 import Card from "@/components/ui/Card";
+import StatTile from "@/components/ui/StatTile";
 import SingleMetricBarChart, { BarDatum } from "@/components/charts/SingleMetricBarChart";
 import MultiSeriesLineChart from "@/components/charts/MultiSeriesLineChart";
-import { formatIndianCurrency, formatPercent, formatYoyLine } from "@/lib/format/currency";
-import { CATEGORY_COLOR, CATEGORY_ORDER, FY_COLOR } from "@/lib/design/tokens";
-import { pivotByFiscalMonth } from "@/lib/charts/pivotByFiscalMonth";
-
-function CategorySplitRow({ caption, items }: { caption?: string; items: { label: string; value: string }[] }) {
-  return (
-    <div className="border-b border-zinc-100 pb-3 dark:border-zinc-800">
-      {caption && <p className="mb-1.5 text-center text-[10px] text-zinc-400 dark:text-zinc-500">{caption}</p>}
-      <div className="grid grid-cols-3 gap-2 text-center">
-        {items.map((it) => (
-          <div key={it.label}>
-            <p className="text-[11px] font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">{it.label}</p>
-            <p className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">{it.value}</p>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function HeroFigure({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return (
-    <div className="py-3 text-center">
-      <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">{label}</p>
-      <p className="mt-1 text-3xl font-semibold text-zinc-900 dark:text-zinc-50">{value}</p>
-      {sub && <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">{sub}</p>}
-    </div>
-  );
-}
+import DonutChart from "@/components/charts/DonutChart";
+import { formatIndianCurrency, formatPercent } from "@/lib/format/currency";
+import { CATEGORY_COLOR, CATEGORY_ORDER } from "@/lib/design/tokens";
 
 // Three consecutive calendar months, side by side, each carrying its own exact
 // month name and a one-line explainer — so "what period is this?" and "is this
-// final or still moving?" are never ambiguous.
+// final or still moving?" are never ambiguous. Real-time, independent of the
+// active period tab (same convention as the reference dashboard's own pace read).
 function PaceComparison({ pace }: { pace: OccupancyPace }) {
   const blocks = [
     { tag: "Last Month", period: pace.lastMonthLabel, value: pace.lastMonth, note: "Finished, final" },
@@ -45,7 +27,7 @@ function PaceComparison({ pace }: { pace: OccupancyPace }) {
     { tag: "Next Month", period: pace.nextMonthLabel, value: pace.nextMonth, note: "Early pace — will rise" },
   ];
   return (
-    <div className="grid grid-cols-3 gap-2 border-b border-zinc-100 pb-3 dark:border-zinc-800">
+    <div className="grid grid-cols-3 gap-2">
       {blocks.map((b) => (
         <div key={b.tag} className="rounded-md bg-zinc-50 p-2 text-center dark:bg-zinc-900">
           <p className="text-[11px] font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">{b.tag}</p>
@@ -60,55 +42,49 @@ function PaceComparison({ pace }: { pace: OccupancyPace }) {
   );
 }
 
+function mergeSeries(
+  current: TrendSeries["current"],
+  previous: TrendSeries["previous"],
+  key: "revenue" | "occupancyPct",
+  currentKey: string,
+  previousKey: string
+) {
+  const len = Math.max(current.length, previous.length);
+  const rows: Record<string, unknown>[] = [];
+  for (let i = 0; i < len; i++) {
+    const c = current[i];
+    const p = previous[i];
+    const cVal = c ? (key === "occupancyPct" ? (c.occupancyPct !== null ? c.occupancyPct * 100 : null) : c.revenue) : null;
+    const pVal = p ? (key === "occupancyPct" ? (p.occupancyPct !== null ? p.occupancyPct * 100 : null) : p.revenue) : null;
+    rows.push({ label: c?.monthLabel ?? p?.monthLabel ?? `#${i + 1}`, [currentKey]: cVal, [previousKey]: pVal });
+  }
+  return rows;
+}
+
 export default function RevenueContent({
   overview,
   adrByProperty,
   occupancyPace,
   monthlyTrends,
-  fys,
-  fy,
-  lastMonthCategoryBreakdown,
 }: {
   overview: OverviewKpis;
   adrByProperty: PropertyAdr[];
   occupancyPace: OccupancyPace;
-  monthlyTrends: MonthlyTrendPoint[];
-  fys: string[]; // every FY currently selected — the monthly charts below show one line per FY here, not just the latest
-  fy: string;
-  lastMonthCategoryBreakdown: LastMonthCategorySnapshot;
+  monthlyTrends: TrendSeries;
 }) {
   const categoriesPresent = CATEGORY_ORDER.filter((c) => overview.bySource.some((s) => s.category === c));
-
-  // Revenue split header shows LAST MONTH specifically (a recent-pulse read),
-  // deliberately a different period than the FY/filter-scoped hero number
-  // below it — the caption always names the exact month so the two numbers
-  // are never mistaken for the same period.
-  const lastMonthCategoriesPresent = CATEGORY_ORDER.filter((c) => lastMonthCategoryBreakdown.items.some((s) => s.category === c));
-  const revenueSplit = lastMonthCategoriesPresent.map((c) => {
-    const s = lastMonthCategoryBreakdown.items.find((x) => x.category === c)!;
-    const pct = lastMonthCategoryBreakdown.totalRevenue > 0 ? (s.revenue / lastMonthCategoryBreakdown.totalRevenue) * 100 : 0;
-    return { label: c, value: `${formatIndianCurrency(s.revenue)} | ${pct.toFixed(0)}%` };
-  });
-
-  const adrSplit = categoriesPresent.map((c) => {
+  const revenueDonut = categoriesPresent.map((c) => {
     const s = overview.bySource.find((x) => x.category === c)!;
-    const adr = s.nights > 0 ? s.revenue / s.nights : null;
-    return { label: c, value: adr !== null ? `₹${Math.round(adr).toLocaleString("en-IN")}` : "—" };
+    return { name: c, value: s.revenue, color: CATEGORY_COLOR[c] };
   });
 
-  const occupancySplit = categoriesPresent.map((c) => {
-    const s = overview.bySource.find((x) => x.category === c)!;
-    const pct = overview.availableRoomNights > 0 ? (s.nights / overview.availableRoomNights) * 100 : 0;
-    return { label: c, value: `${pct.toFixed(0)}%` };
-  });
-
-  // One line per selected FY (matches Trends tab's convention) rather than a
-  // single-series bar limited to the latest FY — otherwise selecting "All" (or
-  // several FYs) in the filter left these two charts silently stuck on just
-  // one year while every other number on the page correctly reflected all of them.
-  const fySeries = fys.map((f) => ({ key: f, color: FY_COLOR[f] ?? "var(--chart-baseline)" }));
-  const revenueByMonth = pivotByFiscalMonth(monthlyTrends, fys, (p) => p.month, (p) => p.revenue);
-  const occupancyByMonth = pivotByFiscalMonth(monthlyTrends, fys, (p) => p.month, (p) => (p.occupancyPct !== null ? p.occupancyPct * 100 : null));
+  const { comparison } = overview;
+  const revenueByMonth = mergeSeries(monthlyTrends.current, monthlyTrends.previous, "revenue", comparison.currentLabel, comparison.previousLabel);
+  const occupancyByMonth = mergeSeries(monthlyTrends.current, monthlyTrends.previous, "occupancyPct", comparison.currentLabel, comparison.previousLabel);
+  const trendSeries = [
+    { key: comparison.currentLabel, color: "var(--series-1)" },
+    { key: comparison.previousLabel, color: "var(--chart-baseline)" },
+  ];
 
   const adrByPropertyData: BarDatum[] = adrByProperty.map((r) => ({
     name: r.property,
@@ -120,57 +96,59 @@ export default function RevenueContent({
     <div className="space-y-6">
       <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">Revenue Details</h2>
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Card>
-          <CategorySplitRow items={revenueSplit} />
-          <HeroFigure
-            label="Room Revenue"
-            value={formatIndianCurrency(overview.roomRevenue)}
-            sub={`${fy} · ${formatYoyLine(overview.yoy.currentRevenue, overview.yoy.priorRevenue, overview.yoy.pctChange, overview.yoy.priorFY, formatIndianCurrency)}`}
-          />
-          <MultiSeriesLineChart data={revenueByMonth} xKey="monthLabel" series={fySeries} valueFormatter={(v) => formatIndianCurrency(v)} height={180} />
-        </Card>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <StatTile
+          label="Room Revenue"
+          value={formatIndianCurrency(overview.roomRevenue)}
+          delta={comparison.revenue.pctChange !== null ? { pct: comparison.revenue.pctChange * 100, label: `vs ${comparison.previousLabel}` } : undefined}
+        />
+        <StatTile
+          label="ADR"
+          value={overview.adr !== null ? `₹${Math.round(overview.adr).toLocaleString("en-IN")}` : "—"}
+          delta={comparison.adr.pctChange !== null ? { pct: comparison.adr.pctChange * 100, label: `vs ${comparison.previousLabel}` } : undefined}
+        />
+        <StatTile
+          label="Occupancy %"
+          value={overview.occupancyPct !== null ? formatPercent(overview.occupancyPct, 0) : "—"}
+          delta={comparison.occupancyPct.pctChange !== null ? { pct: comparison.occupancyPct.pctChange * 100, label: `vs ${comparison.previousLabel}` } : undefined}
+          progress={overview.occupancyPct !== null ? { pct: overview.occupancyPct } : undefined}
+        />
+        <StatTile
+          label="RevPAR"
+          value={overview.revPar !== null ? `₹${Math.round(overview.revPar).toLocaleString("en-IN")}` : "—"}
+          delta={comparison.revPar.pctChange !== null ? { pct: comparison.revPar.pctChange * 100, label: `vs ${comparison.previousLabel}` } : undefined}
+        />
+      </div>
 
-        <Card>
-          <CategorySplitRow items={adrSplit} />
-          <HeroFigure
-            label="ADR"
-            value={overview.adr !== null ? `₹${Math.round(overview.adr).toLocaleString("en-IN")}` : "—"}
-            sub={formatYoyLine(overview.yoy.adr.current, overview.yoy.adr.prior, overview.yoy.adr.pctChange, overview.yoy.priorFY, (v) => `₹${Math.round(v).toLocaleString("en-IN")}`)}
-          />
-          <SingleMetricBarChart data={adrByPropertyData} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} height={180} />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card title="Revenue Trend">
+          <MultiSeriesLineChart data={revenueByMonth} xKey="label" series={trendSeries} valueFormatter={(v) => formatIndianCurrency(v)} height={220} />
         </Card>
-
-        <Card>
-          <PaceComparison pace={occupancyPace} />
-          <CategorySplitRow items={occupancySplit} />
-          <HeroFigure
-            label="Occupancy %"
-            value={overview.occupancyPct !== null ? formatPercent(overview.occupancyPct, 0) : "—"}
-            sub={formatYoyLine(overview.yoy.occupancyPct.current, overview.yoy.occupancyPct.prior, overview.yoy.occupancyPct.pctChange, overview.yoy.priorFY, (v) => formatPercent(v, 0))}
-          />
-          <MultiSeriesLineChart data={occupancyByMonth} xKey="monthLabel" series={fySeries} valueFormatter={(v) => `${v.toFixed(0)}%`} height={180} />
+        <Card title="Occupancy Trend">
+          <MultiSeriesLineChart data={occupancyByMonth} xKey="label" series={trendSeries} valueFormatter={(v) => `${v.toFixed(0)}%`} height={220} />
         </Card>
       </div>
 
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card title="Revenue Mix">
+          <DonutChart data={revenueDonut} valueFormatter={(v) => formatIndianCurrency(v)} />
+        </Card>
+        <Card title="ADR By Property">
+          <SingleMetricBarChart data={adrByPropertyData} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} height={220} />
+        </Card>
+      </div>
+
+      <Card title="Pace">
+        <PaceComparison pace={occupancyPace} />
+      </Card>
+
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-          <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">RevPAR</p>
-          <p className="mt-1.5 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">{overview.revPar !== null ? `₹${Math.round(overview.revPar).toLocaleString("en-IN")}` : "—"}</p>
-          <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">{formatYoyLine(overview.yoy.revPar.current, overview.yoy.revPar.prior, overview.yoy.revPar.pctChange, overview.yoy.priorFY, (v) => `₹${Math.round(v).toLocaleString("en-IN")}`)}</p>
-        </div>
-        <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-          <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">Sold / Available Room Nights</p>
-          <p className="mt-1.5 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
-            {overview.soldRoomNights.toLocaleString("en-IN")} / {overview.availableRoomNights.toLocaleString("en-IN")}
-          </p>
-        </div>
-        <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
-          <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">Unsold Room Nights</p>
-          <p className="mt-1.5 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
-            {Math.max(0, overview.availableRoomNights - overview.soldRoomNights).toLocaleString("en-IN")}
-          </p>
-        </div>
+        <StatTile label="Sold Room Nights" value={overview.soldRoomNights.toLocaleString("en-IN")} />
+        <StatTile label="Available Room Nights" value={overview.availableRoomNights.toLocaleString("en-IN")} />
+        <StatTile
+          label="Unsold Room Nights"
+          value={Math.max(0, overview.availableRoomNights - overview.soldRoomNights).toLocaleString("en-IN")}
+        />
       </div>
     </div>
   );
