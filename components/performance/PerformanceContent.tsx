@@ -1,7 +1,12 @@
 "use client";
 
+// 2026-09-02 redesign, fifth pass — Performance merges the old Targets and
+// Reviews pages. Google/OTA reviews and ADR/Occupancy target-vs-achieved were
+// each already two side-by-side cards showing the same shape of chart for a
+// different slice — folded into one TabbedCard apiece per item #11.
 import { CategoryAchievement, RevenueAchievement, MonthlyRevenueTarget, MonthlyAdrTarget, MonthlyOccupancyTarget } from "@/lib/bigquery/queries/targets";
 import type { PropertyTargetComparisonResult } from "@/lib/bigquery/queries/propertyTargets";
+import { ReviewStats, RatingTrendPoint } from "@/lib/bigquery/queries/reviews";
 import StatTile from "@/components/ui/StatTile";
 import Card from "@/components/ui/Card";
 import TabbedCard, { useTabbedCard } from "@/components/ui/TabbedCard";
@@ -33,7 +38,22 @@ function shouldHideAchieved(fy: string, monthNumber: number, achieved: number) {
   return achieved === 0 && isFutureFiscalMonth(fy, calendarMonthFromFiscal(monthNumber));
 }
 
-export default function TargetsContent({
+function RatingTrendChart({ trend }: { trend: RatingTrendPoint[] }) {
+  const data = trend.map((p) => ({ month: p.monthLabel, count: p.count }));
+  return trend.length === 0 ? (
+    <p className="py-8 text-center text-sm text-zinc-400 dark:text-zinc-600">No reviews for this period.</p>
+  ) : (
+    <MultiSeriesLineChart data={data} xKey="month" series={[{ key: "count", color: "var(--series-1)" }]} valueFormatter={(v) => v.toLocaleString("en-IN")} />
+  );
+}
+
+type TargetTrendTab = "ADR" | "Occupancy";
+const TARGET_TREND_TABS: TargetTrendTab[] = ["ADR", "Occupancy"];
+
+type ReviewsTab = "Google" | "OTA";
+const REVIEWS_TABS: ReviewsTab[] = ["Google", "OTA"];
+
+export default function PerformanceContent({
   fy,
   categoryAchievement,
   revenueAchievement,
@@ -41,6 +61,10 @@ export default function TargetsContent({
   adrTargetVsAchieved,
   occupancyTargetVsAchieved,
   propertyTargetComparison,
+  googleStats,
+  googleTrend,
+  otaStats,
+  otaTrend,
 }: {
   fy: string;
   categoryAchievement: CategoryAchievement[];
@@ -49,22 +73,22 @@ export default function TargetsContent({
   adrTargetVsAchieved: MonthlyAdrTarget[];
   occupancyTargetVsAchieved: MonthlyOccupancyTarget[];
   propertyTargetComparison: PropertyTargetComparisonResult;
+  googleStats: ReviewStats;
+  googleTrend: RatingTrendPoint[];
+  otaStats: ReviewStats;
+  otaTrend: RatingTrendPoint[];
 }) {
-  const categoryData = categoryAchievement.map((c) => ({
-    category: c.category,
-    target: c.target,
-    achieved: c.achieved,
-  }));
-
-  const propertyRevenueData = propertyTargetComparison.rows.map((r) => ({
-    property: r.property,
-    Target: r.targetRevenue,
-    Achieved: r.achievedRevenue,
-  }));
+  const categoryData = categoryAchievement.map((c) => ({ category: c.category, target: c.target, achieved: c.achieved }));
+  const propertyRevenueData = propertyTargetComparison.rows.map((r) => ({ property: r.property, Target: r.targetRevenue, Achieved: r.achievedRevenue }));
 
   const propertyTabs = propertyTargetComparison.rows.map((r) => r.property);
   const [activeProperty, setActiveProperty] = useTabbedCard(propertyTabs);
   const activeRow = propertyTargetComparison.rows.find((r) => r.property === activeProperty) ?? propertyTargetComparison.rows[0];
+
+  const [targetTrendTab, setTargetTrendTab] = useTabbedCard(TARGET_TREND_TABS);
+  const [reviewsTab, setReviewsTab] = useTabbedCard(REVIEWS_TABS);
+  const activeReviewStats = reviewsTab === "Google" ? googleStats : otaStats;
+  const activeReviewTrend = reviewsTab === "Google" ? googleTrend : otaTrend;
 
   return (
     <div className="space-y-6">
@@ -159,18 +183,16 @@ export default function TargetsContent({
         />
       </Card>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card title="ADR: Target Vs Achieved">
+      <TabbedCard title="Target Vs Achieved" tabs={TARGET_TREND_TABS} active={targetTrendTab} onChange={setTargetTrendTab}>
+        {targetTrendTab === "ADR" ? (
           <MultiSeriesLineChart
             data={adrTargetVsAchieved.map((r) => ({ month: r.month, target: r.targetAdr, achieved: shouldHideAchieved(fy, r.monthNumber, r.achievedAdr) ? null : r.achievedAdr }))}
             xKey="month"
             series={TA_SERIES}
             valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`}
-            height={240}
+            height={260}
           />
-        </Card>
-
-        <Card title="Occupancy: Target Vs Achieved">
+        ) : (
           <MultiSeriesLineChart
             data={occupancyTargetVsAchieved.map((r) => ({
               month: r.month,
@@ -180,9 +202,28 @@ export default function TargetsContent({
             xKey="month"
             series={TA_SERIES}
             valueFormatter={(v) => `${v.toFixed(0)}%`}
-            height={240}
+            height={260}
           />
-        </Card>
+        )}
+      </TabbedCard>
+
+      <div>
+        <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Reviews</h3>
+        <TabbedCard title="Rating Count Trend" subtitle={`${reviewsTab} reviews`} tabs={REVIEWS_TABS} active={reviewsTab} onChange={setReviewsTab}>
+          <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <StatTile
+              label="Overall Avg Rating"
+              value={activeReviewStats.avgRating !== null ? activeReviewStats.avgRating.toFixed(2) : "—"}
+              delta={activeReviewStats.comparison.avgRating.pctChange !== null ? { pct: activeReviewStats.comparison.avgRating.pctChange * 100, label: "vs previous" } : undefined}
+            />
+            <StatTile
+              label="Total Reviews"
+              value={activeReviewStats.totalReviews.toLocaleString("en-IN")}
+              delta={activeReviewStats.comparison.totalReviews.pctChange !== null ? { pct: activeReviewStats.comparison.totalReviews.pctChange * 100, label: "vs previous" } : undefined}
+            />
+          </div>
+          <RatingTrendChart trend={activeReviewTrend} />
+        </TabbedCard>
       </div>
     </div>
   );

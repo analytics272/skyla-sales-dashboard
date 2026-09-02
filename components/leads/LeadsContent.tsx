@@ -120,85 +120,98 @@ export default function LeadsContent({
         </div>
       </div>
 
-      <Card title="Leads MoM (Total Vs Closed)">
-        <MultiSeriesLineChart
-          data={momData}
-          xKey="month"
-          series={[
-            { key: "total", color: TARGET_VS_ACHIEVED_COLOR.target },
-            { key: "closed", color: TARGET_VS_ACHIEVED_COLOR.achieved },
-          ]}
-          valueFormatter={(v) => v.toLocaleString("en-IN")}
-          height={260}
-        />
-      </Card>
+      {/* Item #6: two vertical sides — left = lead volume/funnel, right =
+          revenue & owner performance — instead of one long single-column
+          stack of cards. */}
+      <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
+        <div className="space-y-4">
+          <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Lead Volume</h3>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card title="Leads By Property">
-          <HorizontalBarChart data={propertyData} valueFormatter={(v) => v.toLocaleString("en-IN")} />
-        </Card>
-        <Card title="Leads By Source">
-          <Treemap data={sourceData} valueFormatter={(v) => v.toLocaleString("en-IN")} />
-        </Card>
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-3">
-        <Card title="Leads By Format">
-          <HorizontalBarChart data={formatLeadsData} valueFormatter={(v) => v.toLocaleString("en-IN")} />
-        </Card>
-        <Card title="Revenue By Format">
-          <HorizontalBarChart data={formatRevenueData} valueFormatter={(v) => formatIndianCurrency(v)} />
-        </Card>
-        <Card title="ADR By Format" subtitle="Closed leads only">
-          <HorizontalBarChart data={adrByFormatData} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} />
-        </Card>
-      </div>
-
-      <Card title="Lost Leads Reasons">
-        <DonutChart data={lostDonut} valueFormatter={(v) => v.toLocaleString("en-IN")} />
-        <div className="mt-3 space-y-1.5 border-t border-zinc-100 pt-3 dark:border-zinc-800">
-          {lostReasons.map((r) => (
-            <p key={r.stage} className="text-xs text-zinc-500 dark:text-zinc-400">
-              <span className="font-medium text-zinc-700 dark:text-zinc-200">{r.stage}</span>
-              {LOST_REASON_DESCRIPTIONS[r.stage] && ` — ${LOST_REASON_DESCRIPTIONS[r.stage]}`}
-            </p>
-          ))}
-        </div>
-      </Card>
-
-      <div>
-        <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">By Owner ({byOwner.rows.length})</h3>
-        <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3">
-          <StatTile label="Total Revenue" value={formatIndianCurrency(byOwner.total.revenue)} />
-          <StatTile label="Total Leads" value={byOwner.total.totalLeads.toLocaleString("en-IN")} />
-          <StatTile
-            label="Closed %"
-            value={byOwner.total.closedPct !== null ? formatPercent(byOwner.total.closedPct) : "—"}
-            progress={byOwner.total.closedPct !== null ? { pct: byOwner.total.closedPct, good: 0.6, warn: 0.35 } : undefined}
-          />
-        </div>
-        <Card title="Revenue By Owner" subtitle="Total revenue attributed to each owner">
-          <HorizontalBarChart data={ownerRevenueData} valueFormatter={(v) => formatIndianCurrency(v)} />
-        </Card>
-        <Card title="Owner × Source" subtitle="Lead volume per owner, by top source — darker = more leads">
-          <Heatmap rows={heatmapOwners} cols={topSources} cells={heatmapCells} valueFormatter={(v) => v.toLocaleString("en-IN")} />
-        </Card>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {byOwner.rows.map((r) => (
-            <EntityCard
-              key={r.owner}
-              name={r.owner}
-              headlineLabel="Revenue"
-              headline={formatIndianCurrency(r.revenue)}
-              progress={r.closedPct !== null ? { pct: r.closedPct, good: 0.6, warn: 0.35, label: `${formatPercent(r.closedPct)} of ${r.totalLeads.toLocaleString("en-IN")} leads closed` } : undefined}
-              stats={[
-                { label: "Exotel", value: `${r.exotelLeads.toLocaleString("en-IN")} / ${r.exotelClosed.toLocaleString("en-IN")} closed` },
-                { label: "Reference", value: r.referenceLeads.toLocaleString("en-IN") },
-                { label: "Existing", value: r.existingLeads.toLocaleString("en-IN") },
-                { label: "ADR", value: r.adr !== null ? `₹${Math.round(r.adr).toLocaleString("en-IN")}` : "—" },
+          <Card title="Leads MoM (Total Vs Closed)">
+            <MultiSeriesLineChart
+              data={momData}
+              xKey="month"
+              series={[
+                { key: "total", color: TARGET_VS_ACHIEVED_COLOR.target },
+                { key: "closed", color: TARGET_VS_ACHIEVED_COLOR.achieved },
               ]}
+              valueFormatter={(v) => v.toLocaleString("en-IN")}
+              height={240}
             />
-          ))}
+          </Card>
+
+          <Card title="Leads By Property">
+            <HorizontalBarChart data={propertyData} valueFormatter={(v) => v.toLocaleString("en-IN")} />
+          </Card>
+
+          <Card title="Leads By Source">
+            <Treemap data={sourceData} valueFormatter={(v) => v.toLocaleString("en-IN")} />
+          </Card>
+
+          <Card title="Leads By Format">
+            <HorizontalBarChart data={formatLeadsData} valueFormatter={(v) => v.toLocaleString("en-IN")} />
+          </Card>
+
+          <Card title="Lost Leads Reasons">
+            <DonutChart data={lostDonut} valueFormatter={(v) => v.toLocaleString("en-IN")} />
+            <div className="mt-3 space-y-1.5 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+              {lostReasons.map((r) => (
+                <p key={r.stage} className="text-xs text-zinc-500 dark:text-zinc-400">
+                  <span className="font-medium text-zinc-700 dark:text-zinc-200">{r.stage}</span>
+                  {LOST_REASON_DESCRIPTIONS[r.stage] && ` — ${LOST_REASON_DESCRIPTIONS[r.stage]}`}
+                </p>
+              ))}
+            </div>
+          </Card>
+        </div>
+
+        <div className="space-y-4">
+          <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Revenue & Owners</h3>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Card title="Revenue By Format">
+              <HorizontalBarChart data={formatRevenueData} valueFormatter={(v) => formatIndianCurrency(v)} />
+            </Card>
+            <Card title="ADR By Format" subtitle="Closed leads only">
+              <HorizontalBarChart data={adrByFormatData} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} />
+            </Card>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <StatTile label="Total Revenue" value={formatIndianCurrency(byOwner.total.revenue)} />
+            <StatTile label="Total Leads" value={byOwner.total.totalLeads.toLocaleString("en-IN")} />
+            <StatTile
+              label="Closed %"
+              value={byOwner.total.closedPct !== null ? formatPercent(byOwner.total.closedPct) : "—"}
+              progress={byOwner.total.closedPct !== null ? { pct: byOwner.total.closedPct, good: 0.6, warn: 0.35 } : undefined}
+            />
+          </div>
+
+          <Card title="Revenue By Owner" subtitle="Total revenue attributed to each owner">
+            <HorizontalBarChart data={ownerRevenueData} valueFormatter={(v) => formatIndianCurrency(v)} />
+          </Card>
+
+          <Card title="Owner × Source" subtitle="Lead volume per owner, by top source — darker = more leads">
+            <Heatmap rows={heatmapOwners} cols={topSources} cells={heatmapCells} valueFormatter={(v) => v.toLocaleString("en-IN")} />
+          </Card>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            {byOwner.rows.map((r) => (
+              <EntityCard
+                key={r.owner}
+                name={r.owner}
+                headlineLabel="Revenue"
+                headline={formatIndianCurrency(r.revenue)}
+                progress={r.closedPct !== null ? { pct: r.closedPct, good: 0.6, warn: 0.35, label: `${formatPercent(r.closedPct)} of ${r.totalLeads.toLocaleString("en-IN")} leads closed` } : undefined}
+                stats={[
+                  { label: "Exotel", value: `${r.exotelLeads.toLocaleString("en-IN")} / ${r.exotelClosed.toLocaleString("en-IN")} closed` },
+                  { label: "Reference", value: r.referenceLeads.toLocaleString("en-IN") },
+                  { label: "Existing", value: r.existingLeads.toLocaleString("en-IN") },
+                  { label: "ADR", value: r.adr !== null ? `₹${Math.round(r.adr).toLocaleString("en-IN")}` : "—" },
+                ]}
+              />
+            ))}
+          </div>
         </div>
       </div>
     </div>
