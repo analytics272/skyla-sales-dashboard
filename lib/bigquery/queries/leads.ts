@@ -372,3 +372,22 @@ export async function getLeadsByOwner(filter: LeadsFilter): Promise<OwnerLeadSta
 
   return { rows, total };
 }
+
+// --- Owner x Source matrix, for the heatmap (redesign 2026-09-02, fourth pass) ---
+
+export interface OwnerSourceCell {
+  owner: string;
+  source: string;
+  count: number;
+}
+
+export async function getLeadsByOwnerSource(filter: LeadsFilter): Promise<OwnerSourceCell[]> {
+  const { clause, params } = whereForFilter(filter);
+  const rows = await runQuery<{ owner: string | null; source: string | null; count: number }>(`
+    SELECT Owner AS owner, Source AS source, COUNT(*) AS count
+    FROM ${table("lead_tracker")}
+    WHERE ${clause} AND ${OWNER_EXCLUDE_SQL} AND Source IS NOT NULL AND TRIM(Source) != ''
+    GROUP BY owner, source
+  `, params);
+  return rows.map((r) => ({ owner: r.owner ?? "null", source: r.source ?? "null", count: r.count }));
+}

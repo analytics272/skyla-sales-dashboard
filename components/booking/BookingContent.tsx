@@ -11,6 +11,7 @@ import Expandable from "@/components/ui/Expandable";
 import SingleMetricBarChart, { BarDatum } from "@/components/charts/SingleMetricBarChart";
 import HorizontalBarChart from "@/components/charts/HorizontalBarChart";
 import DonutChart from "@/components/charts/DonutChart";
+import Treemap from "@/components/charts/Treemap";
 import { formatIndianCurrency, formatPercent } from "@/lib/format/currency";
 import { ROOM_TYPE_COLOR, ROOM_TYPE_ORDER, CATEGORY_COLOR, CATEGORY_ORDER } from "@/lib/design/tokens";
 
@@ -207,9 +208,7 @@ export default function BookingContent({
               <StatTile label="Contract Revenue Achieved" value={formatIndianCurrency(b2bContractSummary.totalContractRevenue)} sub="Contract_Status = Contract only, not total company revenue" />
               <StatTile label="Companies Under Contract" value={b2bContractSummary.contractCompanyCount.toLocaleString("en-IN")} />
             </div>
-            <Expandable collapsedHeight={420} label={`Show all ${b2bRanking.length} companies`}>
-              <HorizontalBarChart data={b2bRevenueData} valueFormatter={(v) => formatIndianCurrency(v)} labelWidth={140} />
-            </Expandable>
+            <Treemap data={b2bRevenueData} valueFormatter={(v) => formatIndianCurrency(v)} height={360} />
           </Card>
         </div>
 

@@ -1,20 +1,22 @@
 "use client";
 
-import { LeadsSummary, LeadsMoMSeries, LeadsByGroup, FormatLeadsRevenue, AdrByFormat, LostLeadReason, OwnerLeadStatsResult } from "@/lib/bigquery/queries/leads";
+import { LeadsSummary, LeadsMoMSeries, LeadsByGroup, FormatLeadsRevenue, AdrByFormat, LostLeadReason, OwnerLeadStatsResult, OwnerSourceCell } from "@/lib/bigquery/queries/leads";
 import StatTile from "@/components/ui/StatTile";
 import Card from "@/components/ui/Card";
-import Expandable from "@/components/ui/Expandable";
 import EntityCard from "@/components/ui/EntityCard";
 import HorizontalBarChart from "@/components/charts/HorizontalBarChart";
 import { BarDatum } from "@/components/charts/SingleMetricBarChart";
 import MultiSeriesLineChart from "@/components/charts/MultiSeriesLineChart";
 import DonutChart from "@/components/charts/DonutChart";
+import Treemap from "@/components/charts/Treemap";
+import Heatmap from "@/components/charts/Heatmap";
 import { formatIndianCurrency, formatPercent } from "@/lib/format/currency";
 import { TARGET_VS_ACHIEVED_COLOR } from "@/lib/design/tokens";
 import { LOST_REASON_DESCRIPTIONS } from "@/lib/reference/lostLeadReasons";
 
 const RANKING_COLOR = "var(--series-1)";
 const LOST_REASON_PALETTE = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--series-4)", "var(--series-5)", "var(--chart-baseline)"];
+const HEATMAP_TOP_SOURCES = 6;
 
 export default function LeadsContent({
   summary,
@@ -26,6 +28,7 @@ export default function LeadsContent({
   lostReasons,
   bookingPace,
   byOwner,
+  byOwnerSource,
 }: {
   summary: LeadsSummary;
   mom: LeadsMoMSeries;
@@ -36,6 +39,7 @@ export default function LeadsContent({
   lostReasons: LostLeadReason[];
   bookingPace: number | null;
   byOwner: OwnerLeadStatsResult;
+  byOwnerSource: OwnerSourceCell[];
 }) {
   const existingTotal = bySource.find((s) => s.key === "Existing")?.count ?? 0;
   const referenceTotal = bySource.find((s) => s.key === "Reference")?.count ?? 0;
@@ -45,7 +49,7 @@ export default function LeadsContent({
   const referenceAchievedPct = pct(summary.referenceClosedLeads, referenceTotal);
 
   const propertyData: BarDatum[] = byProperty.map((r) => ({ name: r.key, value: r.count, color: RANKING_COLOR }));
-  const sourceData: BarDatum[] = bySource.map((r) => ({ name: r.key, value: r.count, color: RANKING_COLOR }));
+  const sourceData: BarDatum[] = bySource.map((r, i) => ({ name: r.key, value: r.count, color: LOST_REASON_PALETTE[i % LOST_REASON_PALETTE.length] }));
   const formatLeadsData: BarDatum[] = formatLeadsRevenue.map((r) => ({ name: r.format, value: r.leads, color: RANKING_COLOR }));
   const formatRevenueData: BarDatum[] = formatLeadsRevenue.map((r) => ({ name: r.format, value: r.revenue, color: RANKING_COLOR }));
   const adrByFormatData: BarDatum[] = adrByFormat.map((r) => ({ name: r.format, value: r.adr ?? 0, color: RANKING_COLOR }));
@@ -53,6 +57,12 @@ export default function LeadsContent({
   const lostDonut = lostReasons.map((r, i) => ({ name: r.stage, value: r.count, color: LOST_REASON_PALETTE[i % LOST_REASON_PALETTE.length] }));
 
   const ownerRevenueData: BarDatum[] = byOwner.rows.map((r) => ({ name: r.owner, value: r.revenue, color: RANKING_COLOR }));
+
+  const heatmapOwners = byOwner.rows.map((r) => r.owner);
+  const topSources = [...bySource].sort((a, b) => b.count - a.count).slice(0, HEATMAP_TOP_SOURCES).map((s) => s.key);
+  const heatmapCells = byOwnerSource
+    .filter((c) => heatmapOwners.includes(c.owner) && topSources.includes(c.source))
+    .map((c) => ({ row: c.owner, col: c.source, value: c.count }));
 
   const momLen = Math.max(mom.current.length, mom.previous.length);
   const momData = Array.from({ length: momLen }, (_, i) => {
@@ -128,9 +138,7 @@ export default function LeadsContent({
           <HorizontalBarChart data={propertyData} valueFormatter={(v) => v.toLocaleString("en-IN")} />
         </Card>
         <Card title="Leads By Source">
-          <Expandable collapsedHeight={260}>
-            <HorizontalBarChart data={sourceData} valueFormatter={(v) => v.toLocaleString("en-IN")} height={Math.max(200, sourceData.length * 32)} />
-          </Expandable>
+          <Treemap data={sourceData} valueFormatter={(v) => v.toLocaleString("en-IN")} />
         </Card>
       </div>
 
@@ -171,6 +179,9 @@ export default function LeadsContent({
         </div>
         <Card title="Revenue By Owner" subtitle="Total revenue attributed to each owner">
           <HorizontalBarChart data={ownerRevenueData} valueFormatter={(v) => formatIndianCurrency(v)} />
+        </Card>
+        <Card title="Owner × Source" subtitle="Lead volume per owner, by top source — darker = more leads">
+          <Heatmap rows={heatmapOwners} cols={topSources} cells={heatmapCells} valueFormatter={(v) => v.toLocaleString("en-IN")} />
         </Card>
         <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {byOwner.rows.map((r) => (
