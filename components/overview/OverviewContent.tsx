@@ -222,7 +222,11 @@ export default function OverviewContent({
       </Card>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <StatTile label="Sold Room Nights" value={overview.soldRoomNights.toLocaleString("en-IN")} />
+        <StatTile
+          label="Sold Room Nights"
+          value={overview.soldRoomNights.toLocaleString("en-IN")}
+          delta={comparison.soldRoomNights.pctChange !== null ? { pct: comparison.soldRoomNights.pctChange * 100, label: `vs ${comparison.previousLabel}` } : undefined}
+        />
         <StatTile label="Available Room Nights" value={overview.availableRoomNights.toLocaleString("en-IN")} />
         <StatTile
           label="Unsold Room Nights"

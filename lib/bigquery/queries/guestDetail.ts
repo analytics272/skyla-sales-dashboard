@@ -14,16 +14,19 @@ function comparisonMetric(current: number | null, previous: number | null): Comp
   return { current, previous, pctChange: current !== null && previous !== null ? safeDivide(current - previous, previous) : null };
 }
 
-// --- Total Bookings / Guests Served / ALOS ---
+// --- Total Bookings / Unique Guests Served / ALOS ---
 
 export interface BookingStats {
   totalBookings: number;
+  /** MAX(NoOfGuest) per booking, summed — an approximation of distinct people hosted, not guest-nights (see getGuestServedAccuracyCheck for the sheet-reconciled guest-nights figure). */
   guestsServed: number;
   alos: number | null;
   revenuePerGuest: number | null;
   comparison: {
     totalBookings: ComparisonMetric;
     guestsServed: ComparisonMetric;
+    alos: ComparisonMetric;
+    revenuePerGuest: ComparisonMetric;
   };
 }
 
@@ -46,20 +49,20 @@ const BOOKING_STATS_SQL = (where: string) => `
     -- rows since CONCAT(..., NULL) is NULL and excluded from COUNT DISTINCT.
     -- Grouping by a NULL ReservationNo would otherwise collapse many unrelated
     -- rows into one phantom booking per property (confirmed against real data).
-    SELECT Property, ReservationNo
+    -- guests = MAX(NoOfGuest) per booking (peak occupancy) -> "Unique Guests
+    -- Served", a distinct-people-hosted headcount. This is deliberately NOT
+    -- guest-nights (see getGuestServedAccuracyCheck, which sums NoOfGuest
+    -- across every night instead) — the two are different, both legitimate,
+    -- metrics (item #2, 2026-09-02 seventh pass: restored after briefly
+    -- conflating the two in the prior pass).
+    SELECT Property, ReservationNo, MAX(NoOfGuest) AS guests
     FROM scoped
     WHERE ReservationNo IS NOT NULL
     GROUP BY Property, ReservationNo
   )
   SELECT
     (SELECT COUNT(*) FROM per_booking) AS total_bookings,
-    -- Item #8 (2026-09-02, sixth pass): guests_served sums NoOfGuest across
-    -- every night of stay (guest-nights), not MAX(NoOfGuest) per booking
-    -- (peak occupancy once). Confirmed against the Guest Served sheet
-    -- (see getGuestServedAccuracyCheck) that guest-nights is the sheet's own
-    -- definition — the old per-booking-peak basis undercounted it by ~82%;
-    -- this basis lands within ~3% for the one month cross-validated so far.
-    (SELECT SUM(NoOfGuest) FROM scoped) AS guests_served,
+    (SELECT SUM(guests) FROM per_booking) AS guests_served,
     (SELECT COUNT(*) FROM scoped) AS sold_room_nights,
     (SELECT SUM(DailyRevenue) FROM scoped) AS room_revenue
 `;
@@ -88,19 +91,27 @@ export async function getBookingStats(filter: KpiFilter): Promise<BookingStats> 
   const guestsServed = (r.guests_served ?? 0) + (lpTotals?.guestsServed ?? 0);
   const soldRoomNights = r.sold_room_nights + (lpTotals?.soldRoomNights ?? 0);
   const roomRevenue = (r.room_revenue ?? 0) + (lpTotals?.roomRevenue ?? 0);
+  const alos = safeDivide(soldRoomNights, totalBookings);
+  const revenuePerGuest = safeDivide(roomRevenue, guestsServed);
 
   const pr = prevRows ? prevRows[0] ?? { total_bookings: 0, guests_served: 0, sold_room_nights: 0, room_revenue: 0 } : null;
   const prevTotalBookings = pr ? pr.total_bookings + (lpPrevTotals?.bookingsCount ?? 0) : null;
   const prevGuestsServed = pr ? (pr.guests_served ?? 0) + (lpPrevTotals?.guestsServed ?? 0) : null;
+  const prevSoldRoomNights = pr ? pr.sold_room_nights + (lpPrevTotals?.soldRoomNights ?? 0) : null;
+  const prevRoomRevenue = pr ? (pr.room_revenue ?? 0) + (lpPrevTotals?.roomRevenue ?? 0) : null;
+  const prevAlos = prevSoldRoomNights !== null && prevTotalBookings !== null ? safeDivide(prevSoldRoomNights, prevTotalBookings) : null;
+  const prevRevenuePerGuest = prevRoomRevenue !== null && prevGuestsServed !== null ? safeDivide(prevRoomRevenue, prevGuestsServed) : null;
 
   return {
     totalBookings,
     guestsServed,
-    alos: safeDivide(soldRoomNights, totalBookings),
-    revenuePerGuest: safeDivide(roomRevenue, guestsServed),
+    alos,
+    revenuePerGuest,
     comparison: {
       totalBookings: comparisonMetric(totalBookings, prevTotalBookings),
       guestsServed: comparisonMetric(guestsServed, prevGuestsServed),
+      alos: comparisonMetric(alos, prevAlos),
+      revenuePerGuest: comparisonMetric(revenuePerGuest, prevRevenuePerGuest),
     },
   };
 }
@@ -202,42 +213,70 @@ export interface RepeatBookingShare {
   repeatBookings: number;
   totalBookings: number;
   sharePct: number | null;
+  comparison: {
+    repeatBookings: ComparisonMetric;
+    sharePct: ComparisonMetric;
+  };
 }
+
+interface RepeatBookingRow {
+  repeat_bookings: number;
+  total_bookings: number;
+}
+
+const REPEAT_BOOKING_SQL = (where: string) => `
+  WITH per_booking AS (
+    -- ReservationNo IS NOT NULL: same canonical booking-count basis used
+    -- throughout (see getBookingStats) — avoids inflating the count with
+    -- distinct-guest-combo rows that share a null ReservationNo.
+    SELECT DISTINCT Property, ReservationNo, Mobile, Email, GuestName
+    FROM ${table("sales_booking")}
+    WHERE ${where} AND ReservationNo IS NOT NULL
+  ),
+  keyed AS (
+    SELECT *,
+      COALESCE(NULLIF(TRIM(Mobile), ''), NULLIF(TRIM(Email), ''), TRIM(GuestName)) AS guest_key
+    FROM per_booking
+  ),
+  guest_counts AS (
+    SELECT guest_key, COUNT(DISTINCT CONCAT(Property, '|', ReservationNo)) AS booking_count
+    FROM keyed
+    WHERE guest_key IS NOT NULL AND guest_key != ''
+    GROUP BY guest_key
+  )
+  SELECT
+    (SELECT COALESCE(SUM(booking_count), 0) FROM guest_counts WHERE booking_count > 1) AS repeat_bookings,
+    (SELECT COUNT(*) FROM per_booking) AS total_bookings
+`;
 
 export async function getRepeatBookingShare(filter: KpiFilter): Promise<RepeatBookingShare> {
   const resolved = resolveFilter(filter);
+  const compare = filter.compareYoY ?? false;
   const { clause: where, params } = buildScopeClause("Property", "CAST(StayDate AS DATE)", resolved, "");
 
-  const rows = await runQuery<{ repeat_bookings: number; total_bookings: number }>(`
-    WITH per_booking AS (
-      -- ReservationNo IS NOT NULL: same canonical booking-count basis used
-      -- throughout (see getBookingStats) — avoids inflating the count with
-      -- distinct-guest-combo rows that share a null ReservationNo.
-      SELECT DISTINCT Property, ReservationNo, Mobile, Email, GuestName
-      FROM ${table("sales_booking")}
-      WHERE ${where} AND ReservationNo IS NOT NULL
-    ),
-    keyed AS (
-      SELECT *,
-        COALESCE(NULLIF(TRIM(Mobile), ''), NULLIF(TRIM(Email), ''), TRIM(GuestName)) AS guest_key
-      FROM per_booking
-    ),
-    guest_counts AS (
-      SELECT guest_key, COUNT(DISTINCT CONCAT(Property, '|', ReservationNo)) AS booking_count
-      FROM keyed
-      WHERE guest_key IS NOT NULL AND guest_key != ''
-      GROUP BY guest_key
-    )
-    SELECT
-      (SELECT COALESCE(SUM(booking_count), 0) FROM guest_counts WHERE booking_count > 1) AS repeat_bookings,
-      (SELECT COUNT(*) FROM per_booking) AS total_bookings
-  `, params);
+  const [rows, prevRows] = await Promise.all([
+    runQuery<RepeatBookingRow>(REPEAT_BOOKING_SQL(where), params),
+    compare
+      ? (() => {
+          const { clause: prevWhere, params: prevParams } = buildPreviousScopeClause("Property", "CAST(StayDate AS DATE)", resolved, "prev");
+          return runQuery<RepeatBookingRow>(REPEAT_BOOKING_SQL(prevWhere), prevParams);
+        })()
+      : Promise.resolve(null),
+  ]);
 
   const r = rows[0] ?? { repeat_bookings: 0, total_bookings: 0 };
+  const sharePct = safeDivide(r.repeat_bookings, r.total_bookings);
+  const pr = prevRows ? prevRows[0] ?? { repeat_bookings: 0, total_bookings: 0 } : null;
+  const prevSharePct = pr ? safeDivide(pr.repeat_bookings, pr.total_bookings) : null;
+
   return {
     repeatBookings: r.repeat_bookings,
     totalBookings: r.total_bookings,
-    sharePct: safeDivide(r.repeat_bookings, r.total_bookings),
+    sharePct,
+    comparison: {
+      repeatBookings: comparisonMetric(r.repeat_bookings, pr ? pr.repeat_bookings : null),
+      sharePct: comparisonMetric(sharePct, prevSharePct),
+    },
   };
 }
 
@@ -338,12 +377,12 @@ export interface CancellationStats {
   activeBookings: number;
   cancelledBookings: number;
   cancellationPct: number | null;
+  comparison: {
+    cancellationPct: ComparisonMetric;
+  };
 }
 
-export async function getCancellationStats(filter: KpiFilter): Promise<CancellationStats> {
-  const resolved = resolveFilter(filter);
-  const { clause: where, params } = buildScopeClause("Property", "CAST(StayDate AS DATE)", resolved, "");
-
+async function cancellationCounts(where: string, params: Record<string, unknown>): Promise<{ activeBookings: number; cancelledBookings: number }> {
   const [activeRows, cancelledRows] = await Promise.all([
     runQuery<{ n: number }>(`
       SELECT COUNT(DISTINCT CONCAT(Property, '|', ReservationNo)) AS n
@@ -356,13 +395,34 @@ export async function getCancellationStats(filter: KpiFilter): Promise<Cancellat
       WHERE ${where}
     `, params),
   ]);
+  return { activeBookings: activeRows[0]?.n ?? 0, cancelledBookings: cancelledRows[0]?.n ?? 0 };
+}
 
-  const activeBookings = activeRows[0]?.n ?? 0;
-  const cancelledBookings = cancelledRows[0]?.n ?? 0;
+export async function getCancellationStats(filter: KpiFilter): Promise<CancellationStats> {
+  const resolved = resolveFilter(filter);
+  const compare = filter.compareYoY ?? false;
+  const { clause: where, params } = buildScopeClause("Property", "CAST(StayDate AS DATE)", resolved, "");
+
+  const [current, previous] = await Promise.all([
+    cancellationCounts(where, params),
+    compare
+      ? (() => {
+          const { clause: prevWhere, params: prevParams } = buildPreviousScopeClause("Property", "CAST(StayDate AS DATE)", resolved, "prev");
+          return cancellationCounts(prevWhere, prevParams);
+        })()
+      : Promise.resolve(null),
+  ]);
+
+  const cancellationPct = safeDivide(current.cancelledBookings, current.activeBookings + current.cancelledBookings);
+  const prevCancellationPct = previous ? safeDivide(previous.cancelledBookings, previous.activeBookings + previous.cancelledBookings) : null;
+
   return {
-    activeBookings,
-    cancelledBookings,
-    cancellationPct: safeDivide(cancelledBookings, activeBookings + cancelledBookings),
+    activeBookings: current.activeBookings,
+    cancelledBookings: current.cancelledBookings,
+    cancellationPct,
+    comparison: {
+      cancellationPct: comparisonMetric(cancellationPct, prevCancellationPct),
+    },
   };
 }
 
@@ -373,29 +433,50 @@ export async function getCancellationStats(filter: KpiFilter): Promise<Cancellat
 export interface CancellationLeadTime {
   avgLeadTimeDays: number | null;
   sampledCancellations: number;
+  comparison: {
+    avgLeadTimeDays: ComparisonMetric;
+  };
 }
+
+const CANCELLATION_LEAD_TIME_SQL = (where: string) => `
+  WITH per_booking AS (
+    SELECT DISTINCT Property, ReservationNo, ArrivalDate, CancelDate
+    FROM ${table("sales_booking_cancelled")}
+    WHERE ${where}
+      AND ReservationNo IS NOT NULL
+      AND CancelDate IS NOT NULL AND TRIM(CancelDate) != ''
+      AND ArrivalDate IS NOT NULL AND TRIM(ArrivalDate) != ''
+  )
+  SELECT
+    AVG(DATE_DIFF(SAFE_CAST(ArrivalDate AS DATE), SAFE_CAST(CancelDate AS DATE), DAY)) AS avg_days,
+    COUNT(*) AS n
+  FROM per_booking
+`;
 
 export async function getCancellationLeadTime(filter: KpiFilter): Promise<CancellationLeadTime> {
   const resolved = resolveFilter(filter);
+  const compare = filter.compareYoY ?? false;
   const { clause: where, params } = buildScopeClause("Property", "CAST(StayDate AS DATE)", resolved, "");
 
-  const rows = await runQuery<{ avg_days: number | null; n: number }>(`
-    WITH per_booking AS (
-      SELECT DISTINCT Property, ReservationNo, ArrivalDate, CancelDate
-      FROM ${table("sales_booking_cancelled")}
-      WHERE ${where}
-        AND ReservationNo IS NOT NULL
-        AND CancelDate IS NOT NULL AND TRIM(CancelDate) != ''
-        AND ArrivalDate IS NOT NULL AND TRIM(ArrivalDate) != ''
-    )
-    SELECT
-      AVG(DATE_DIFF(SAFE_CAST(ArrivalDate AS DATE), SAFE_CAST(CancelDate AS DATE), DAY)) AS avg_days,
-      COUNT(*) AS n
-    FROM per_booking
-  `, params);
+  const [rows, prevRows] = await Promise.all([
+    runQuery<{ avg_days: number | null; n: number }>(CANCELLATION_LEAD_TIME_SQL(where), params),
+    compare
+      ? (() => {
+          const { clause: prevWhere, params: prevParams } = buildPreviousScopeClause("Property", "CAST(StayDate AS DATE)", resolved, "prev");
+          return runQuery<{ avg_days: number | null; n: number }>(CANCELLATION_LEAD_TIME_SQL(prevWhere), prevParams);
+        })()
+      : Promise.resolve(null),
+  ]);
 
   const r = rows[0] ?? { avg_days: null, n: 0 };
-  return { avgLeadTimeDays: r.avg_days, sampledCancellations: r.n };
+  const prevAvgDays = prevRows ? prevRows[0]?.avg_days ?? null : null;
+  return {
+    avgLeadTimeDays: r.avg_days,
+    sampledCancellations: r.n,
+    comparison: {
+      avgLeadTimeDays: comparisonMetric(r.avg_days, prevAvgDays),
+    },
+  };
 }
 
 // --- Guest Served: sheet-vs-BigQuery accuracy check (see lib/reference/guestServedSheetSnapshot.ts) ---

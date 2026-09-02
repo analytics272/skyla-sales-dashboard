@@ -66,14 +66,20 @@ export interface LeadsSummary {
   newLeads: number; // Source IN (Exotel, Business WA, Website) — same basis as b2cLeads below
   b2cLeads: number;
   b2cLeadsClosed: number;
+  existingLeads: number;
   existingClosedLeads: number;
+  referenceLeads: number;
   referenceClosedLeads: number;
   revenue: number;
   conversionRate: number | null;
   comparison: {
     totalLeads: ComparisonMetric;
+    closedLeads: ComparisonMetric;
     revenue: ComparisonMetric;
     conversionRate: ComparisonMetric;
+    b2cLeads: ComparisonMetric;
+    existingLeads: ComparisonMetric;
+    referenceLeads: ComparisonMetric;
   };
 }
 
@@ -82,7 +88,9 @@ interface LeadsSummaryRow {
   closed_leads: number;
   new_leads: number;
   b2c_leads_closed: number;
+  existing_leads: number;
   existing_closed_leads: number;
+  reference_leads: number;
   reference_closed_leads: number;
   revenue: number | null;
 }
@@ -93,7 +101,9 @@ const LEADS_SUMMARY_SQL = (where: string) => `
     COUNTIF(Stage = 'Closed') AS closed_leads,
     COUNTIF(${B2C_SOURCES_SQL}) AS new_leads,
     COUNTIF(${B2C_SOURCES_SQL} AND Stage = 'Closed') AS b2c_leads_closed,
+    COUNTIF(Source = 'Existing') AS existing_leads,
     COUNTIF(Source = 'Existing' AND Stage = 'Closed') AS existing_closed_leads,
+    COUNTIF(Source = 'Reference') AS reference_leads,
     COUNTIF(Source = 'Reference' AND Stage = 'Closed') AS reference_closed_leads,
     SUM(${TOTAL_EXPR}) AS revenue
   FROM ${table("lead_tracker")}
@@ -115,7 +125,7 @@ export async function getLeadsSummary(filter: LeadsFilter): Promise<LeadsSummary
       : Promise.resolve(null),
   ]);
 
-  const empty: LeadsSummaryRow = { total_leads: 0, closed_leads: 0, new_leads: 0, b2c_leads_closed: 0, existing_closed_leads: 0, reference_closed_leads: 0, revenue: 0 };
+  const empty: LeadsSummaryRow = { total_leads: 0, closed_leads: 0, new_leads: 0, b2c_leads_closed: 0, existing_leads: 0, existing_closed_leads: 0, reference_leads: 0, reference_closed_leads: 0, revenue: 0 };
   const r = rows[0] ?? empty;
   const pr = prevRows ? prevRows[0] ?? empty : null;
   const conversionRate = safeDivide(r.closed_leads, r.total_leads);
@@ -127,14 +137,20 @@ export async function getLeadsSummary(filter: LeadsFilter): Promise<LeadsSummary
     newLeads: r.new_leads,
     b2cLeads: r.new_leads,
     b2cLeadsClosed: r.b2c_leads_closed,
+    existingLeads: r.existing_leads,
     existingClosedLeads: r.existing_closed_leads,
+    referenceLeads: r.reference_leads,
     referenceClosedLeads: r.reference_closed_leads,
     revenue: r.revenue ?? 0,
     conversionRate,
     comparison: {
       totalLeads: comparisonMetric(r.total_leads, pr ? pr.total_leads : null),
+      closedLeads: comparisonMetric(r.closed_leads, pr ? pr.closed_leads : null),
       revenue: comparisonMetric(r.revenue ?? 0, pr ? pr.revenue ?? 0 : null),
       conversionRate: comparisonMetric(conversionRate, prevConversionRate),
+      b2cLeads: comparisonMetric(r.new_leads, pr ? pr.new_leads : null),
+      existingLeads: comparisonMetric(r.existing_leads, pr ? pr.existing_leads : null),
+      referenceLeads: comparisonMetric(r.reference_leads, pr ? pr.reference_leads : null),
     },
   };
 }
