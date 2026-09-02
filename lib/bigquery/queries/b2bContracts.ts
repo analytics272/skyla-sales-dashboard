@@ -20,7 +20,7 @@
 import { runQuery, table } from "../client";
 import { safeDivide } from "@/lib/format/currency";
 import { currentFYLabel, fyLabelSqlExpr } from "@/lib/reference/financialYear";
-import { PeriodKey, resolvePeriod } from "@/lib/reference/period";
+import { PeriodFilter, resolvePeriodFromFilter } from "@/lib/reference/period";
 
 /**
  * b2b_bills is keyed by its own Financial_Year STRING column, not a date
@@ -31,8 +31,8 @@ import { PeriodKey, resolvePeriod } from "@/lib/reference/period";
  * period.current.start ("Today"/"This FY" -> the current FY, "Last Year" ->
  * the prior completed FY).
  */
-export function resolveB2bFy(period?: PeriodKey): string {
-  const p = resolvePeriod(period ?? "this_fy");
+export function resolveB2bFy(filter: PeriodFilter): string {
+  const p = resolvePeriodFromFilter(filter);
   return currentFYLabel(new Date(`${p.current.start}T00:00:00`));
 }
 

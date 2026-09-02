@@ -15,7 +15,7 @@ export default async function TargetsPage({ searchParams }: { searchParams: Prom
   const sp = await searchParams;
   const filter = parseKpiFilter(sp);
   // leadership_targets isn't property-scoped (§6.5) — only the period tab applies.
-  const targetsFilter = { period: filter.period };
+  const targetsFilter = { period: filter.period, customStart: filter.customStart, customEnd: filter.customEnd };
   const fy = resolveTargetsFy(targetsFilter);
   const resolved = resolveFilter(filter);
 

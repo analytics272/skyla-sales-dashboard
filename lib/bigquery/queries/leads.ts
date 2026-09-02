@@ -14,7 +14,7 @@
 // scoped by a plain date range instead of FY-label/fiscal-month matching.
 import { runQuery, table } from "../client";
 import { DateRange } from "@/lib/reference/financialYear";
-import { PeriodKey, resolvePeriod } from "@/lib/reference/period";
+import { PeriodFilter, resolvePeriodFromFilter } from "@/lib/reference/period";
 import { safeDivide } from "@/lib/format/currency";
 import { ComparisonMetric } from "./overview";
 
@@ -29,9 +29,8 @@ END`;
 
 const TOTAL_EXPR = "SAFE_CAST(REPLACE(Total, ',', '') AS FLOAT64)";
 
-export interface LeadsFilter {
+export interface LeadsFilter extends PeriodFilter {
   properties?: string[]; // matched against the remapped display property
-  period?: PeriodKey;
 }
 
 function comparisonMetric(current: number | null, previous: number | null): ComparisonMetric {
@@ -49,7 +48,7 @@ function whereForRange(range: DateRange, properties?: string[]): { clause: strin
 }
 
 function whereForFilter(filter: LeadsFilter): { clause: string; params: Record<string, unknown> } {
-  const period = resolvePeriod(filter.period ?? "this_fy");
+  const period = resolvePeriodFromFilter(filter);
   return whereForRange(period.current, filter.properties);
 }
 
@@ -102,7 +101,7 @@ const LEADS_SUMMARY_SQL = (where: string) => `
 `;
 
 export async function getLeadsSummary(filter: LeadsFilter): Promise<LeadsSummary> {
-  const period = resolvePeriod(filter.period ?? "this_fy");
+  const period = resolvePeriodFromFilter(filter);
   const { clause, params } = whereForRange(period.current, filter.properties);
   const { clause: prevClause, params: prevParams } = whereForRange(period.previous, filter.properties);
 
@@ -169,7 +168,7 @@ export interface LeadsMoMSeries {
 }
 
 export async function getLeadsMoM(filter: LeadsFilter): Promise<LeadsMoMSeries> {
-  const period = resolvePeriod(filter.period ?? "this_fy");
+  const period = resolvePeriodFromFilter(filter);
   const [current, previous] = await Promise.all([
     leadsMoMForRange(period.current, filter.properties),
     leadsMoMForRange(period.previous, filter.properties),
@@ -248,18 +247,21 @@ export interface LostLeadReason {
 
 export async function getLostLeadReasons(filter: LeadsFilter): Promise<LostLeadReason[]> {
   const { clause, params } = whereForFilter(filter);
-  // "Not Intersted" typo variant folded into "Not Interested" per §2.4.
-  const rows = await runQuery<{ stage: string | null; count: number }>(`
+  // "Not Intersted" typo variant folded into "Not Interested" per §2.4. Blank
+  // Stage (open/in-progress leads, not yet lost) is deliberately excluded
+  // here — it isn't a "lost reason", so it shouldn't appear in a chart of
+  // lost reasons (per 2026-09-02 request: no blank/unlabeled slices).
+  const rows = await runQuery<{ stage: string; count: number }>(`
     SELECT
       CASE WHEN Stage = 'Not Intersted' THEN 'Not Interested' ELSE Stage END AS stage,
       COUNT(*) AS count
     FROM ${table("lead_tracker")}
-    WHERE ${clause} AND (Stage IS NULL OR Stage != 'Closed')
+    WHERE ${clause} AND Stage IS NOT NULL AND Stage != 'Closed' AND TRIM(Stage) != ''
     GROUP BY stage
     ORDER BY count DESC
   `, params);
   const total = rows.reduce((s, r) => s + r.count, 0);
-  return rows.map((r) => ({ stage: r.stage ?? "(open/in-progress)", count: r.count, pct: safeDivide(r.count, total) }));
+  return rows.map((r) => ({ stage: r.stage, count: r.count, pct: safeDivide(r.count, total) }));
 }
 
 export async function getBookingPace(filter: LeadsFilter): Promise<number | null> {

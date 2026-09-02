@@ -1,10 +1,10 @@
 "use client";
 
 import { CategoryAchievement, RevenueAchievement, MonthlyRevenueTarget, MonthlyAdrTarget, MonthlyOccupancyTarget } from "@/lib/bigquery/queries/targets";
-import type { PropertyTargetComparison, PropertyTargetComparisonResult } from "@/lib/bigquery/queries/propertyTargets";
+import type { PropertyTargetComparisonResult } from "@/lib/bigquery/queries/propertyTargets";
 import StatTile from "@/components/ui/StatTile";
 import Card from "@/components/ui/Card";
-import Table, { TableColumn } from "@/components/ui/Table";
+import EntityCard from "@/components/ui/EntityCard";
 import GroupedBarChart from "@/components/charts/GroupedBarChart";
 import MultiSeriesLineChart from "@/components/charts/MultiSeriesLineChart";
 import { formatIndianCurrency, formatPercent } from "@/lib/format/currency";
@@ -55,16 +55,11 @@ export default function TargetsContent({
     achieved: c.achieved,
   }));
 
-  const propertyColumns: TableColumn<PropertyTargetComparison>[] = [
-    { key: "property", header: "Property", render: (r) => r.property },
-    { key: "targetRevenue", header: "Target Revenue", align: "right", render: (r) => formatIndianCurrency(r.targetRevenue) },
-    { key: "achievedRevenue", header: "Achieved Revenue", align: "right", render: (r) => formatIndianCurrency(r.achievedRevenue) },
-    { key: "achievedPct", header: "Achievement %", align: "right", render: (r) => (r.achievedPct !== null ? formatPercent(r.achievedPct, 0) : "—") },
-    { key: "targetOcc", header: "Target Occ %", align: "right", render: (r) => (r.targetOccPct !== null ? formatPercent(r.targetOccPct, 0) : "—") },
-    { key: "achievedOcc", header: "Achieved Occ %", align: "right", render: (r) => (r.achievedOccPct !== null ? formatPercent(r.achievedOccPct, 0) : "—") },
-    { key: "targetArr", header: "Target ARR", align: "right", render: (r) => (r.targetArr !== null ? `₹${Math.round(r.targetArr).toLocaleString("en-IN")}` : "—") },
-    { key: "achievedArr", header: "Achieved ARR", align: "right", render: (r) => (r.achievedArr !== null ? `₹${Math.round(r.achievedArr).toLocaleString("en-IN")}` : "—") },
-  ];
+  const propertyRevenueData = propertyTargetComparison.rows.map((r) => ({
+    property: r.property,
+    Target: r.targetRevenue,
+    Achieved: r.achievedRevenue,
+  }));
 
   return (
     <div className="space-y-6">
@@ -81,9 +76,48 @@ export default function TargetsContent({
         </div>
       </div>
 
-      <Card title="Revenue Targets By Property" subtitle={`Fixed reference plan — ${fy}`}>
-        <Table columns={propertyColumns} rows={propertyTargetComparison.rows} rowKey={(r) => r.property} footerRow={propertyTargetComparison.total} />
-      </Card>
+      <div>
+        <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Revenue Targets By Property</h3>
+        <p className="text-xs text-zinc-400 dark:text-zinc-500">Fixed reference plan — {fy}</p>
+        <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <StatTile label="Total Target" value={formatIndianCurrency(propertyTargetComparison.total.targetRevenue)} />
+          <StatTile label="Total Achieved" value={formatIndianCurrency(propertyTargetComparison.total.achievedRevenue)} />
+          <StatTile
+            label="Overall Achievement"
+            value={propertyTargetComparison.total.achievedPct !== null ? formatPercent(propertyTargetComparison.total.achievedPct, 0) : "—"}
+            progress={propertyTargetComparison.total.achievedPct !== null ? { pct: propertyTargetComparison.total.achievedPct } : undefined}
+          />
+          <StatTile label="Overall Occ %" value={propertyTargetComparison.total.achievedOccPct !== null ? formatPercent(propertyTargetComparison.total.achievedOccPct, 0) : "—"} />
+        </div>
+        <Card title="Target Vs Achieved Revenue By Property">
+          <GroupedBarChart
+            data={propertyRevenueData}
+            xKey="property"
+            series={[
+              { key: "Target", color: TARGET_VS_ACHIEVED_COLOR.target },
+              { key: "Achieved", color: TARGET_VS_ACHIEVED_COLOR.achieved },
+            ]}
+            valueFormatter={(v) => formatIndianCurrency(v)}
+          />
+        </Card>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {propertyTargetComparison.rows.map((r) => (
+            <EntityCard
+              key={r.property}
+              name={r.property}
+              headlineLabel="Achieved Revenue"
+              headline={formatIndianCurrency(r.achievedRevenue)}
+              progress={r.achievedPct !== null ? { pct: r.achievedPct, label: `${formatPercent(r.achievedPct, 0)} of ${formatIndianCurrency(r.targetRevenue)} target` } : undefined}
+              stats={[
+                { label: "Target Occ %", value: r.targetOccPct !== null ? formatPercent(r.targetOccPct, 0) : "—" },
+                { label: "Achieved Occ %", value: r.achievedOccPct !== null ? formatPercent(r.achievedOccPct, 0) : "—" },
+                { label: "Target ARR", value: r.targetArr !== null ? `₹${Math.round(r.targetArr).toLocaleString("en-IN")}` : "—" },
+                { label: "Achieved ARR", value: r.achievedArr !== null ? `₹${Math.round(r.achievedArr).toLocaleString("en-IN")}` : "—" },
+              ]}
+            />
+          ))}
+        </div>
+      </div>
 
       <Card title="B2B / B2C / OTA Achievement">
         <GroupedBarChart data={categoryData} xKey="category" series={TA_SERIES} valueFormatter={(v) => formatIndianCurrency(v)} />

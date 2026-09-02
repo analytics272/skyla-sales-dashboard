@@ -1,11 +1,9 @@
-import { PeriodKey, PeriodDef, resolvePeriod } from "@/lib/reference/period";
+import { PeriodDef, PeriodFilter, resolvePeriodFromFilter } from "@/lib/reference/period";
 import { ACTIVE_PROPERTY_CODES } from "@/lib/reference/propertyReference";
 
-export interface KpiFilter {
+export interface KpiFilter extends PeriodFilter {
   /** Property codes to include. Omit/empty = all active properties (includes LP as of the 2026-08-26 re-integration — see the LP PRD addendum). */
   properties?: string[];
-  /** Which comparison-period tab is active. Omit = "this_fy" (the old default-to-current-FY behavior). */
-  period?: PeriodKey;
 }
 
 export interface ResolvedFilter {
@@ -16,7 +14,7 @@ export interface ResolvedFilter {
 export function resolveFilter(filter: KpiFilter): ResolvedFilter {
   return {
     properties: filter.properties && filter.properties.length > 0 ? filter.properties : ACTIVE_PROPERTY_CODES,
-    period: resolvePeriod(filter.period ?? "this_fy"),
+    period: resolvePeriodFromFilter(filter),
   };
 }
 

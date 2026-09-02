@@ -11,13 +11,12 @@
 // 2026-09-02: rewritten for the Today/This FY/Last Year period-tabs model.
 import { runQuery, table } from "../client";
 import { DateRange } from "@/lib/reference/financialYear";
-import { PeriodKey, resolvePeriod } from "@/lib/reference/period";
+import { PeriodFilter, resolvePeriodFromFilter } from "@/lib/reference/period";
 import { safeDivide } from "@/lib/format/currency";
 import { ComparisonMetric } from "./overview";
 
-export interface ReviewsFilter {
+export interface ReviewsFilter extends PeriodFilter {
   properties?: string[];
-  period?: PeriodKey;
 }
 
 function comparisonMetric(current: number | null, previous: number | null): ComparisonMetric {
@@ -44,7 +43,7 @@ export interface ReviewStats {
 }
 
 async function ratingStats(tableName: string, ratingExpr: string, dateExprAsDate: string, filter: ReviewsFilter): Promise<ReviewStats> {
-  const period = resolvePeriod(filter.period ?? "this_fy");
+  const period = resolvePeriodFromFilter(filter);
   const { clause, params } = scopeClause(period.current, dateExprAsDate, filter.properties);
   const { clause: prevClause, params: prevParams } = scopeClause(period.previous, dateExprAsDate, filter.properties);
 
@@ -90,7 +89,7 @@ function monthLabelOf(iso: string): string {
 // booking system by a decade — an unscoped trend would produce a 15-series
 // chart spanning 2013-2027.)
 async function ratingTrend(tableName: string, dateExprAsDate: string, filter: ReviewsFilter): Promise<RatingTrendPoint[]> {
-  const period = resolvePeriod(filter.period ?? "this_fy");
+  const period = resolvePeriodFromFilter(filter);
   const { clause, params } = scopeClause(period.current, dateExprAsDate, filter.properties);
   const rows = await runQuery<{ month_start: string; count: number }>(`
     SELECT CAST(DATE_TRUNC(${dateExprAsDate}, MONTH) AS STRING) AS month_start, COUNT(*) AS count

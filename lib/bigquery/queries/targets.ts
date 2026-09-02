@@ -13,18 +13,16 @@
 // to-date-vs-full-year-plan reading without any elapsed-months filtering.
 import { runQuery, table } from "../client";
 import { currentFYLabel, fyLabel, parseFyLabel, calendarMonthFromFiscal, isFutureFiscalMonth, fiscalMonthNumber } from "@/lib/reference/financialYear";
-import { PeriodKey, resolvePeriod } from "@/lib/reference/period";
+import { PeriodFilter, resolvePeriodFromFilter } from "@/lib/reference/period";
 import { safeDivide } from "@/lib/format/currency";
 
-export interface TargetsFilter {
-  period?: PeriodKey;
-}
+export type TargetsFilter = PeriodFilter;
 
 export { fiscalMonthNumber };
 
 /** The single FY leadership_targets should be read from for the active period tab. */
 export function resolveTargetsFy(filter: TargetsFilter): string {
-  const period = resolvePeriod(filter.period ?? "this_fy");
+  const period = resolvePeriodFromFilter(filter);
   return currentFYLabel(new Date(`${period.current.start}T00:00:00`));
 }
 

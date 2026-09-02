@@ -15,7 +15,7 @@ import LeadsContent from "@/components/leads/LeadsContent";
 export default async function LeadsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const sp = await searchParams;
   const filter = parseKpiFilter(sp);
-  const leadsFilter = { properties: filter.properties, period: filter.period };
+  const leadsFilter = { properties: filter.properties, period: filter.period, customStart: filter.customStart, customEnd: filter.customEnd };
 
   const [summary, mom, byProperty, bySource, formatLeadsRevenue, adrByFormat, lostReasons, bookingPace, byOwner] =
     await Promise.all([

@@ -2,51 +2,62 @@
 
 import { OtaBreakdownRow } from "@/lib/bigquery/queries/otaBreakdown";
 import Card from "@/components/ui/Card";
-import Table, { TableColumn } from "@/components/ui/Table";
+import StatTile from "@/components/ui/StatTile";
 import DonutChart from "@/components/charts/DonutChart";
+import HorizontalBarChart from "@/components/charts/HorizontalBarChart";
+import GroupedBarChart from "@/components/charts/GroupedBarChart";
 import { formatIndianCurrency } from "@/lib/format/currency";
 
 const OTA_PALETTE = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--series-4)", "var(--series-5)", "var(--chart-baseline)", "#a855f7", "#0ea5e9"];
 
 export default function OtaContent({ otaBreakdown }: { otaBreakdown: OtaBreakdownRow[] }) {
-  const otaColumns: TableColumn<OtaBreakdownRow>[] = [
-    { key: "ota", header: "OTA Site", render: (r) => r.otaName },
-    { key: "commission", header: "Commission %", align: "right", render: (r) => `${r.avgCommissionPct.toFixed(1)}%` },
-    { key: "nights", header: "Month Nights", align: "right", render: (r) => r.nights.toLocaleString("en-IN") },
-    { key: "revenue", header: "Total Revenue", align: "right", render: (r) => formatIndianCurrency(r.totalRevenue) },
-    { key: "net", header: "Net Revenue", align: "right", render: (r) => formatIndianCurrency(r.netRevenue) },
-    { key: "adrBefore", header: "Before Commission ADR", align: "right", render: (r) => (r.adrBeforeCommission !== null ? `₹${Math.round(r.adrBeforeCommission).toLocaleString("en-IN")}` : "—") },
-    { key: "adrAfter", header: "After Commission ADR", align: "right", render: (r) => (r.adrAfterCommission !== null ? `₹${Math.round(r.adrAfterCommission).toLocaleString("en-IN")}` : "—") },
-  ];
-
   const totalNights = otaBreakdown.reduce((s, r) => s + r.nights, 0);
   const totalRevenue = otaBreakdown.reduce((s, r) => s + r.totalRevenue, 0);
   const netRevenue = otaBreakdown.reduce((s, r) => s + r.netRevenue, 0);
-
-  // Same shape as a data row, so it renders through the identical column
-  // definitions above — guarantees the totals line up under their headers.
-  const grandTotalRow: OtaBreakdownRow = {
-    otaName: "Grand Total",
-    nights: totalNights,
-    totalRevenue,
-    avgCommissionPct: totalRevenue > 0 ? (1 - netRevenue / totalRevenue) * 100 : 0,
-    netRevenue,
-    adrBeforeCommission: totalNights > 0 ? totalRevenue / totalNights : null,
-    adrAfterCommission: totalNights > 0 ? netRevenue / totalNights : null,
-  };
+  const blendedCommissionPct = totalRevenue > 0 ? (1 - netRevenue / totalRevenue) * 100 : 0;
 
   const revenueDonut = otaBreakdown.map((r, i) => ({ name: r.otaName, value: r.totalRevenue, color: OTA_PALETTE[i % OTA_PALETTE.length] }));
+  const commissionData = otaBreakdown.map((r, i) => ({ name: r.otaName, value: r.avgCommissionPct, color: OTA_PALETTE[i % OTA_PALETTE.length] }));
+  const adrData = otaBreakdown.map((r) => ({
+    ota: r.otaName,
+    "Before Commission": r.adrBeforeCommission ?? 0,
+    "After Commission": r.adrAfterCommission ?? 0,
+  }));
 
   return (
     <div className="space-y-6">
       <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">OTA Breakdown</h2>
 
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <StatTile label="Total Nights" value={totalNights.toLocaleString("en-IN")} />
+        <StatTile label="Total Revenue" value={formatIndianCurrency(totalRevenue)} />
+        <StatTile label="Net Revenue" value={formatIndianCurrency(netRevenue)} />
+        <StatTile label="Blended Commission %" value={`${blendedCommissionPct.toFixed(1)}%`} />
+      </div>
+
       <Card title="Revenue Share By OTA Site">
         <DonutChart data={revenueDonut} valueFormatter={(v) => formatIndianCurrency(v)} />
       </Card>
 
-      <Card title="Commission, Revenue & ADR By OTA Site">
-        <Table columns={otaColumns} rows={otaBreakdown} rowKey={(r) => r.otaName} footerRow={grandTotalRow} />
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card title="Net Revenue By OTA Site">
+          <HorizontalBarChart data={otaBreakdown.map((r) => ({ name: r.otaName, value: r.netRevenue, color: "var(--series-1)" }))} valueFormatter={(v) => formatIndianCurrency(v)} />
+        </Card>
+        <Card title="Commission % By OTA Site">
+          <HorizontalBarChart data={commissionData} valueFormatter={(v) => `${v.toFixed(1)}%`} />
+        </Card>
+      </div>
+
+      <Card title="ADR Before / After Commission By OTA Site">
+        <GroupedBarChart
+          data={adrData}
+          xKey="ota"
+          series={[
+            { key: "Before Commission", color: "var(--series-1)" },
+            { key: "After Commission", color: "var(--series-3)" },
+          ]}
+          valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`}
+        />
       </Card>
     </div>
   );

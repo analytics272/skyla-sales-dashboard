@@ -1,9 +1,11 @@
 "use client";
 
-// Global Property filter + the Today/This FY/Last Year comparison-period tab
-// (2026-09-02 redesign), synced to the URL so they survive refresh, are
-// shareable, and persist across tab navigation without needing a separate
-// store. Property stays multi-select; the period is a single active tab.
+// Global Property filter + the comparison-period tab (2026-09-02 redesign,
+// extended the same day to the reference dashboard's full 7-tab set), synced
+// to the URL so they survive refresh, are shareable, and persist across tab
+// navigation without needing a separate store. Property stays multi-select;
+// the period is a single active tab, with an optional custom date range when
+// period === "custom".
 import { createContext, useContext, useMemo, useCallback, ReactNode, Suspense } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { PeriodKey, isPeriodKey } from "@/lib/reference/period";
@@ -11,11 +13,15 @@ import { PeriodKey, isPeriodKey } from "@/lib/reference/period";
 export interface FiltersState {
   properties: string[]; // empty = all active properties
   period: PeriodKey;
+  customStart: string | null; // ISO date, only meaningful when period === "custom"
+  customEnd: string | null;
 }
 
 interface FiltersContextValue extends FiltersState {
   setProperties: (properties: string[]) => void;
   setPeriod: (period: PeriodKey) => void;
+  /** Sets period to "custom" and both bounds in one URL update. */
+  setCustomRange: (start: string, end: string) => void;
   resetAll: () => void;
 }
 
@@ -33,6 +39,8 @@ function FiltersProviderInner({ children }: { children: ReactNode }) {
 
   const periodRaw = searchParams.get("period");
   const period: PeriodKey = isPeriodKey(periodRaw) ? periodRaw : "this_fy";
+  const customStart = searchParams.get("start");
+  const customEnd = searchParams.get("end");
 
   const updateParams = useCallback(
     (updates: Record<string, string | undefined>) => {
@@ -49,10 +57,15 @@ function FiltersProviderInner({ children }: { children: ReactNode }) {
   const value: FiltersContextValue = {
     properties,
     period,
+    customStart,
+    customEnd,
     setProperties: (p) => updateParams({ property: p.length ? p.join(",") : undefined }),
-    setPeriod: (p) => updateParams({ period: p === "this_fy" ? undefined : p }),
+    // Switching away from "custom" clears any leftover start/end so they
+    // don't linger in the URL and silently resurrect on a later "Custom Range" click.
+    setPeriod: (p) => updateParams({ period: p === "this_fy" ? undefined : p, ...(p === "custom" ? {} : { start: undefined, end: undefined }) }),
+    setCustomRange: (start, end) => updateParams({ period: "custom", start, end }),
     // Back to defaults: all properties, "This FY".
-    resetAll: () => updateParams({ property: undefined, period: undefined }),
+    resetAll: () => updateParams({ property: undefined, period: undefined, start: undefined, end: undefined }),
   };
 
   return <FiltersContext.Provider value={value}>{children}</FiltersContext.Provider>;

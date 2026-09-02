@@ -23,7 +23,7 @@ export default async function BookingPage({ searchParams }: { searchParams: Prom
   const sp = await searchParams;
   const filter = parseKpiFilter(sp);
   const resolved = resolveFilter(filter);
-  const b2bFy = resolveB2bFy(filter.period);
+  const b2bFy = resolveB2bFy(filter);
 
   const [
     bookingStats,

@@ -43,10 +43,10 @@ function SidebarContent({ lastUpdated, onNavigate }: { lastUpdated: string | nul
 
   return (
     <>
-      <div className="flex flex-col items-center gap-2 px-4 pb-6 pt-8 text-center">
-        <Image src="/skyla-icon.png" alt="Skyla Collective" width={932} height={899} className="h-14 w-auto" priority />
-        <div>
-          <p className="text-sm font-semibold tracking-wide">SKYLA COLLECTIVE</p>
+      <div className="flex items-center gap-3 px-4 pb-6 pt-8">
+        <Image src="/skyla-icon.png" alt="Skyla Collective" width={932} height={899} className="h-9 w-auto shrink-0" priority />
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold tracking-wide">Skyla Collective</p>
           <p className="text-[10px] uppercase tracking-widest text-teal-300">Sales Dashboard</p>
         </div>
       </div>

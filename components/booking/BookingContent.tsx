@@ -7,13 +7,18 @@ import {
 import type { B2bContractRanking, B2bTopAdrContract, RetentionPoint, B2bContractSummary } from "@/lib/bigquery/queries/b2bContracts";
 import StatTile from "@/components/ui/StatTile";
 import Card from "@/components/ui/Card";
-import Table, { TableColumn } from "@/components/ui/Table";
 import Expandable from "@/components/ui/Expandable";
 import SingleMetricBarChart, { BarDatum } from "@/components/charts/SingleMetricBarChart";
 import HorizontalBarChart from "@/components/charts/HorizontalBarChart";
 import DonutChart from "@/components/charts/DonutChart";
 import { formatIndianCurrency, formatPercent } from "@/lib/format/currency";
 import { ROOM_TYPE_COLOR, ROOM_TYPE_ORDER, CATEGORY_COLOR, CATEGORY_ORDER } from "@/lib/design/tokens";
+
+const CONTRACT_STATUS_COLOR: Record<string, string> = {
+  Contract: "var(--chart-delta-good)",
+  "No Contract": "#d97706",
+};
+const CONTRACT_STATUS_FALLBACK = "var(--chart-baseline)";
 
 export default function BookingContent({
   bookingStats,
@@ -63,20 +68,17 @@ export default function BookingContent({
     return { name: rt, value: row?.nights ?? 0, color: ROOM_TYPE_COLOR[rt] ?? "var(--chart-baseline)" };
   });
 
-  const rankingColumns: TableColumn<B2bContractRanking>[] = [
-    { key: "company", header: "Company", render: (r) => r.company },
-    { key: "status", header: "Contract Status", render: (r) => r.contractStatus ?? "—" },
-    { key: "nights", header: "Nights", align: "right", render: (r) => r.nights.toLocaleString("en-IN") },
-    { key: "revenue", header: "Room Revenue", align: "right", render: (r) => formatIndianCurrency(r.roomRevenue) },
-    { key: "adr", header: "ADR", align: "right", render: (r) => (r.adr !== null ? `₹${Math.round(r.adr).toLocaleString("en-IN")}` : "—") },
-    { key: "contribution", header: "Contribution %", align: "right", render: (r) => (r.contributionPct !== null ? formatPercent(r.contributionPct, 0) : "—") },
-  ];
-
-  const adrColumns: TableColumn<B2bTopAdrContract>[] = [
-    { key: "company", header: "Company", render: (r) => r.company },
-    { key: "adr", header: "Avg ADR", align: "right", render: (r) => `₹${Math.round(r.avgAdr).toLocaleString("en-IN")}` },
-    { key: "nights", header: "Nights", align: "right", render: (r) => r.nights.toLocaleString("en-IN") },
-  ];
+  const b2bRevenueData: BarDatum[] = b2bRanking.map((r) => ({
+    name: r.company,
+    value: r.roomRevenue,
+    color: CONTRACT_STATUS_COLOR[r.contractStatus ?? ""] ?? CONTRACT_STATUS_FALLBACK,
+  }));
+  const b2bContributionData: BarDatum[] = [...b2bRanking]
+    .filter((r) => r.contributionPct !== null)
+    .sort((a, b) => (b.contributionPct ?? 0) - (a.contributionPct ?? 0))
+    .slice(0, 15)
+    .map((r) => ({ name: r.company, value: (r.contributionPct ?? 0) * 100, color: "var(--series-1)" }));
+  const b2bAdrData: BarDatum[] = b2bTopAdr.map((r) => ({ name: r.company, value: r.avgAdr, color: "var(--series-4)" }));
 
   const categoriesPresent = CATEGORY_ORDER.filter((c) => categoryMix.some((m) => m.category === c));
   const revenueDonut = categoriesPresent.map((c) => {
@@ -171,21 +173,24 @@ export default function BookingContent({
         </div>
 
         <div className="mt-3">
-          <Card title={`Contract Status & Ranking (${b2bRanking.length} Companies)`}>
+          <Card title={`Revenue By Company (${b2bRanking.length})`} subtitle="Green = under contract · Amber = no contract">
             <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-2">
               <StatTile label="Contract Revenue Achieved" value={formatIndianCurrency(b2bContractSummary.totalContractRevenue)} sub="Contract_Status = Contract only, not total company revenue" />
               <StatTile label="Companies Under Contract" value={b2bContractSummary.contractCompanyCount.toLocaleString("en-IN")} />
             </div>
             <Expandable collapsedHeight={420} label={`Show all ${b2bRanking.length} companies`}>
-              <Table columns={rankingColumns} rows={b2bRanking} rowKey={(r) => r.company} />
+              <HorizontalBarChart data={b2bRevenueData} valueFormatter={(v) => formatIndianCurrency(v)} labelWidth={140} />
             </Expandable>
           </Card>
         </div>
 
-        <div className="mt-3">
-          <Card title="Top ADR Contracts (Min. 1 Night)">
+        <div className="mt-3 grid gap-4 lg:grid-cols-2">
+          <Card title="Top Contribution % By Company" subtitle="Share of Skyla's total revenue, top 15">
+            <HorizontalBarChart data={b2bContributionData} valueFormatter={(v) => `${v.toFixed(0)}%`} labelWidth={140} />
+          </Card>
+          <Card title="Top ADR Contracts" subtitle="Minimum 1 night">
             <Expandable collapsedHeight={420} label={`Show all ${b2bTopAdr.length}`}>
-              <Table columns={adrColumns} rows={b2bTopAdr} rowKey={(r) => r.company} />
+              <HorizontalBarChart data={b2bAdrData} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} labelWidth={140} />
             </Expandable>
           </Card>
         </div>

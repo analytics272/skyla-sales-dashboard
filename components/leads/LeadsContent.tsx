@@ -1,17 +1,17 @@
 "use client";
 
-import { LeadsSummary, LeadsMoMSeries, LeadsByGroup, FormatLeadsRevenue, AdrByFormat, LostLeadReason, OwnerLeadStats, OwnerLeadStatsResult } from "@/lib/bigquery/queries/leads";
+import { LeadsSummary, LeadsMoMSeries, LeadsByGroup, FormatLeadsRevenue, AdrByFormat, LostLeadReason, OwnerLeadStatsResult } from "@/lib/bigquery/queries/leads";
 import StatTile from "@/components/ui/StatTile";
 import Card from "@/components/ui/Card";
-import Table, { TableColumn } from "@/components/ui/Table";
 import Expandable from "@/components/ui/Expandable";
-import ProgressBar from "@/components/ui/ProgressBar";
+import EntityCard from "@/components/ui/EntityCard";
 import HorizontalBarChart from "@/components/charts/HorizontalBarChart";
 import { BarDatum } from "@/components/charts/SingleMetricBarChart";
 import GroupedBarChart from "@/components/charts/GroupedBarChart";
 import DonutChart from "@/components/charts/DonutChart";
 import { formatIndianCurrency, formatPercent } from "@/lib/format/currency";
 import { TARGET_VS_ACHIEVED_COLOR } from "@/lib/design/tokens";
+import { LOST_REASON_DESCRIPTIONS } from "@/lib/reference/lostLeadReasons";
 
 const RANKING_COLOR = "var(--series-1)";
 const LOST_REASON_PALETTE = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--series-4)", "var(--series-5)", "var(--chart-baseline)"];
@@ -52,6 +52,8 @@ export default function LeadsContent({
 
   const lostDonut = lostReasons.map((r, i) => ({ name: r.stage, value: r.count, color: LOST_REASON_PALETTE[i % LOST_REASON_PALETTE.length] }));
 
+  const ownerRevenueData: BarDatum[] = byOwner.rows.map((r) => ({ name: r.owner, value: r.revenue, color: RANKING_COLOR }));
+
   const momLen = Math.max(mom.current.length, mom.previous.length);
   const momData = Array.from({ length: momLen }, (_, i) => {
     const c = mom.current[i];
@@ -63,29 +65,6 @@ export default function LeadsContent({
       previousTotal: p?.totalLeads ?? 0,
     };
   });
-
-  const ownerColumns: TableColumn<OwnerLeadStats>[] = [
-    { key: "owner", header: "Owner", render: (r) => r.owner },
-    { key: "revenue", header: "Revenue", align: "right", render: (r) => formatIndianCurrency(r.revenue) },
-    { key: "total", header: "Total Leads", align: "right", render: (r) => r.totalLeads.toLocaleString("en-IN") },
-    { key: "closed", header: "Closed Leads", align: "right", render: (r) => r.closedLeads.toLocaleString("en-IN") },
-    {
-      key: "closedPct",
-      header: "Closed %",
-      align: "right",
-      render: (r) => (
-        <div className="flex items-center justify-end gap-2">
-          <span className="w-16"><ProgressBar pct={r.closedPct ?? 0} good={0.6} warn={0.35} /></span>
-          <span className="tabular-nums">{r.closedPct !== null ? formatPercent(r.closedPct) : "—"}</span>
-        </div>
-      ),
-    },
-    { key: "exotel", header: "Exotel Leads", align: "right", render: (r) => r.exotelLeads.toLocaleString("en-IN") },
-    { key: "exotelClosed", header: "Exotel Closed", align: "right", render: (r) => r.exotelClosed.toLocaleString("en-IN") },
-    { key: "reference", header: "Reference", align: "right", render: (r) => r.referenceLeads.toLocaleString("en-IN") },
-    { key: "existing", header: "Existing Leads", align: "right", render: (r) => r.existingLeads.toLocaleString("en-IN") },
-    { key: "adr", header: "ADR", align: "right", render: (r) => (r.adr !== null ? `₹${Math.round(r.adr).toLocaleString("en-IN")}` : "—") },
-  ];
 
   return (
     <div className="space-y-6">
@@ -170,11 +149,48 @@ export default function LeadsContent({
 
       <Card title="Lost Leads Reasons">
         <DonutChart data={lostDonut} valueFormatter={(v) => v.toLocaleString("en-IN")} />
+        <div className="mt-3 space-y-1.5 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+          {lostReasons.map((r) => (
+            <p key={r.stage} className="text-xs text-zinc-500 dark:text-zinc-400">
+              <span className="font-medium text-zinc-700 dark:text-zinc-200">{r.stage}</span>
+              {LOST_REASON_DESCRIPTIONS[r.stage] && ` — ${LOST_REASON_DESCRIPTIONS[r.stage]}`}
+            </p>
+          ))}
+        </div>
       </Card>
 
-      <Card title={`By Owner (${byOwner.rows.length})`}>
-        <Table columns={ownerColumns} rows={byOwner.rows} rowKey={(r) => r.owner} footerRow={byOwner.total} />
-      </Card>
+      <div>
+        <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">By Owner ({byOwner.rows.length})</h3>
+        <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <StatTile label="Total Revenue" value={formatIndianCurrency(byOwner.total.revenue)} />
+          <StatTile label="Total Leads" value={byOwner.total.totalLeads.toLocaleString("en-IN")} />
+          <StatTile
+            label="Closed %"
+            value={byOwner.total.closedPct !== null ? formatPercent(byOwner.total.closedPct) : "—"}
+            progress={byOwner.total.closedPct !== null ? { pct: byOwner.total.closedPct, good: 0.6, warn: 0.35 } : undefined}
+          />
+        </div>
+        <Card title="Revenue By Owner" subtitle="Total revenue attributed to each owner">
+          <HorizontalBarChart data={ownerRevenueData} valueFormatter={(v) => formatIndianCurrency(v)} />
+        </Card>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {byOwner.rows.map((r) => (
+            <EntityCard
+              key={r.owner}
+              name={r.owner}
+              headlineLabel="Revenue"
+              headline={formatIndianCurrency(r.revenue)}
+              progress={r.closedPct !== null ? { pct: r.closedPct, good: 0.6, warn: 0.35, label: `${formatPercent(r.closedPct)} of ${r.totalLeads.toLocaleString("en-IN")} leads closed` } : undefined}
+              stats={[
+                { label: "Exotel", value: `${r.exotelLeads.toLocaleString("en-IN")} / ${r.exotelClosed.toLocaleString("en-IN")} closed` },
+                { label: "Reference", value: r.referenceLeads.toLocaleString("en-IN") },
+                { label: "Existing", value: r.existingLeads.toLocaleString("en-IN") },
+                { label: "ADR", value: r.adr !== null ? `₹${Math.round(r.adr).toLocaleString("en-IN")}` : "—" },
+              ]}
+            />
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
