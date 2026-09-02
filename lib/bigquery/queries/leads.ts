@@ -13,7 +13,7 @@
 // 2026-09-02: rewritten for the Today/This FY/Last Year period-tabs model —
 // scoped by a plain date range instead of FY-label/fiscal-month matching.
 import { runQuery, table } from "../client";
-import { DateRange } from "@/lib/reference/financialYear";
+import { DateRange, fyStartYearSqlExpr, fyLabel } from "@/lib/reference/financialYear";
 import { PeriodFilter, resolvePeriodFromFilter } from "@/lib/reference/period";
 import { safeDivide } from "@/lib/format/currency";
 import { ComparisonMetric } from "./overview";
@@ -103,18 +103,23 @@ const LEADS_SUMMARY_SQL = (where: string) => `
 export async function getLeadsSummary(filter: LeadsFilter): Promise<LeadsSummary> {
   const period = resolvePeriodFromFilter(filter);
   const { clause, params } = whereForRange(period.current, filter.properties);
-  const { clause: prevClause, params: prevParams } = whereForRange(period.previous, filter.properties);
 
+  // Comparisons are opt-in — skip the previous-period query entirely unless compareYoY is on.
   const [rows, prevRows] = await Promise.all([
     runQuery<LeadsSummaryRow>(LEADS_SUMMARY_SQL(clause), params),
-    runQuery<LeadsSummaryRow>(LEADS_SUMMARY_SQL(prevClause), prevParams),
+    filter.compareYoY
+      ? (() => {
+          const { clause: prevClause, params: prevParams } = whereForRange(period.previous, filter.properties);
+          return runQuery<LeadsSummaryRow>(LEADS_SUMMARY_SQL(prevClause), prevParams);
+        })()
+      : Promise.resolve(null),
   ]);
 
   const empty: LeadsSummaryRow = { total_leads: 0, closed_leads: 0, new_leads: 0, b2c_leads_closed: 0, existing_closed_leads: 0, reference_closed_leads: 0, revenue: 0 };
   const r = rows[0] ?? empty;
-  const pr = prevRows[0] ?? empty;
+  const pr = prevRows ? prevRows[0] ?? empty : null;
   const conversionRate = safeDivide(r.closed_leads, r.total_leads);
-  const prevConversionRate = safeDivide(pr.closed_leads, pr.total_leads);
+  const prevConversionRate = pr ? safeDivide(pr.closed_leads, pr.total_leads) : null;
 
   return {
     totalLeads: r.total_leads,
@@ -127,16 +132,24 @@ export async function getLeadsSummary(filter: LeadsFilter): Promise<LeadsSummary
     revenue: r.revenue ?? 0,
     conversionRate,
     comparison: {
-      totalLeads: comparisonMetric(r.total_leads, pr.total_leads),
-      revenue: comparisonMetric(r.revenue ?? 0, pr.revenue ?? 0),
+      totalLeads: comparisonMetric(r.total_leads, pr ? pr.total_leads : null),
+      revenue: comparisonMetric(r.revenue ?? 0, pr ? pr.revenue ?? 0 : null),
       conversionRate: comparisonMetric(conversionRate, prevConversionRate),
     },
   };
 }
 
-export interface LeadsMoMPoint {
-  monthStartDate: string;
-  monthLabel: string;
+// Item #2 (2026-09-02, sixth pass): "Leads MoM" drills from day -> month ->
+// FY instead of being locked to one grain. All three grains share one query
+// shape (bucket + total/closed counts); day and month bucket on a truncated
+// DATE (sorts naturally as an ISO string), FY buckets on the fiscal start
+// year (sorts naturally as a zero-padded number string) since a calendar
+// DATE_TRUNC has no fiscal-year unit.
+export type LeadsTrendGranularity = "day" | "month" | "fy";
+
+export interface LeadsTrendPoint {
+  bucketKey: string; // sort key — ISO date (day/month) or zero-padded FY start year (fy)
+  label: string; // display label, e.g. "2 Sep 2026" / "Sep 2026" / "FY 26-27"
   totalLeads: number;
   closedLeads: number;
 }
@@ -146,32 +159,58 @@ function monthLabelOf(iso: string): string {
   const d = new Date(`${iso}T00:00:00`);
   return `${MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}`;
 }
+function dayLabelOf(iso: string): string {
+  const d = new Date(`${iso}T00:00:00`);
+  return `${d.getDate()} ${MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}`;
+}
 
-async function leadsMoMForRange(range: DateRange, properties?: string[]): Promise<LeadsMoMPoint[]> {
+async function leadsTrendForRange(range: DateRange, properties: string[] | undefined, granularity: LeadsTrendGranularity): Promise<LeadsTrendPoint[]> {
   const { clause, params } = whereForRange(range, properties);
-  const rows = await runQuery<{ month_start: string; total_leads: number; closed_leads: number }>(`
+
+  if (granularity === "fy") {
+    const rows = await runQuery<{ fy_start: number; total_leads: number; closed_leads: number }>(`
+      SELECT
+        ${fyStartYearSqlExpr("CAST(date AS DATE)")} AS fy_start,
+        COUNT(*) AS total_leads,
+        COUNTIF(Stage = 'Closed') AS closed_leads
+      FROM ${table("lead_tracker")}
+      WHERE ${clause}
+      GROUP BY fy_start
+      ORDER BY fy_start
+    `, params);
+    return rows.map((r) => ({ bucketKey: String(r.fy_start).padStart(4, "0"), label: fyLabel(r.fy_start), totalLeads: r.total_leads, closedLeads: r.closed_leads }));
+  }
+
+  const truncUnit = granularity === "day" ? "DAY" : "MONTH";
+  const rows = await runQuery<{ bucket: string; total_leads: number; closed_leads: number }>(`
     SELECT
-      CAST(DATE_TRUNC(date, MONTH) AS STRING) AS month_start,
+      CAST(DATE_TRUNC(CAST(date AS DATE), ${truncUnit}) AS STRING) AS bucket,
       COUNT(*) AS total_leads,
       COUNTIF(Stage = 'Closed') AS closed_leads
     FROM ${table("lead_tracker")}
     WHERE ${clause}
-    GROUP BY month_start
-    ORDER BY month_start
+    GROUP BY bucket
+    ORDER BY bucket
   `, params);
-  return rows.map((r) => ({ monthStartDate: r.month_start, monthLabel: monthLabelOf(r.month_start), totalLeads: r.total_leads, closedLeads: r.closed_leads }));
+  return rows.map((r) => ({
+    bucketKey: r.bucket,
+    label: granularity === "day" ? dayLabelOf(r.bucket) : monthLabelOf(r.bucket),
+    totalLeads: r.total_leads,
+    closedLeads: r.closed_leads,
+  }));
 }
 
-export interface LeadsMoMSeries {
-  current: LeadsMoMPoint[];
-  previous: LeadsMoMPoint[];
+export interface LeadsTrendSeries {
+  current: LeadsTrendPoint[];
+  /** Same-period-last-year comparison — only populated when compareYoY is on (comparisons are opt-in, item #7). */
+  previous: LeadsTrendPoint[];
 }
 
-export async function getLeadsMoM(filter: LeadsFilter): Promise<LeadsMoMSeries> {
+export async function getLeadsTrend(filter: LeadsFilter, granularity: LeadsTrendGranularity): Promise<LeadsTrendSeries> {
   const period = resolvePeriodFromFilter(filter);
   const [current, previous] = await Promise.all([
-    leadsMoMForRange(period.current, filter.properties),
-    leadsMoMForRange(period.previous, filter.properties),
+    leadsTrendForRange(period.current, filter.properties, granularity),
+    filter.compareYoY ? leadsTrendForRange(period.previous, filter.properties, granularity) : Promise.resolve([]),
   ]);
   return { current, previous };
 }

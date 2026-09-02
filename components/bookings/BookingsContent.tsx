@@ -116,6 +116,17 @@ export default function BookingsContent({
     .map((r) => ({ name: r.company, value: (r.contributionPct ?? 0) * 100, color: "var(--series-1)" }));
   const b2bAdrData: BarDatum[] = b2bTopAdr.map((r) => ({ name: r.company, value: r.avgAdr, color: "var(--series-4)" }));
 
+  // Item #10: the two raw StatTiles here (a revenue figure and a company
+  // count — different units, hard to compare at a glance) are replaced by
+  // one donut reading "what share of B2B revenue is contractually secured",
+  // which is the actual question those two numbers were trying to answer.
+  const totalB2bRevenue = b2bRanking.reduce((s, r) => s + r.roomRevenue, 0);
+  const noContractRevenue = Math.max(0, totalB2bRevenue - b2bContractSummary.totalContractRevenue);
+  const contractShareDonut = [
+    { name: "Contract", value: b2bContractSummary.totalContractRevenue, color: CONTRACT_STATUS_COLOR.Contract },
+    { name: "No Contract", value: noContractRevenue, color: CONTRACT_STATUS_COLOR["No Contract"] },
+  ];
+
   const retentionData: BarDatum[] = b2bRetention.map((r) => ({
     name: `${r.fromFy} → ${r.toFy}`,
     value: r.retentionPct !== null ? r.retentionPct * 100 : 0,
@@ -136,7 +147,7 @@ export default function BookingsContent({
   }));
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <div>
         <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           <StatTile
@@ -145,13 +156,14 @@ export default function BookingsContent({
             delta={bookingStats.comparison.totalBookings.pctChange !== null ? { pct: bookingStats.comparison.totalBookings.pctChange * 100, label: "vs previous" } : undefined}
           />
           <StatTile
-            label="Guests Served"
+            label="Guest Nights Served"
             value={bookingStats.guestsServed.toLocaleString("en-IN")}
+            sub="Sum of guests across every night stayed — see Guest Served card below"
             delta={bookingStats.comparison.guestsServed.pctChange !== null ? { pct: bookingStats.comparison.guestsServed.pctChange * 100, label: "vs previous" } : undefined}
           />
           <StatTile label="ALOS" value={bookingStats.alos !== null ? `${bookingStats.alos.toFixed(1)} nights` : "—"} />
           <StatTile
-            label="Revenue Per Guest"
+            label="Revenue Per Guest-Night"
             value={bookingStats.revenuePerGuest !== null ? `₹${Math.round(bookingStats.revenuePerGuest).toLocaleString("en-IN")}` : "—"}
           />
           <StatTile
@@ -168,13 +180,18 @@ export default function BookingsContent({
       </div>
 
       <Card title="Guest Served — Sheet Vs BigQuery" subtitle={`One-time accuracy snapshot, ${guestServedAccuracy.label} — not scoped by the period filter above`}>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-          <StatTile label="BigQuery (API sync)" value={guestServedAccuracy.totalBigQuery.toLocaleString("en-IN")} />
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <StatTile label="BigQuery (guest-nights)" value={guestServedAccuracy.totalBigQuery.toLocaleString("en-IN")} />
           <StatTile label="Sheet (manual PMS extract)" value={guestServedAccuracy.totalSheet.toLocaleString("en-IN")} />
           <StatTile
             label="Variance"
             value={guestServedAccuracy.totalVariancePct !== null ? formatPercent(guestServedAccuracy.totalVariancePct, 0) : "—"}
             delta={guestServedAccuracy.totalVariancePct !== null ? { pct: guestServedAccuracy.totalVariancePct * 100, label: "BigQuery vs Sheet", upIsGood: true } : undefined}
+          />
+          <StatTile
+            label="Data Error Rate"
+            value={guestServedAccuracy.dataErrorRatePct !== null ? formatPercent(guestServedAccuracy.dataErrorRatePct, 1) : "—"}
+            sub="Residual gap after correcting the guest-count formula (below)"
           />
         </div>
         <div className="mt-3 grid grid-cols-2 gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800 sm:grid-cols-5">
@@ -182,16 +199,17 @@ export default function BookingsContent({
             <div key={r.property}>
               <p className="text-[10px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500">{r.property}</p>
               <p className="text-xs text-zinc-700 dark:text-zinc-200">{r.bigQuery.toLocaleString("en-IN")} / {r.sheet.toLocaleString("en-IN")}</p>
-              <p className="text-xs font-medium" style={{ color: r.variancePct !== null && r.variancePct < -0.2 ? "var(--chart-delta-bad)" : "var(--chart-delta-good)" }}>
+              <p className="text-xs font-medium" style={{ color: r.variancePct !== null && Math.abs(r.variancePct) > 0.1 ? "var(--chart-delta-bad)" : "var(--chart-delta-good)" }}>
                 {r.variancePct !== null ? formatPercent(r.variancePct, 0) : "—"}
               </p>
             </div>
           ))}
         </div>
         <p className="mt-3 text-[11px] text-zinc-400 dark:text-zinc-500">
-          BigQuery consistently runs lower than the sheet across every property — that pattern looks more like a different Guest Served definition
-          between the two sources (e.g. total guest-nights vs. peak per-booking occupancy) than a specific number of bookings missing from the sync.
-          Shown as measured; root cause not confirmed.
+          Root cause confirmed: BigQuery previously summed each booking&apos;s peak occupancy once (MAX guests per booking), undercounting the sheet
+          by ~82%. NoOfGuest itself already matches Adult+Child exactly on every row checked — the pax figure per night was never wrong. Summing
+          guests across every night of stay instead (guest-nights, matching the sheet&apos;s own convention) closes nearly all of the gap; the
+          Data Error Rate above is what&apos;s left after that fix.
         </p>
       </Card>
 
@@ -216,21 +234,24 @@ export default function BookingsContent({
         </div>
       </div>
 
-      <TabbedCard title="Revenue Mix" tabs={MIX_TABS} active={mixTab} onChange={setMixTab}>
-        {mixTab === "Category" ? (
-          <DonutChart data={revenueDonut} valueFormatter={(v) => formatIndianCurrency(v)} />
-        ) : (
-          <DonutChart data={nightsShareDonut} valueFormatter={(v) => v.toLocaleString("en-IN")} />
-        )}
-      </TabbedCard>
+      {/* Item #9/#11: paired side by side instead of full-width stacked. */}
+      <div className="grid gap-3 lg:grid-cols-2">
+        <TabbedCard title="Revenue Mix" tabs={MIX_TABS} active={mixTab} onChange={setMixTab}>
+          {mixTab === "Category" ? (
+            <DonutChart data={revenueDonut} valueFormatter={(v) => formatIndianCurrency(v)} />
+          ) : (
+            <DonutChart data={nightsShareDonut} valueFormatter={(v) => v.toLocaleString("en-IN")} />
+          )}
+        </TabbedCard>
 
-      <TabbedCard title="By Room Format" tabs={FORMAT_TABS} active={formatTab} onChange={setFormatTab}>
-        {formatTab === "Revenue" ? (
-          <HorizontalBarChart data={revenueByFormat} valueFormatter={(v) => formatIndianCurrency(v)} />
-        ) : (
-          <HorizontalBarChart data={adrByFormat} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} />
-        )}
-      </TabbedCard>
+        <TabbedCard title="By Room Format" tabs={FORMAT_TABS} active={formatTab} onChange={setFormatTab}>
+          {formatTab === "Revenue" ? (
+            <HorizontalBarChart data={revenueByFormat} valueFormatter={(v) => formatIndianCurrency(v)} />
+          ) : (
+            <HorizontalBarChart data={adrByFormat} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} />
+          )}
+        </TabbedCard>
+      </div>
 
       <div>
         <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">B2B Contracts</h3>
@@ -243,9 +264,12 @@ export default function BookingsContent({
 
         <div className="mt-3">
           <Card title={`Revenue By Company (${b2bRanking.length})`} subtitle="Green = under contract · Amber = no contract">
-            <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-2">
-              <StatTile label="Contract Revenue Achieved" value={formatIndianCurrency(b2bContractSummary.totalContractRevenue)} sub="Contract_Status = Contract only, not total company revenue" />
-              <StatTile label="Companies Under Contract" value={b2bContractSummary.contractCompanyCount.toLocaleString("en-IN")} />
+            <div className="mb-3 flex flex-col gap-3 border-b border-zinc-100 pb-3 dark:border-zinc-800 sm:flex-row sm:items-center">
+              <DonutChart data={contractShareDonut} valueFormatter={(v) => formatIndianCurrency(v)} height={140} innerRadiusRatio={0.58} />
+              <p className="text-xs text-zinc-400 dark:text-zinc-500 sm:ml-2">
+                {b2bContractSummary.contractCompanyCount.toLocaleString("en-IN")} of {b2bRanking.length.toLocaleString("en-IN")} companies under contract.
+                Contract revenue reflects Contract_Status = Contract rows only, not each company&apos;s total revenue.
+              </p>
             </div>
             <Treemap data={b2bRevenueData} valueFormatter={(v) => formatIndianCurrency(v)} height={360} />
           </Card>

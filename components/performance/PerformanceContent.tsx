@@ -91,17 +91,17 @@ export default function PerformanceContent({
   const activeReviewTrend = reviewsTab === "Google" ? googleTrend : otaTrend;
 
   return (
-    <div className="space-y-6">
-      <div>
-        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-2">
-          <StatTile
-            label="Revenue Achievement"
-            value={revenueAchievement.achievedPct !== null ? formatPercent(revenueAchievement.achievedPct) : "—"}
-            sub={`${formatIndianCurrency(revenueAchievement.achieved)} of ${formatIndianCurrency(revenueAchievement.target)}`}
-            progress={revenueAchievement.achievedPct !== null ? { pct: revenueAchievement.achievedPct } : undefined}
-          />
-          <StatTile label="Target" value={formatIndianCurrency(revenueAchievement.target)} />
-        </div>
+    <div className="space-y-4">
+      {/* Item #5: "Target" dropped as its own tile — its value was already
+          restated in this tile's own sub-text, so the two cards were showing
+          the same number twice. */}
+      <div className="mt-3 sm:max-w-sm">
+        <StatTile
+          label="Revenue Achievement"
+          value={revenueAchievement.achievedPct !== null ? formatPercent(revenueAchievement.achievedPct) : "—"}
+          sub={`${formatIndianCurrency(revenueAchievement.achieved)} of ${formatIndianCurrency(revenueAchievement.target)}`}
+          progress={revenueAchievement.achievedPct !== null ? { pct: revenueAchievement.achievedPct } : undefined}
+        />
       </div>
 
       <div>

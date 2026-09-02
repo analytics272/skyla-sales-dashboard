@@ -97,9 +97,11 @@ export interface TrendSeries {
 export async function getMonthlyTrends(filter: KpiFilter): Promise<TrendSeries> {
   const resolved = resolveFilter(filter);
   const includeLp = resolved.properties.includes(LP_PROPERTY);
+  // Comparisons are opt-in (compareYoY toggle) — don't even query the
+  // previous-period series unless the user turned it on.
   const [current, previous] = await Promise.all([
     fetchMonthlyPoints(resolved.properties, resolved.period.current, includeLp),
-    fetchMonthlyPoints(resolved.properties, resolved.period.previous, includeLp),
+    filter.compareYoY ? fetchMonthlyPoints(resolved.properties, resolved.period.previous, includeLp) : Promise.resolve([]),
   ]);
   return { current, previous };
 }

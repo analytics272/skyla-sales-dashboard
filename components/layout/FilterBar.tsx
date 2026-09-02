@@ -32,14 +32,18 @@ function CustomRangePopover({ onClose }: { onClose: () => void }) {
       <div className="flex items-center gap-2">
         <label className="text-xs text-zinc-500 dark:text-zinc-400">
           From
-          {/* No `max` here: sales_booking legitimately holds forward/advance
-              bookings with a future StayDate (see Remaining Room Nights),
-              so a custom range ending after today is a real, valid query —
-              clamping it to today was the "stopped working after Sept 2nd" bug. */}
+          {/* No `min`/`max` tying these two fields to each other: an earlier
+              version set the "From" field's max to the "To" field's current
+              value (defaulting to today), which silently blocked picking any
+              "From" date past today until "To" was extended first — the
+              "stopped working after Sept 2nd" bug. Order of entry no longer
+              matters; out-of-order values are normalized below on Apply.
+              sales_booking legitimately holds forward/advance bookings with a
+              future StayDate (see Remaining Room Nights), so a range entirely
+              in the future, or spanning any past/future year, is valid. */}
           <input
             type="date"
             value={start}
-            max={end}
             onChange={(e) => setStart(e.target.value)}
             className="ml-2 rounded border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-800 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
           />
@@ -49,7 +53,6 @@ function CustomRangePopover({ onClose }: { onClose: () => void }) {
           <input
             type="date"
             value={end}
-            min={start}
             onChange={(e) => setEnd(e.target.value)}
             className="ml-2 rounded border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-800 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
           />
@@ -58,7 +61,10 @@ function CustomRangePopover({ onClose }: { onClose: () => void }) {
       <button
         type="button"
         onClick={() => {
-          setCustomRange(start, end);
+          // Normalize here instead of constraining the inputs live — if the
+          // user picked them out of order, swap rather than reject.
+          const [from, to] = start <= end ? [start, end] : [end, start];
+          setCustomRange(from, to);
           onClose();
         }}
         className="rounded-md bg-teal-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-teal-800"
