@@ -1,9 +1,12 @@
 "use client";
 
-import { LeadsSummary, LeadsMoMSeries, LeadsByGroup, FormatLeadsRevenue, AdrByFormat, LostLeadReason, OwnerLeadStatsResult, OwnerSourceCell } from "@/lib/bigquery/queries/leads";
+import { useState } from "react";
+import clsx from "clsx";
+import { LeadsSummary, LeadsTrendSeries, LeadsTrendPoint, LeadsByGroup, FormatLeadsRevenue, AdrByFormat, LostLeadReason, OwnerLeadStatsResult, OwnerSourceCell } from "@/lib/bigquery/queries/leads";
 import StatTile from "@/components/ui/StatTile";
 import Card from "@/components/ui/Card";
-import EntityCard from "@/components/ui/EntityCard";
+import TabbedCard, { useTabbedCard } from "@/components/ui/TabbedCard";
+import ProgressBar from "@/components/ui/ProgressBar";
 import HorizontalBarChart from "@/components/charts/HorizontalBarChart";
 import { BarDatum } from "@/components/charts/SingleMetricBarChart";
 import MultiSeriesLineChart from "@/components/charts/MultiSeriesLineChart";
@@ -18,9 +21,92 @@ const RANKING_COLOR = "var(--series-1)";
 const LOST_REASON_PALETTE = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--series-4)", "var(--series-5)", "var(--chart-baseline)"];
 const HEATMAP_TOP_SOURCES = 6;
 
+// Item #2 (2026-09-02, sixth pass): Leads MoM drills day -> month -> FY
+// instead of being locked to one grain — compact (month, ~200px) by default,
+// with an Expand toggle that reveals the grain tabs and a taller chart,
+// rather than a permanently-tall chart taking up space at every grain.
+type MomGranularity = "Day" | "Month" | "FY";
+const MOM_TABS: MomGranularity[] = ["Day", "Month", "FY"];
+
+function buildMomRows(current: LeadsTrendPoint[], previous: LeadsTrendPoint[], compareYoY: boolean) {
+  const len = compareYoY ? Math.max(current.length, previous.length) : current.length;
+  return Array.from({ length: len }, (_, i) => {
+    const c = current[i];
+    const p = previous[i];
+    return {
+      label: c?.label ?? p?.label ?? `#${i + 1}`,
+      total: c?.totalLeads ?? 0,
+      closed: c?.closedLeads ?? 0,
+      ...(compareYoY ? { previousTotal: p ? p.totalLeads : null } : {}),
+    };
+  });
+}
+
+function LeadsMoMCard({
+  momByDay,
+  momByMonth,
+  momByFy,
+  compareYoY,
+}: {
+  momByDay: LeadsTrendSeries;
+  momByMonth: LeadsTrendSeries;
+  momByFy: LeadsTrendSeries;
+  compareYoY: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [granularity, setGranularity] = useState<MomGranularity>("Month");
+  const active = granularity === "Day" ? momByDay : granularity === "FY" ? momByFy : momByMonth;
+  const rows = buildMomRows(active.current, active.previous, compareYoY);
+  const series = [
+    { key: "total", color: TARGET_VS_ACHIEVED_COLOR.target },
+    { key: "closed", color: TARGET_VS_ACHIEVED_COLOR.achieved },
+    ...(compareYoY ? [{ key: "previousTotal", color: "var(--chart-baseline)" }] : []),
+  ];
+
+  return (
+    <Card title="Leads MoM (Total Vs Closed)" subtitle={expanded ? `By ${granularity.toLowerCase()}` : "By month — expand to drill by day or FY"}>
+      <div className="mb-2 flex items-center justify-between">
+        {expanded ? (
+          <div role="tablist" className="flex items-center gap-1 rounded-full bg-zinc-100 p-1 dark:bg-zinc-900">
+            {MOM_TABS.map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                role="tab"
+                aria-selected={granularity === tab}
+                onClick={() => setGranularity(tab)}
+                className={clsx(
+                  "rounded-full px-3 py-1 text-xs font-semibold transition-colors",
+                  granularity === tab
+                    ? "bg-teal-700 text-white shadow-sm"
+                    : "text-zinc-600 hover:bg-white hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white"
+                )}
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <span />
+        )}
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="text-xs font-medium text-teal-700 hover:underline dark:text-teal-300"
+        >
+          {expanded ? "Collapse" : "Expand to drill down"}
+        </button>
+      </div>
+      <MultiSeriesLineChart data={rows} xKey="label" series={series} valueFormatter={(v) => v.toLocaleString("en-IN")} height={expanded ? 340 : 200} />
+    </Card>
+  );
+}
+
 export default function LeadsContent({
   summary,
-  mom,
+  momByDay,
+  momByMonth,
+  momByFy,
   byProperty,
   bySource,
   formatLeadsRevenue,
@@ -29,9 +115,12 @@ export default function LeadsContent({
   bookingPace,
   byOwner,
   byOwnerSource,
+  compareYoY,
 }: {
   summary: LeadsSummary;
-  mom: LeadsMoMSeries;
+  momByDay: LeadsTrendSeries;
+  momByMonth: LeadsTrendSeries;
+  momByFy: LeadsTrendSeries;
   byProperty: LeadsByGroup[];
   bySource: LeadsByGroup[];
   formatLeadsRevenue: FormatLeadsRevenue[];
@@ -40,6 +129,7 @@ export default function LeadsContent({
   bookingPace: number | null;
   byOwner: OwnerLeadStatsResult;
   byOwnerSource: OwnerSourceCell[];
+  compareYoY: boolean;
 }) {
   const existingTotal = bySource.find((s) => s.key === "Existing")?.count ?? 0;
   const referenceTotal = bySource.find((s) => s.key === "Reference")?.count ?? 0;
@@ -58,26 +148,18 @@ export default function LeadsContent({
 
   const ownerRevenueData: BarDatum[] = byOwner.rows.map((r) => ({ name: r.owner, value: r.revenue, color: RANKING_COLOR }));
 
+  const ownerTabs = byOwner.rows.map((r) => r.owner);
+  const [activeOwner, setActiveOwner] = useTabbedCard(ownerTabs);
+  const activeOwnerRow = byOwner.rows.find((r) => r.owner === activeOwner) ?? byOwner.rows[0];
+
   const heatmapOwners = byOwner.rows.map((r) => r.owner);
   const topSources = [...bySource].sort((a, b) => b.count - a.count).slice(0, HEATMAP_TOP_SOURCES).map((s) => s.key);
   const heatmapCells = byOwnerSource
     .filter((c) => heatmapOwners.includes(c.owner) && topSources.includes(c.source))
     .map((c) => ({ row: c.owner, col: c.source, value: c.count }));
 
-  const momLen = Math.max(mom.current.length, mom.previous.length);
-  const momData = Array.from({ length: momLen }, (_, i) => {
-    const c = mom.current[i];
-    const p = mom.previous[i];
-    return {
-      month: c?.monthLabel ?? p?.monthLabel ?? `#${i + 1}`,
-      total: c?.totalLeads ?? 0,
-      closed: c?.closedLeads ?? 0,
-      previousTotal: p?.totalLeads ?? 0,
-    };
-  });
-
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <div>
         <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           <StatTile
@@ -127,18 +209,7 @@ export default function LeadsContent({
         <div className="space-y-4">
           <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Lead Volume</h3>
 
-          <Card title="Leads MoM (Total Vs Closed)">
-            <MultiSeriesLineChart
-              data={momData}
-              xKey="month"
-              series={[
-                { key: "total", color: TARGET_VS_ACHIEVED_COLOR.target },
-                { key: "closed", color: TARGET_VS_ACHIEVED_COLOR.achieved },
-              ]}
-              valueFormatter={(v) => v.toLocaleString("en-IN")}
-              height={240}
-            />
-          </Card>
+          <LeadsMoMCard momByDay={momByDay} momByMonth={momByMonth} momByFy={momByFy} compareYoY={compareYoY} />
 
           <Card title="Leads By Property">
             <HorizontalBarChart data={propertyData} valueFormatter={(v) => v.toLocaleString("en-IN")} />
@@ -195,23 +266,31 @@ export default function LeadsContent({
             <Heatmap rows={heatmapOwners} cols={topSources} cells={heatmapCells} valueFormatter={(v) => v.toLocaleString("en-IN")} />
           </Card>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            {byOwner.rows.map((r) => (
-              <EntityCard
-                key={r.owner}
-                name={r.owner}
-                headlineLabel="Revenue"
-                headline={formatIndianCurrency(r.revenue)}
-                progress={r.closedPct !== null ? { pct: r.closedPct, good: 0.6, warn: 0.35, label: `${formatPercent(r.closedPct)} of ${r.totalLeads.toLocaleString("en-IN")} leads closed` } : undefined}
-                stats={[
-                  { label: "Exotel", value: `${r.exotelLeads.toLocaleString("en-IN")} / ${r.exotelClosed.toLocaleString("en-IN")} closed` },
-                  { label: "Reference", value: r.referenceLeads.toLocaleString("en-IN") },
-                  { label: "Existing", value: r.existingLeads.toLocaleString("en-IN") },
-                  { label: "ADR", value: r.adr !== null ? `₹${Math.round(r.adr).toLocaleString("en-IN")}` : "—" },
-                ]}
-              />
-            ))}
-          </div>
+          {/* Item #4: one owner's detail at a time via internal tabs, instead
+              of a grid of N always-visible cards (same pattern as Performance's
+              Property Detail card). */}
+          <TabbedCard title="By Owner Detail" tabs={ownerTabs} active={activeOwner} onChange={setActiveOwner}>
+            {activeOwnerRow && (
+              <>
+                <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">Revenue</p>
+                <p className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">{formatIndianCurrency(activeOwnerRow.revenue)}</p>
+                {activeOwnerRow.closedPct !== null && (
+                  <div className="mt-2">
+                    <ProgressBar pct={activeOwnerRow.closedPct} good={0.6} warn={0.35} />
+                    <p className="mt-1 text-[11px] text-zinc-400 dark:text-zinc-500">
+                      {formatPercent(activeOwnerRow.closedPct)} of {activeOwnerRow.totalLeads.toLocaleString("en-IN")} leads closed
+                    </p>
+                  </div>
+                )}
+                <div className="mt-3 grid grid-cols-2 gap-3 border-t border-zinc-100 pt-3 dark:border-zinc-800 sm:grid-cols-4">
+                  <StatTile label="Exotel" value={`${activeOwnerRow.exotelLeads.toLocaleString("en-IN")} / ${activeOwnerRow.exotelClosed.toLocaleString("en-IN")} closed`} />
+                  <StatTile label="Reference" value={activeOwnerRow.referenceLeads.toLocaleString("en-IN")} />
+                  <StatTile label="Existing" value={activeOwnerRow.existingLeads.toLocaleString("en-IN")} />
+                  <StatTile label="ADR" value={activeOwnerRow.adr !== null ? `₹${Math.round(activeOwnerRow.adr).toLocaleString("en-IN")}` : "—"} />
+                </div>
+              </>
+            )}
+          </TabbedCard>
         </div>
       </div>
     </div>

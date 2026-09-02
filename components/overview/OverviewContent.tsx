@@ -27,6 +27,7 @@ import TabbedCard, { useTabbedCard } from "@/components/ui/TabbedCard";
 import SingleMetricBarChart, { BarDatum } from "@/components/charts/SingleMetricBarChart";
 import MultiSeriesLineChart from "@/components/charts/MultiSeriesLineChart";
 import DonutChart from "@/components/charts/DonutChart";
+import ProgressBar from "@/components/ui/ProgressBar";
 import { formatIndianCurrency, formatPercent, safeDivide } from "@/lib/format/currency";
 import { CATEGORY_COLOR, CATEGORY_ORDER, BRAND_COLOR, BRAND_ORDER } from "@/lib/design/tokens";
 
@@ -49,7 +50,15 @@ function PaceComparison({ pace }: { pace: OccupancyPace }) {
           <p className="mt-1 text-lg font-semibold text-zinc-800 dark:text-zinc-100">
             {b.value !== null ? formatPercent(b.value, 0) : "—"}
           </p>
-          <p className="mt-0.5 text-[10px] text-zinc-400 dark:text-zinc-500">{b.note}</p>
+          {/* Item #9/#10: a fixed-color bar, not the green/amber/red target-vs-
+              achieved read — a low % on a still-forming future month is normal
+              pace, not a shortfall, so it shouldn't paint red. */}
+          {b.value !== null && (
+            <div className="mt-1.5 px-1">
+              <ProgressBar pct={b.value} color="var(--series-1)" height={5} />
+            </div>
+          )}
+          <p className="mt-1 text-[10px] text-zinc-400 dark:text-zinc-500">{b.note}</p>
         </div>
       ))}
     </div>
@@ -88,22 +97,29 @@ export default function OverviewContent({
   occupancyPace,
   monthlyTrends,
   brandOccupancy,
+  compareYoY,
 }: {
   overview: OverviewKpis;
   adrByProperty: PropertyAdr[];
   occupancyPace: OccupancyPace;
   monthlyTrends: TrendSeries;
   brandOccupancy: BrandOccupancy[];
+  compareYoY: boolean;
 }) {
   const { comparison } = overview;
   const [trendTab, setTrendTab] = useTabbedCard(TREND_TABS);
   const [mixTab, setMixTab] = useTabbedCard(MIX_TABS);
   const [rankTab, setRankTab] = useTabbedCard(RANK_TABS);
 
-  const trendSeries = [
-    { key: comparison.currentLabel, color: "var(--series-1)" },
-    { key: comparison.previousLabel, color: "var(--chart-baseline)" },
-  ];
+  // Comparisons are opt-in: with the toggle off, only the current-period
+  // line is drawn (no empty "Preceding period" legend entry for a series
+  // that was never queried); toggling on adds the same-period-last-year line.
+  const trendSeries = compareYoY
+    ? [
+        { key: comparison.currentLabel, color: "var(--series-1)" },
+        { key: comparison.previousLabel, color: "var(--chart-baseline)" },
+      ]
+    : [{ key: comparison.currentLabel, color: "var(--series-1)" }];
   const TREND_PICK: Record<TrendTab, { pick: (p: TrendSeries["current"][number]) => number | null; valueFormatter: (v: number) => string; yDomain?: [number, number]; yTicks?: number[] }> = {
     Revenue: { pick: (p) => p.revenue, valueFormatter: (v) => formatIndianCurrency(v) },
     Occupancy: {
@@ -136,7 +152,7 @@ export default function OverviewContent({
   }));
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatTile
@@ -162,7 +178,13 @@ export default function OverviewContent({
         />
       </div>
 
-      <TabbedCard title="Trends" subtitle={`${comparison.currentLabel} vs ${comparison.previousLabel}`} tabs={TREND_TABS} active={trendTab} onChange={setTrendTab}>
+      <TabbedCard
+        title="Trends"
+        subtitle={compareYoY ? `${comparison.currentLabel} vs ${comparison.previousLabel}` : comparison.currentLabel}
+        tabs={TREND_TABS}
+        active={trendTab}
+        onChange={setTrendTab}
+      >
         <MultiSeriesLineChart
           data={trendData}
           xKey="label"
@@ -174,23 +196,28 @@ export default function OverviewContent({
         />
       </TabbedCard>
 
-      <TabbedCard title="Business Category Mix" tabs={MIX_TABS} active={mixTab} onChange={setMixTab}>
-        {mixTab === "Revenue" ? (
-          <DonutChart data={revenueDonut} valueFormatter={(v) => formatIndianCurrency(v)} />
-        ) : (
-          <SingleMetricBarChart data={categoryAdrBars} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} />
-        )}
-      </TabbedCard>
+      {/* Item #9/#11: paired side by side instead of full-width stacked —
+          each was a single small chart in a card with a lot of unused
+          horizontal space on its own row. */}
+      <div className="grid gap-3 lg:grid-cols-2">
+        <TabbedCard title="Business Category Mix" tabs={MIX_TABS} active={mixTab} onChange={setMixTab}>
+          {mixTab === "Revenue" ? (
+            <DonutChart data={revenueDonut} valueFormatter={(v) => formatIndianCurrency(v)} />
+          ) : (
+            <SingleMetricBarChart data={categoryAdrBars} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} />
+          )}
+        </TabbedCard>
 
-      <TabbedCard title="ADR & Occupancy Ranking" tabs={RANK_TABS} active={rankTab} onChange={setRankTab}>
-        {rankTab === "By Property" ? (
-          <SingleMetricBarChart data={adrByPropertyData} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} height={240} />
-        ) : (
-          <SingleMetricBarChart data={brandData} valueFormatter={(v) => `${v.toFixed(0)}%`} height={240} />
-        )}
-      </TabbedCard>
+        <TabbedCard title="ADR & Occupancy Ranking" tabs={RANK_TABS} active={rankTab} onChange={setRankTab}>
+          {rankTab === "By Property" ? (
+            <SingleMetricBarChart data={adrByPropertyData} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} height={240} />
+          ) : (
+            <SingleMetricBarChart data={brandData} valueFormatter={(v) => `${v.toFixed(0)}%`} height={240} />
+          )}
+        </TabbedCard>
+      </div>
 
-      <Card title="Pace">
+      <Card title="Booking Pace" subtitle="Occupancy booked so far for each month — real-time, independent of the filters above">
         <PaceComparison pace={occupancyPace} />
       </Card>
 

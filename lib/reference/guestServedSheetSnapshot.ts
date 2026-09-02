@@ -11,13 +11,17 @@
 // matched, confirming the extraction lined up with the right row/columns
 // before trusting the Guest Served figures next to it.
 //
-// Caveat, kept visible in the UI, not just here: the resulting variance is
-// large and consistent (roughly 4-8x higher in the sheet, every property) in
-// a way that looks more like a different metric definition (e.g. total
-// guest-*nights* in the sheet vs. BigQuery's per-booking peak-occupancy
-// count) than a small number of bookings missing from the API sync. Shown
-// anyway, per explicit request — a real, measured gap is still worth
-// surfacing even without a confirmed root cause; the card says so.
+// Root cause CONFIRMED (2026-09-02, sixth pass, item #8): BigQuery's
+// guest-served figure originally summed each booking's peak occupancy once
+// (MAX(NoOfGuest) per booking), undercounting the sheet by ~82%. Checked
+// whether NoOfGuest itself was the problem (e.g. recorded as 1 pax for an
+// actual double-occupancy stay) — it wasn't: NoOfGuest matched Adult+Child
+// exactly on every one of April 2026's 3,722 room-nights, zero mismatches.
+// The gap was the AGGREGATION: summing NoOfGuest across every night of stay
+// (guest-*nights*, not one peak reading per booking) landed at 4,928 against
+// the sheet's 5,093 — within ~3%, not ~82%. lib/bigquery/queries/guestDetail.ts
+// (getBookingStats, getGuestServedAccuracyCheck) now sum guest-nights
+// directly; the residual ~3% gap is surfaced as "Data Error Rate" in the UI.
 export const GUEST_SERVED_SNAPSHOT_LABEL = "April 2026";
 export const GUEST_SERVED_SNAPSHOT_RANGE = { start: "2026-04-01", end: "2026-04-30" };
 

@@ -46,14 +46,20 @@ const BOOKING_STATS_SQL = (where: string) => `
     -- rows since CONCAT(..., NULL) is NULL and excluded from COUNT DISTINCT.
     -- Grouping by a NULL ReservationNo would otherwise collapse many unrelated
     -- rows into one phantom booking per property (confirmed against real data).
-    SELECT Property, ReservationNo, MAX(NoOfGuest) AS guests
+    SELECT Property, ReservationNo
     FROM scoped
     WHERE ReservationNo IS NOT NULL
     GROUP BY Property, ReservationNo
   )
   SELECT
     (SELECT COUNT(*) FROM per_booking) AS total_bookings,
-    (SELECT SUM(guests) FROM per_booking) AS guests_served,
+    -- Item #8 (2026-09-02, sixth pass): guests_served sums NoOfGuest across
+    -- every night of stay (guest-nights), not MAX(NoOfGuest) per booking
+    -- (peak occupancy once). Confirmed against the Guest Served sheet
+    -- (see getGuestServedAccuracyCheck) that guest-nights is the sheet's own
+    -- definition — the old per-booking-peak basis undercounted it by ~82%;
+    -- this basis lands within ~3% for the one month cross-validated so far.
+    (SELECT SUM(NoOfGuest) FROM scoped) AS guests_served,
     (SELECT COUNT(*) FROM scoped) AS sold_room_nights,
     (SELECT SUM(DailyRevenue) FROM scoped) AS room_revenue
 `;
@@ -61,14 +67,20 @@ const BOOKING_STATS_SQL = (where: string) => `
 export async function getBookingStats(filter: KpiFilter): Promise<BookingStats> {
   const resolved = resolveFilter(filter);
   const includeLp = resolved.properties.includes(LP_PROPERTY);
+  const compare = filter.compareYoY ?? false;
   const { clause: where, params } = buildScopeClause("Property", "CAST(StayDate AS DATE)", resolved, "");
-  const { clause: prevWhere, params: prevParams } = buildPreviousScopeClause("Property", "CAST(StayDate AS DATE)", resolved, "prev");
 
   const [rows, prevRows, lpTotals, lpPrevTotals] = await Promise.all([
     runQuery<BookingStatsRow>(BOOKING_STATS_SQL(where), params),
-    runQuery<BookingStatsRow>(BOOKING_STATS_SQL(prevWhere), prevParams),
+    // Comparisons are opt-in — skip the previous-period query entirely unless compareYoY is on.
+    compare
+      ? (() => {
+          const { clause: prevWhere, params: prevParams } = buildPreviousScopeClause("Property", "CAST(StayDate AS DATE)", resolved, "prev");
+          return runQuery<BookingStatsRow>(BOOKING_STATS_SQL(prevWhere), prevParams);
+        })()
+      : Promise.resolve(null),
     includeLp ? getLpOverviewTotals(resolved.period.current) : Promise.resolve(null),
-    includeLp ? getLpOverviewTotals(resolved.period.previous) : Promise.resolve(null),
+    includeLp && compare ? getLpOverviewTotals(resolved.period.previous) : Promise.resolve(null),
   ]);
 
   const r = rows[0] ?? { total_bookings: 0, guests_served: 0, sold_room_nights: 0, room_revenue: 0 };
@@ -77,9 +89,9 @@ export async function getBookingStats(filter: KpiFilter): Promise<BookingStats> 
   const soldRoomNights = r.sold_room_nights + (lpTotals?.soldRoomNights ?? 0);
   const roomRevenue = (r.room_revenue ?? 0) + (lpTotals?.roomRevenue ?? 0);
 
-  const pr = prevRows[0] ?? { total_bookings: 0, guests_served: 0, sold_room_nights: 0, room_revenue: 0 };
-  const prevTotalBookings = pr.total_bookings + (lpPrevTotals?.bookingsCount ?? 0);
-  const prevGuestsServed = (pr.guests_served ?? 0) + (lpPrevTotals?.guestsServed ?? 0);
+  const pr = prevRows ? prevRows[0] ?? { total_bookings: 0, guests_served: 0, sold_room_nights: 0, room_revenue: 0 } : null;
+  const prevTotalBookings = pr ? pr.total_bookings + (lpPrevTotals?.bookingsCount ?? 0) : null;
+  const prevGuestsServed = pr ? (pr.guests_served ?? 0) + (lpPrevTotals?.guestsServed ?? 0) : null;
 
   return {
     totalBookings,
@@ -401,25 +413,31 @@ export interface GuestServedAccuracyCheck {
   totalBigQuery: number;
   totalSheet: number;
   totalVariancePct: number | null;
+  /** Item #8: |totalVariancePct| — the residual, still-unexplained gap between BigQuery and the sheet after correcting the guest-served formula (see comment below). Surfaced in the UI as "Data Error Rate". */
+  dataErrorRatePct: number | null;
 }
 
-/** Fixed one-time snapshot comparison (April 2026) — not scoped by the active period tab, same convention as §6.1's property targets. */
+/**
+ * Item #8 (2026-09-02, sixth pass) root-cause finding: BigQuery's guest-served
+ * figure previously summed MAX(NoOfGuest) PER BOOKING (i.e. each booking's
+ * peak occupancy counted once) — confirmed directly against BigQuery for
+ * April 2026 that this undercounts the sheet by ~82%. Also confirmed:
+ * NoOfGuest itself already agrees exactly with Adult+Child on every row that
+ * month (0 mismatches) — so the guest count per night is NOT being
+ * mis-captured. The gap was the AGGREGATION, not the pax figure: summing
+ * NoOfGuest across every night of stay (guest-NIGHTS, matching how a
+ * multi-night booking's occupancy accumulates on the sheet's own manual PMS
+ * extract) lands within ~3% of the sheet total (4,928 vs 5,093 for April
+ * 2026, vs. 903 under the old per-booking-peak basis) — this is the sheet's
+ * actual definition of "Guest Served", not booking-level headcount. Fixed
+ * here and in getBookingStats to sum NoOfGuest directly over scoped nights.
+ */
 export async function getGuestServedAccuracyCheck(): Promise<GuestServedAccuracyCheck> {
   const properties = Object.keys(GUEST_SERVED_SHEET_SNAPSHOT);
   const rows = await runQuery<{ property: string; guests_served: number | null }>(`
-    WITH scoped AS (
-      SELECT Property, ReservationNo, NoOfGuest
-      FROM ${table("sales_booking")}
-      WHERE Property IN UNNEST(@properties) AND CAST(StayDate AS DATE) BETWEEN @start AND @end
-    ),
-    per_booking AS (
-      SELECT Property, ReservationNo, MAX(NoOfGuest) AS guests
-      FROM scoped
-      WHERE ReservationNo IS NOT NULL
-      GROUP BY Property, ReservationNo
-    )
-    SELECT Property AS property, SUM(guests) AS guests_served
-    FROM per_booking
+    SELECT Property AS property, SUM(NoOfGuest) AS guests_served
+    FROM ${table("sales_booking")}
+    WHERE Property IN UNNEST(@properties) AND CAST(StayDate AS DATE) BETWEEN @start AND @end
     GROUP BY property
   `, { properties, start: GUEST_SERVED_SNAPSHOT_RANGE.start, end: GUEST_SERVED_SNAPSHOT_RANGE.end });
 
@@ -432,12 +450,14 @@ export async function getGuestServedAccuracyCheck(): Promise<GuestServedAccuracy
 
   const totalBigQuery = accuracyRows.reduce((s, r) => s + r.bigQuery, 0);
   const totalSheet = accuracyRows.reduce((s, r) => s + r.sheet, 0);
+  const totalVariancePct = safeDivide(totalBigQuery - totalSheet, totalSheet);
 
   return {
     label: GUEST_SERVED_SNAPSHOT_LABEL,
     rows: accuracyRows,
     totalBigQuery,
     totalSheet,
-    totalVariancePct: safeDivide(totalBigQuery - totalSheet, totalSheet),
+    totalVariancePct,
+    dataErrorRatePct: totalVariancePct !== null ? Math.abs(totalVariancePct) : null,
   };
 }

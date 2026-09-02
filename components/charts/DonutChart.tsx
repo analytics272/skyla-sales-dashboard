@@ -25,7 +25,7 @@ export default function DonutChart({
 }) {
   const total = data.reduce((s, d) => s + d.value, 0);
   return (
-    <div className="flex flex-col items-center gap-3 sm:flex-row sm:items-center">
+    <div className="flex flex-col items-center gap-3 sm:flex-row sm:items-center sm:justify-center">
       <ResponsiveContainer width="100%" height={height} className="max-w-[220px] shrink-0">
         <PieChart>
           <Pie

@@ -31,6 +31,7 @@ export default async function OverviewPage({ searchParams }: { searchParams: Pro
       occupancyPace={occupancyPace}
       monthlyTrends={monthlyTrends}
       brandOccupancy={brandOccupancy}
+      compareYoY={filter.compareYoY ?? false}
     />
   );
 }

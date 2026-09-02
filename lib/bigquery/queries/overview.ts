@@ -63,7 +63,13 @@ function comparisonMetric(current: number | null, previous: number | null): Comp
 export async function getOverviewKpis(filter: KpiFilter): Promise<OverviewKpis> {
   const resolved = resolveFilter(filter);
   const { clause: where, params } = buildScopeClause("Property", "CAST(StayDate AS DATE)", resolved, "");
-  const { clause: prevWhere, params: prevParams } = buildPreviousScopeClause("Property", "CAST(StayDate AS DATE)", resolved, "prev");
+  // Comparisons are strictly opt-in (compareYoY toggle) — no comparison is
+  // computed, let alone queried, unless the user turned it on. Without it,
+  // every `comparisonMetric` below gets a `null` previous and its pctChange
+  // stays null, which is exactly what every StatTile's delta already checks
+  // for before rendering — so this alone is enough to hide deltas by default,
+  // with no UI-side change needed.
+  const compare = filter.compareYoY ?? false;
   // LP (LP Integration PRD Addendum, 2026-08-26) has zero sales_booking rows —
   // its real numbers come from sales_booking_lp_monthly and are merged in
   // here additively when it's in the selected properties.
@@ -75,11 +81,16 @@ export async function getOverviewKpis(filter: KpiFilter): Promise<OverviewKpis> 
       FROM ${table("sales_booking")}
       WHERE ${where}
     `, params),
-    runQuery<AggRow>(`
-      SELECT SUM(DailyRevenue) AS room_revenue, SUM(DailyOtherRevenueExclusiveTax) AS extras_revenue, COUNT(*) AS sold_room_nights
-      FROM ${table("sales_booking")}
-      WHERE ${prevWhere}
-    `, prevParams),
+    compare
+      ? (() => {
+          const { clause: prevWhere, params: prevParams } = buildPreviousScopeClause("Property", "CAST(StayDate AS DATE)", resolved, "prev");
+          return runQuery<AggRow>(`
+            SELECT SUM(DailyRevenue) AS room_revenue, SUM(DailyOtherRevenueExclusiveTax) AS extras_revenue, COUNT(*) AS sold_room_nights
+            FROM ${table("sales_booking")}
+            WHERE ${prevWhere}
+          `, prevParams);
+        })()
+      : Promise.resolve(null),
     runQuery<SourceRow>(`
       SELECT ${bookingCategorySqlExpr("Source")} AS category, COUNT(*) AS nights, SUM(DailyRevenue) AS revenue
       FROM ${table("sales_booking")}
@@ -88,9 +99,9 @@ export async function getOverviewKpis(filter: KpiFilter): Promise<OverviewKpis> 
       ORDER BY revenue DESC
     `, params),
     getAvailableRoomNights(resolved.properties, resolved.period.current),
-    getAvailableRoomNights(resolved.properties, resolved.period.previous),
+    compare ? getAvailableRoomNights(resolved.properties, resolved.period.previous) : Promise.resolve(null),
     includeLp ? getLpOverviewTotals(resolved.period.current) : null,
-    includeLp ? getLpOverviewTotals(resolved.period.previous) : null,
+    includeLp && compare ? getLpOverviewTotals(resolved.period.previous) : null,
   ]);
 
   const agg = aggRows[0] ?? { room_revenue: 0, extras_revenue: 0, sold_room_nights: 0 };
@@ -98,9 +109,9 @@ export async function getOverviewKpis(filter: KpiFilter): Promise<OverviewKpis> 
   let extrasRevenue = agg.extras_revenue ?? 0;
   let soldRoomNights = agg.sold_room_nights ?? 0;
 
-  const prevAgg = prevAggRows[0] ?? { room_revenue: 0, extras_revenue: 0, sold_room_nights: 0 };
-  let prevRoomRevenue = prevAgg.room_revenue ?? 0;
-  let prevSoldRoomNights = prevAgg.sold_room_nights ?? 0;
+  const prevAgg = prevAggRows ? prevAggRows[0] ?? { room_revenue: 0, extras_revenue: 0, sold_room_nights: 0 } : null;
+  let prevRoomRevenue: number | null = prevAgg ? prevAgg.room_revenue ?? 0 : null;
+  let prevSoldRoomNights: number | null = prevAgg ? prevAgg.sold_room_nights ?? 0 : null;
 
   const bySourceMap = new Map<BookingCategory, { nights: number; revenue: number }>();
   for (const r of sourceRows) bySourceMap.set(r.category, { nights: r.nights, revenue: r.revenue ?? 0 });
@@ -114,7 +125,7 @@ export async function getOverviewKpis(filter: KpiFilter): Promise<OverviewKpis> 
       bySourceMap.set(s.category, { nights: existing.nights + s.nights, revenue: existing.revenue + s.revenue });
     }
   }
-  if (lpPrevious) {
+  if (lpPrevious && prevRoomRevenue !== null && prevSoldRoomNights !== null) {
     prevRoomRevenue += lpPrevious.roomRevenue;
     prevSoldRoomNights += lpPrevious.soldRoomNights;
   }
@@ -126,9 +137,9 @@ export async function getOverviewKpis(filter: KpiFilter): Promise<OverviewKpis> 
   const adr = safeDivide(roomRevenue, soldRoomNights);
   const occupancyPct = safeDivide(soldRoomNights, availableRoomNights);
   const revPar = safeDivide(roomRevenue, availableRoomNights);
-  const prevAdr = safeDivide(prevRoomRevenue, prevSoldRoomNights);
-  const prevOccupancyPct = safeDivide(prevSoldRoomNights, prevAvailableRoomNights);
-  const prevRevPar = safeDivide(prevRoomRevenue, prevAvailableRoomNights);
+  const prevAdr = prevRoomRevenue !== null && prevSoldRoomNights !== null ? safeDivide(prevRoomRevenue, prevSoldRoomNights) : null;
+  const prevOccupancyPct = prevSoldRoomNights !== null && prevAvailableRoomNights !== null ? safeDivide(prevSoldRoomNights, prevAvailableRoomNights) : null;
+  const prevRevPar = prevRoomRevenue !== null && prevAvailableRoomNights !== null ? safeDivide(prevRoomRevenue, prevAvailableRoomNights) : null;
 
   return {
     roomRevenue,

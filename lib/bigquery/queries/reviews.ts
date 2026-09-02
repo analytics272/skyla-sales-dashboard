@@ -45,11 +45,16 @@ export interface ReviewStats {
 async function ratingStats(tableName: string, ratingExpr: string, dateExprAsDate: string, filter: ReviewsFilter): Promise<ReviewStats> {
   const period = resolvePeriodFromFilter(filter);
   const { clause, params } = scopeClause(period.current, dateExprAsDate, filter.properties);
-  const { clause: prevClause, params: prevParams } = scopeClause(period.previous, dateExprAsDate, filter.properties);
 
+  // Comparisons are opt-in — skip the previous-period query entirely unless compareYoY is on.
   const [rows, prevRows] = await Promise.all([
     runQuery<{ avg_rating: number | null; total: number }>(`SELECT AVG(${ratingExpr}) AS avg_rating, COUNT(*) AS total FROM ${table(tableName)} WHERE ${clause}`, params),
-    runQuery<{ avg_rating: number | null; total: number }>(`SELECT AVG(${ratingExpr}) AS avg_rating, COUNT(*) AS total FROM ${table(tableName)} WHERE ${prevClause}`, prevParams),
+    filter.compareYoY
+      ? (() => {
+          const { clause: prevClause, params: prevParams } = scopeClause(period.previous, dateExprAsDate, filter.properties);
+          return runQuery<{ avg_rating: number | null; total: number }>(`SELECT AVG(${ratingExpr}) AS avg_rating, COUNT(*) AS total FROM ${table(tableName)} WHERE ${prevClause}`, prevParams);
+        })()
+      : Promise.resolve(null),
   ]);
 
   const avgRating = rows[0]?.avg_rating ?? null;
@@ -58,8 +63,8 @@ async function ratingStats(tableName: string, ratingExpr: string, dateExprAsDate
     avgRating,
     totalReviews,
     comparison: {
-      totalReviews: comparisonMetric(totalReviews, prevRows[0]?.total ?? 0),
-      avgRating: comparisonMetric(avgRating, prevRows[0]?.avg_rating ?? null),
+      totalReviews: comparisonMetric(totalReviews, prevRows ? prevRows[0]?.total ?? 0 : null),
+      avgRating: comparisonMetric(avgRating, prevRows ? prevRows[0]?.avg_rating ?? null : null),
     },
   };
 }

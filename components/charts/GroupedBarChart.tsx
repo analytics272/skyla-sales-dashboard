@@ -19,8 +19,12 @@ export default function GroupedBarChart({
   valueFormatter: (v: number) => string;
   height?: number;
 }) {
+  // Item #9/#11: cap the chart's own width by category count (centered) so a
+  // handful of grouped bars doesn't spread across a full-width card with a
+  // large blank gap between groups — see SingleMetricBarChart for the same fix.
+  const maxWidth = Math.min(800, Math.max(280, data.length * 160));
   return (
-    <ResponsiveContainer width="100%" height={height}>
+    <ResponsiveContainer width="100%" height={height} style={{ maxWidth, margin: "0 auto" }}>
       <BarChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }} barCategoryGap="24%" barGap={2}>
         <CartesianGrid stroke={CHART_GRIDLINE} vertical={false} strokeWidth={1} />
         <XAxis
