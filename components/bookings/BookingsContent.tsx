@@ -16,7 +16,7 @@ import StatTile from "@/components/ui/StatTile";
 import Card from "@/components/ui/Card";
 import Expandable from "@/components/ui/Expandable";
 import TabbedCard, { useTabbedCard } from "@/components/ui/TabbedCard";
-import SingleMetricBarChart, { BarDatum } from "@/components/charts/SingleMetricBarChart";
+import { BarDatum } from "@/components/charts/SingleMetricBarChart";
 import HorizontalBarChart from "@/components/charts/HorizontalBarChart";
 import DonutChart from "@/components/charts/DonutChart";
 import Treemap from "@/components/charts/Treemap";
@@ -127,12 +127,6 @@ export default function BookingsContent({
     { name: "No Contract", value: noContractRevenue, color: CONTRACT_STATUS_COLOR["No Contract"] },
   ];
 
-  const retentionData: BarDatum[] = b2bRetention.map((r) => ({
-    name: `${r.fromFy} → ${r.toFy}`,
-    value: r.retentionPct !== null ? r.retentionPct * 100 : 0,
-    color: "var(--series-1)",
-  }));
-
   const totalOtaNights = otaBreakdown.reduce((s, r) => s + r.nights, 0);
   const totalOtaRevenue = otaBreakdown.reduce((s, r) => s + r.totalRevenue, 0);
   const netOtaRevenue = otaBreakdown.reduce((s, r) => s + r.netRevenue, 0);
@@ -155,13 +149,15 @@ export default function BookingsContent({
             value={bookingStats.totalBookings.toLocaleString("en-IN")}
             delta={bookingStats.comparison.totalBookings.pctChange !== null ? { pct: bookingStats.comparison.totalBookings.pctChange * 100, label: "vs previous" } : undefined}
           />
-          {/* Item #2 (2026-09-02, seventh pass): "Unique Guests Served" is its
-              own metric (distinct people hosted, MAX(NoOfGuest) per booking) —
-              the sheet-reconciled guest-nights figure and its Data Error Rate
-              live only in the Guest Served card below, not duplicated here. */}
+          {/* Item #4 (2026-09-02, eighth pass): the separate "Guest Served —
+              Sheet Vs BigQuery" card is gone — its one fixed number (a
+              one-time April 2026 snapshot that doesn't move with the period
+              filter, unlike everything else on this tile) now lives as this
+              tile's own sub-caption instead of a whole card below. */}
           <StatTile
             label="Unique Guests Served"
             value={bookingStats.guestsServed.toLocaleString("en-IN")}
+            sub={`Data Error Rate ${guestServedAccuracy.dataErrorRatePct !== null ? formatPercent(guestServedAccuracy.dataErrorRatePct, 1) : "—"} vs Sheet (${guestServedAccuracy.label} snapshot)`}
             delta={bookingStats.comparison.guestsServed.pctChange !== null ? { pct: bookingStats.comparison.guestsServed.pctChange * 100, label: "vs previous" } : undefined}
           />
           <StatTile
@@ -189,38 +185,6 @@ export default function BookingsContent({
         </div>
       </div>
 
-      {/* Item #2: this card now shows exactly one number — the residual Data
-          Error Rate — instead of four tiles (BigQuery/Sheet/Variance/Error
-          Rate) that were mostly restating the same gap. The raw BigQuery and
-          Sheet totals move into the caption text below instead of their own
-          StatTiles. */}
-      <Card title="Guest Served — Sheet Vs BigQuery" subtitle={`One-time accuracy snapshot, ${guestServedAccuracy.label} — not scoped by the period filter above`}>
-        <div className="sm:max-w-xs">
-          <StatTile
-            label="Data Error Rate"
-            value={guestServedAccuracy.dataErrorRatePct !== null ? formatPercent(guestServedAccuracy.dataErrorRatePct, 1) : "—"}
-            sub={`BigQuery ${guestServedAccuracy.totalBigQuery.toLocaleString("en-IN")} guest-nights vs Sheet ${guestServedAccuracy.totalSheet.toLocaleString("en-IN")}`}
-          />
-        </div>
-        <div className="mt-3 grid grid-cols-2 gap-2 border-t border-zinc-100 pt-3 dark:border-zinc-800 sm:grid-cols-5">
-          {guestServedAccuracy.rows.map((r) => (
-            <div key={r.property}>
-              <p className="text-[10px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500">{r.property}</p>
-              <p className="text-xs text-zinc-700 dark:text-zinc-200">{r.bigQuery.toLocaleString("en-IN")} / {r.sheet.toLocaleString("en-IN")}</p>
-              <p className="text-xs font-medium" style={{ color: r.variancePct !== null && Math.abs(r.variancePct) > 0.1 ? "var(--chart-delta-bad)" : "var(--chart-delta-good)" }}>
-                {r.variancePct !== null ? formatPercent(r.variancePct, 0) : "—"}
-              </p>
-            </div>
-          ))}
-        </div>
-        <p className="mt-3 text-[11px] text-zinc-400 dark:text-zinc-500">
-          Root cause confirmed: BigQuery previously summed each booking&apos;s peak occupancy once (MAX guests per booking), undercounting the sheet
-          by ~82%. NoOfGuest itself already matches Adult+Child exactly on every row checked — the pax figure per night was never wrong. Summing
-          guests across every night of stay instead (guest-nights, matching the sheet&apos;s own convention) closes nearly all of the gap; the
-          Data Error Rate above is what&apos;s left after that fix.
-        </p>
-      </Card>
-
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatTile label="Available Room Nights" value={roomNightsGap.availableRoomNights.toLocaleString("en-IN")} />
         <StatTile label="Unsold Room Nights" value={roomNightsGap.unsoldRoomNights.toLocaleString("en-IN")} />
@@ -234,7 +198,7 @@ export default function BookingsContent({
       </div>
 
       <div>
-        <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Expats</h3>
+        <h3 className="text-base font-semibold text-zinc-800 dark:text-zinc-100">Expats</h3>
         <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <StatTile label="Expat Bookings" value={expatStats.bookings.toLocaleString("en-IN")} />
           <StatTile label="Expat Revenue" value={formatIndianCurrency(expatStats.revenue)} />
@@ -263,7 +227,7 @@ export default function BookingsContent({
       </div>
 
       <div>
-        <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">B2B Contracts</h3>
+        <h3 className="text-base font-semibold text-zinc-800 dark:text-zinc-100">B2B Contracts</h3>
 
         {/* Item #1 (2026-09-02, seventh pass): donut + caption stacked and
             centered instead of a flex row — at some widths the caption's
@@ -284,11 +248,25 @@ export default function BookingsContent({
           </Card>
         </div>
 
-        {/* Item #3: two compact bar-chart-style B2B reads, paired side by
-            side instead of each taking a full-width row on its own. */}
-        <div className="mt-3 grid gap-3 lg:grid-cols-2">
+        {/* Item #2/#3 (2026-09-02, eighth pass): Retention is only 2-3 data
+            points — a bar chart for that left mostly blank card below it, and
+            when paired with the much-taller Company Rankings card, a default
+            grid row stretches both cells to equal height, turning that blank
+            area into a huge gap. Retention is now a compact StatTile row
+            (sizes to its own content) instead of a chart, and `items-start`
+            stops the grid from stretching either card to match the other. */}
+        <div className="mt-3 grid gap-3 lg:grid-cols-2 lg:items-start">
           <Card title="Corporate Account Retention">
-            <SingleMetricBarChart data={retentionData} valueFormatter={(v) => `${v.toFixed(0)}%`} />
+            <div className="grid grid-cols-2 gap-3">
+              {b2bRetention.map((r) => (
+                <StatTile
+                  key={`${r.fromFy}-${r.toFy}`}
+                  label={`${r.fromFy} → ${r.toFy}`}
+                  value={r.retentionPct !== null ? formatPercent(r.retentionPct, 0) : "—"}
+                  sub={`${r.retainedCompanies.toLocaleString("en-IN")} of ${r.companiesInFromFy.toLocaleString("en-IN")} retained`}
+                />
+              ))}
+            </div>
           </Card>
 
           <TabbedCard title="Company Rankings" tabs={B2B_RANK_TABS} active={b2bRankTab} onChange={setB2bRankTab}>
@@ -304,7 +282,7 @@ export default function BookingsContent({
       </div>
 
       <div>
-        <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">OTA Breakdown</h3>
+        <h3 className="text-base font-semibold text-zinc-800 dark:text-zinc-100">OTA Breakdown</h3>
         <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <StatTile label="Total Nights" value={totalOtaNights.toLocaleString("en-IN")} />
           <StatTile label="Total Revenue" value={formatIndianCurrency(totalOtaRevenue)} />

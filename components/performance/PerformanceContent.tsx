@@ -124,7 +124,7 @@ export default function PerformanceContent({
       </div>
 
       <div>
-        <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Revenue Targets By Property</h3>
+        <h3 className="text-base font-semibold text-zinc-800 dark:text-zinc-100">Revenue Targets By Property</h3>
         <p className="text-xs text-zinc-400 dark:text-zinc-500">Fixed reference plan — {fy}</p>
         <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <StatTile label="Total Target" value={formatIndianCurrency(propertyTargetComparison.total.targetRevenue)} />
@@ -230,7 +230,7 @@ export default function PerformanceContent({
       </TabbedCard>
 
       <div>
-        <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Reviews</h3>
+        <h3 className="text-base font-semibold text-zinc-800 dark:text-zinc-100">Reviews</h3>
         <TabbedCard title="Rating Count Trend" subtitle={`${reviewsTab} reviews`} tabs={REVIEWS_TABS} active={reviewsTab} onChange={setReviewsTab}>
           <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
             <StatTile

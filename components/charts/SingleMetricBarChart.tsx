@@ -25,15 +25,12 @@ export default function SingleMetricBarChart({
   /** Rotate x-axis labels fully vertical instead of horizontal — only where labels are too long/numerous to fit flat (e.g. employee names), not the default. */
   verticalLabels?: boolean;
 }) {
-  // Item #9/#11 ("no unnecessary empty space"): a fixed-height ResponsiveContainer
-  // stretched to a full-width card leaves a huge blank gap between bars when
-  // there are only a couple of categories (Recharts distributes category bands
-  // evenly across whatever width it's given, regardless of maxBarSize). Capping
-  // the container's own width by category count — centered — keeps bar spacing
-  // proportionate instead of spreading 2-3 bars across 700+px.
-  const maxWidth = Math.min(760, Math.max(260, data.length * 130));
+  // A prior pass capped this chart's own width by category count to avoid a
+  // large gap between a couple of bars — reverted per explicit feedback:
+  // that read as its own empty space (a shrink-wrapped chart with blank
+  // margins on both sides). Let the chart fill the full card width instead.
   return (
-    <ResponsiveContainer width="100%" height={height} style={{ maxWidth, margin: "0 auto" }}>
+    <ResponsiveContainer width="100%" height={height}>
       <BarChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }} barCategoryGap="20%">
         <CartesianGrid stroke={CHART_GRIDLINE} vertical={false} strokeWidth={1} />
         <XAxis

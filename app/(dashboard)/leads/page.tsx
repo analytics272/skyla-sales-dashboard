@@ -18,15 +18,12 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   const filter = parseKpiFilter(sp);
   const leadsFilter = { properties: filter.properties, period: filter.period, customStart: filter.customStart, customEnd: filter.customEnd, compareYoY: filter.compareYoY };
 
-  // Item #2: Leads MoM drills day -> month -> FY. All three grains are
-  // prefetched (cheap COUNT/COUNTIF aggregations over the same scoped rows)
-  // so switching grain in the UI is instant, with no extra round trip.
-  const [summary, momByDay, momByMonth, momByFy, byProperty, bySource, formatLeadsRevenue, adrByFormat, lostReasons, bookingPace, byOwner, byOwnerSource] =
+  // Item #5 (2026-09-02, eighth pass): Leads MoM is day-wise only now — the
+  // month/FY grains from a prior pass are gone.
+  const [summary, momByDay, byProperty, bySource, formatLeadsRevenue, adrByFormat, lostReasons, bookingPace, byOwner, byOwnerSource] =
     await Promise.all([
       getLeadsSummary(leadsFilter),
       getLeadsTrend(leadsFilter, "day"),
-      getLeadsTrend(leadsFilter, "month"),
-      getLeadsTrend(leadsFilter, "fy"),
       getLeadsByProperty(leadsFilter),
       getLeadsBySource(leadsFilter),
       getFormatLeadsRevenue(leadsFilter),
@@ -41,8 +38,6 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
     <LeadsContent
       summary={summary}
       momByDay={momByDay}
-      momByMonth={momByMonth}
-      momByFy={momByFy}
       byProperty={byProperty}
       bySource={bySource}
       formatLeadsRevenue={formatLeadsRevenue}

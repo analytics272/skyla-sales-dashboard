@@ -93,7 +93,7 @@ export default function FilterBar() {
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-950 sm:px-6">
-      <h1 className="shrink-0 text-base font-semibold text-zinc-900 dark:text-zinc-50">{activeTab?.label ?? "Dashboard"}</h1>
+      <h1 className="shrink-0 text-lg font-semibold text-zinc-900 dark:text-zinc-50">{activeTab?.label ?? "Dashboard"}</h1>
 
       <div className="flex flex-wrap items-center justify-end gap-2">
         <div role="tablist" aria-label="Comparison period" className="relative flex flex-wrap items-center gap-1 rounded-full bg-zinc-100 p-1 dark:bg-zinc-900">
