@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import clsx from "clsx";
 import { LeadsSummary, LeadsTrendSeries, LeadsTrendPoint, LeadsByGroup, FormatLeadsRevenue, AdrByFormat, LostLeadReason, OwnerLeadStatsResult, OwnerSourceCell } from "@/lib/bigquery/queries/leads";
 import StatTile from "@/components/ui/StatTile";
 import Card from "@/components/ui/Card";
@@ -21,13 +20,10 @@ const RANKING_COLOR = "var(--series-1)";
 const LOST_REASON_PALETTE = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--series-4)", "var(--series-5)", "var(--chart-baseline)"];
 const HEATMAP_TOP_SOURCES = 6;
 
-// Item #2 (2026-09-02, sixth pass): Leads MoM drills day -> month -> FY
-// instead of being locked to one grain — compact (month, ~200px) by default,
-// with an Expand toggle that reveals the grain tabs and a taller chart,
-// rather than a permanently-tall chart taking up space at every grain.
-type MomGranularity = "Day" | "Month" | "FY";
-const MOM_TABS: MomGranularity[] = ["Day", "Month", "FY"];
-
+// Item #5 (2026-09-02, eighth pass): day-wise only — the Month/FY drill-down
+// tabs from a prior pass are gone per explicit request. Expand/collapse is
+// kept for height only (compact by default, taller on demand), since a full
+// FY's worth of daily points is a lot to show at once.
 function buildMomRows(current: LeadsTrendPoint[], previous: LeadsTrendPoint[], compareYoY: boolean) {
   const len = compareYoY ? Math.max(current.length, previous.length) : current.length;
   return Array.from({ length: len }, (_, i) => {
@@ -42,21 +38,9 @@ function buildMomRows(current: LeadsTrendPoint[], previous: LeadsTrendPoint[], c
   });
 }
 
-function LeadsMoMCard({
-  momByDay,
-  momByMonth,
-  momByFy,
-  compareYoY,
-}: {
-  momByDay: LeadsTrendSeries;
-  momByMonth: LeadsTrendSeries;
-  momByFy: LeadsTrendSeries;
-  compareYoY: boolean;
-}) {
+function LeadsMoMCard({ momByDay, compareYoY }: { momByDay: LeadsTrendSeries; compareYoY: boolean }) {
   const [expanded, setExpanded] = useState(false);
-  const [granularity, setGranularity] = useState<MomGranularity>("Month");
-  const active = granularity === "Day" ? momByDay : granularity === "FY" ? momByFy : momByMonth;
-  const rows = buildMomRows(active.current, active.previous, compareYoY);
+  const rows = buildMomRows(momByDay.current, momByDay.previous, compareYoY);
   const series = [
     { key: "total", color: TARGET_VS_ACHIEVED_COLOR.target },
     { key: "closed", color: TARGET_VS_ACHIEVED_COLOR.achieved },
@@ -64,37 +48,14 @@ function LeadsMoMCard({
   ];
 
   return (
-    <Card title="Leads MoM (Total Vs Closed)" subtitle={expanded ? `By ${granularity.toLowerCase()}` : "By month — expand to drill by day or FY"}>
-      <div className="mb-2 flex items-center justify-between">
-        {expanded ? (
-          <div role="tablist" className="flex items-center gap-1 rounded-full bg-zinc-100 p-1 dark:bg-zinc-900">
-            {MOM_TABS.map((tab) => (
-              <button
-                key={tab}
-                type="button"
-                role="tab"
-                aria-selected={granularity === tab}
-                onClick={() => setGranularity(tab)}
-                className={clsx(
-                  "rounded-full px-3 py-1 text-xs font-semibold transition-colors",
-                  granularity === tab
-                    ? "bg-teal-700 text-white shadow-sm"
-                    : "text-zinc-600 hover:bg-white hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white"
-                )}
-              >
-                {tab}
-              </button>
-            ))}
-          </div>
-        ) : (
-          <span />
-        )}
+    <Card title="Leads MoM (Total Vs Closed)" subtitle="By day">
+      <div className="mb-2 flex justify-end">
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
           className="text-xs font-medium text-teal-700 hover:underline dark:text-teal-300"
         >
-          {expanded ? "Collapse" : "Expand to drill down"}
+          {expanded ? "Collapse" : "Expand"}
         </button>
       </div>
       <MultiSeriesLineChart data={rows} xKey="label" series={series} valueFormatter={(v) => v.toLocaleString("en-IN")} height={expanded ? 340 : 200} />
@@ -105,8 +66,6 @@ function LeadsMoMCard({
 export default function LeadsContent({
   summary,
   momByDay,
-  momByMonth,
-  momByFy,
   byProperty,
   bySource,
   formatLeadsRevenue,
@@ -119,8 +78,6 @@ export default function LeadsContent({
 }: {
   summary: LeadsSummary;
   momByDay: LeadsTrendSeries;
-  momByMonth: LeadsTrendSeries;
-  momByFy: LeadsTrendSeries;
   byProperty: LeadsByGroup[];
   bySource: LeadsByGroup[];
   formatLeadsRevenue: FormatLeadsRevenue[];
@@ -140,7 +97,15 @@ export default function LeadsContent({
   const sourceData: BarDatum[] = bySource.map((r, i) => ({ name: r.key, value: r.count, color: LOST_REASON_PALETTE[i % LOST_REASON_PALETTE.length] }));
   const formatLeadsData: BarDatum[] = formatLeadsRevenue.map((r) => ({ name: r.format, value: r.leads, color: RANKING_COLOR }));
   const formatRevenueData: BarDatum[] = formatLeadsRevenue.map((r) => ({ name: r.format, value: r.revenue, color: RANKING_COLOR }));
-  const adrByFormatData: BarDatum[] = adrByFormat.map((r) => ({ name: r.format, value: r.adr ?? 0, color: RANKING_COLOR }));
+  // Item #6 (2026-09-02, eighth pass): ADR By Format now follows the same
+  // format order as Revenue/Leads By Format (by lead count, descending)
+  // instead of its own query's unordered GROUP BY output — the two paired
+  // charts were listing room formats in different, inconsistent orders.
+  const adrByFormatData: BarDatum[] = formatLeadsRevenue.map((r) => ({
+    name: r.format,
+    value: adrByFormat.find((a) => a.format === r.format)?.adr ?? 0,
+    color: RANKING_COLOR,
+  }));
 
   const lostDonut = lostReasons.map((r, i) => ({ name: r.stage, value: r.count, color: LOST_REASON_PALETTE[i % LOST_REASON_PALETTE.length] }));
 
@@ -212,9 +177,9 @@ export default function LeadsContent({
           stack of cards. */}
       <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
         <div className="space-y-4">
-          <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Lead Volume</h3>
+          <h3 className="text-base font-semibold text-zinc-800 dark:text-zinc-100">Lead Volume</h3>
 
-          <LeadsMoMCard momByDay={momByDay} momByMonth={momByMonth} momByFy={momByFy} compareYoY={compareYoY} />
+          <LeadsMoMCard momByDay={momByDay} compareYoY={compareYoY} />
 
           <Card title="Leads By Property">
             <HorizontalBarChart data={propertyData} valueFormatter={(v) => v.toLocaleString("en-IN")} />
@@ -242,7 +207,7 @@ export default function LeadsContent({
         </div>
 
         <div className="space-y-4">
-          <h3 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Revenue & Owners</h3>
+          <h3 className="text-base font-semibold text-zinc-800 dark:text-zinc-100">Revenue & Owners</h3>
 
           <div className="grid grid-cols-2 gap-3">
             <Card title="Revenue By Format">

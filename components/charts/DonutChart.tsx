@@ -72,7 +72,10 @@ export default function DonutChart({
                 <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: d.color }} />
                 <span className="truncate" style={{ color: CHART_TEXT.secondary }}>{d.name}</span>
               </span>
-              <span className="justify-self-end font-medium tabular-nums" style={{ color: CHART_TEXT.primary }}>
+              {/* whitespace-nowrap: item #3 (2026-09-02, eighth pass) — without
+                  it, a narrow legend column wrapped "3.43 Cr · 65%" onto three
+                  lines instead of reading as one number and one percentage. */}
+              <span className="justify-self-end whitespace-nowrap font-medium tabular-nums" style={{ color: CHART_TEXT.primary }}>
                 {valueFormatter(d.value)} · {pct.toFixed(0)}%
               </span>
             </div>

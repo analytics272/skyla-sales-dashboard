@@ -37,10 +37,14 @@ export default function Heatmap({
 
   return (
     <div className="overflow-x-auto">
-      <div className="inline-grid gap-1" style={{ gridTemplateColumns: `120px repeat(${cols.length}, minmax(64px, 1fr))` }}>
+      <div className="inline-grid gap-1" style={{ gridTemplateColumns: `120px repeat(${cols.length}, minmax(76px, 1fr))` }}>
         <div />
+        {/* No `truncate` here — a name like "Business WA" was cutting down
+            to "Business ..." in a narrow column. Wrapping onto two lines
+            reads better than losing part of the label; `title` gives the
+            full name on hover as a fallback. */}
         {cols.map((c) => (
-          <div key={c} className="truncate px-1 pb-1 text-center text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+          <div key={c} title={c} className="px-1 pb-1 text-center text-[11px] font-medium leading-tight text-zinc-500 dark:text-zinc-400">
             {c}
           </div>
         ))}

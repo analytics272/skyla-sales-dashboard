@@ -19,12 +19,13 @@ export default function GroupedBarChart({
   valueFormatter: (v: number) => string;
   height?: number;
 }) {
-  // Item #9/#11: cap the chart's own width by category count (centered) so a
-  // handful of grouped bars doesn't spread across a full-width card with a
-  // large blank gap between groups — see SingleMetricBarChart for the same fix.
-  const maxWidth = Math.min(800, Math.max(280, data.length * 160));
+  // A prior pass capped this chart's own width by category count to avoid a
+  // large gap between a couple of bars — reverted per explicit feedback:
+  // that read as its own empty space (a shrink-wrapped chart with blank
+  // margins on both sides). Recharts' `barCategoryGap`/`barGap` already
+  // control in-chart spacing; let the chart fill the full card width.
   return (
-    <ResponsiveContainer width="100%" height={height} style={{ maxWidth, margin: "0 auto" }}>
+    <ResponsiveContainer width="100%" height={height}>
       <BarChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }} barCategoryGap="24%" barGap={2}>
         <CartesianGrid stroke={CHART_GRIDLINE} vertical={false} strokeWidth={1} />
         <XAxis
