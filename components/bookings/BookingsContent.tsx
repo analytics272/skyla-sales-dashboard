@@ -149,15 +149,14 @@ export default function BookingsContent({
             value={bookingStats.totalBookings.toLocaleString("en-IN")}
             delta={bookingStats.comparison.totalBookings.pctChange !== null ? { pct: bookingStats.comparison.totalBookings.pctChange * 100, label: "vs previous" } : undefined}
           />
-          {/* Item #4 (2026-09-02, eighth pass): the separate "Guest Served —
-              Sheet Vs BigQuery" card is gone — its one fixed number (a
-              one-time April 2026 snapshot that doesn't move with the period
-              filter, unlike everything else on this tile) now lives as this
-              tile's own sub-caption instead of a whole card below. */}
+          {/* Item #1 (2026-09-02, ninth pass): "Unique" dropped from the
+              label; the Data Error Rate line is now just "Error Rate: X%",
+              bold, instead of a full sentence — the "Guest Served — Sheet Vs
+              BigQuery" card it used to live in was already removed last pass. */}
           <StatTile
-            label="Unique Guests Served"
+            label="Guests Served"
             value={bookingStats.guestsServed.toLocaleString("en-IN")}
-            sub={`Data Error Rate ${guestServedAccuracy.dataErrorRatePct !== null ? formatPercent(guestServedAccuracy.dataErrorRatePct, 1) : "—"} vs Sheet (${guestServedAccuracy.label} snapshot)`}
+            subBold={`Error Rate: ${guestServedAccuracy.dataErrorRatePct !== null ? formatPercent(guestServedAccuracy.dataErrorRatePct, 1) : "—"}`}
             delta={bookingStats.comparison.guestsServed.pctChange !== null ? { pct: bookingStats.comparison.guestsServed.pctChange * 100, label: "vs previous" } : undefined}
           />
           <StatTile
@@ -248,26 +247,36 @@ export default function BookingsContent({
           </Card>
         </div>
 
-        {/* Item #2/#3 (2026-09-02, eighth pass): Retention is only 2-3 data
-            points — a bar chart for that left mostly blank card below it, and
-            when paired with the much-taller Company Rankings card, a default
-            grid row stretches both cells to equal height, turning that blank
-            area into a huge gap. Retention is now a compact StatTile row
-            (sizes to its own content) instead of a chart, and `items-start`
-            stops the grid from stretching either card to match the other. */}
+        {/* Item #2 (2026-09-02, ninth pass): Retention is only 2-3 StatTiles
+            tall, next to the much-taller Company Rankings card — even with
+            `items-start` (so neither card stretches), the left column still
+            has visible blank space below Retention. The OTA Breakdown
+            summary row (previously its own section further down, with
+            nothing else short enough to sit next to) now fills that space
+            instead of sitting on its own row lower on the page. */}
         <div className="mt-3 grid gap-3 lg:grid-cols-2 lg:items-start">
-          <Card title="Corporate Account Retention">
-            <div className="grid grid-cols-2 gap-3">
-              {b2bRetention.map((r) => (
-                <StatTile
-                  key={`${r.fromFy}-${r.toFy}`}
-                  label={`${r.fromFy} → ${r.toFy}`}
-                  value={r.retentionPct !== null ? formatPercent(r.retentionPct, 0) : "—"}
-                  sub={`${r.retainedCompanies.toLocaleString("en-IN")} of ${r.companiesInFromFy.toLocaleString("en-IN")} retained`}
-                />
-              ))}
-            </div>
-          </Card>
+          <div className="space-y-3">
+            <Card title="Corporate Account Retention">
+              <div className="grid grid-cols-2 gap-3">
+                {b2bRetention.map((r) => (
+                  <StatTile
+                    key={`${r.fromFy}-${r.toFy}`}
+                    label={`${r.fromFy} → ${r.toFy}`}
+                    value={r.retentionPct !== null ? formatPercent(r.retentionPct, 0) : "—"}
+                    sub={`${r.retainedCompanies.toLocaleString("en-IN")} of ${r.companiesInFromFy.toLocaleString("en-IN")} retained`}
+                  />
+                ))}
+              </div>
+            </Card>
+            <Card title="OTA Breakdown">
+              <div className="grid grid-cols-2 gap-3">
+                <StatTile label="Total Nights" value={totalOtaNights.toLocaleString("en-IN")} />
+                <StatTile label="Total Revenue" value={formatIndianCurrency(totalOtaRevenue)} />
+                <StatTile label="Net Revenue" value={formatIndianCurrency(netOtaRevenue)} />
+                <StatTile label="Blended Commission %" value={`${blendedCommissionPct.toFixed(1)}%`} />
+              </div>
+            </Card>
+          </div>
 
           <TabbedCard title="Company Rankings" tabs={B2B_RANK_TABS} active={b2bRankTab} onChange={setB2bRankTab}>
             {b2bRankTab === "Contribution %" ? (
@@ -283,14 +292,7 @@ export default function BookingsContent({
 
       <div>
         <h3 className="text-base font-semibold text-zinc-800 dark:text-zinc-100">OTA Breakdown</h3>
-        <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <StatTile label="Total Nights" value={totalOtaNights.toLocaleString("en-IN")} />
-          <StatTile label="Total Revenue" value={formatIndianCurrency(totalOtaRevenue)} />
-          <StatTile label="Net Revenue" value={formatIndianCurrency(netOtaRevenue)} />
-          <StatTile label="Blended Commission %" value={`${blendedCommissionPct.toFixed(1)}%`} />
-        </div>
-
-        <div className="mt-3">
+        <div className="mt-2">
           <TabbedCard title="By OTA Site" tabs={OTA_TABS} active={otaTab} onChange={setOtaTab}>
             {otaTab === "Revenue Share" && <DonutChart data={otaRevenueDonut} valueFormatter={(v) => formatIndianCurrency(v)} />}
             {otaTab === "Net Revenue" && <HorizontalBarChart data={otaNetRevenueData} valueFormatter={(v) => formatIndianCurrency(v)} />}

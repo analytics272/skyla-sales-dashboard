@@ -6,11 +6,13 @@ export interface StatTileProps {
   value: string;
   delta?: { pct: number; label: string; upIsGood?: boolean };
   sub?: string;
+  /** A second caption line with more visual weight than `sub` — bold, darker — for a figure that deserves to stand out next to its parent metric (e.g. a data-quality error rate) rather than read as a faint footnote. */
+  subBold?: string;
   /** Compact benchmark/achievement bar under the value (redesign §12) — e.g. "97% of target". `good`/`warn` set the color thresholds (fraction 0-1, default 0.9/0.6). */
   progress?: { pct: number; label?: string; good?: number; warn?: number };
 }
 
-export default function StatTile({ label, value, delta, sub, progress }: StatTileProps) {
+export default function StatTile({ label, value, delta, sub, subBold, progress }: StatTileProps) {
   const deltaColor = delta
     ? (delta.pct >= 0) === (delta.upIsGood ?? true)
       ? CHART_DELTA_GOOD
@@ -27,6 +29,7 @@ export default function StatTile({ label, value, delta, sub, progress }: StatTil
         </p>
       )}
       {sub && <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">{sub}</p>}
+      {subBold && <p className="mt-1 text-xs font-bold text-zinc-700 dark:text-zinc-200">{subBold}</p>}
       {progress && (
         <div className="mt-2.5">
           <ProgressBar pct={progress.pct} good={progress.good} warn={progress.warn} />

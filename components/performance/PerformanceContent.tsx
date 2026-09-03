@@ -111,22 +111,21 @@ export default function PerformanceContent({
 
   return (
     <div className="space-y-4">
-      {/* Item #5: "Target" dropped as its own tile — its value was already
-          restated in this tile's own sub-text, so the two cards were showing
-          the same number twice. */}
-      <div className="mt-3 sm:max-w-sm">
-        <StatTile
-          label="Revenue Achievement"
-          value={revenueAchievement.achievedPct !== null ? formatPercent(revenueAchievement.achievedPct) : "—"}
-          sub={`${formatIndianCurrency(revenueAchievement.achieved)} of ${formatIndianCurrency(revenueAchievement.target)}`}
-          progress={revenueAchievement.achievedPct !== null ? { pct: revenueAchievement.achievedPct } : undefined}
-        />
-      </div>
-
+      {/* Item #3 (2026-09-02, ninth pass): "Revenue Achievement" was alone in
+          its own row, leaving a large blank area beside its narrow card — it
+          now sits in the same stat row as the property-level rollup below it
+          (both are "achievement" summaries; there was no reason for two
+          separate rows here). */}
       <div>
         <h3 className="text-base font-semibold text-zinc-800 dark:text-zinc-100">Revenue Targets By Property</h3>
         <p className="text-xs text-zinc-400 dark:text-zinc-500">Fixed reference plan — {fy}</p>
-        <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-5">
+          <StatTile
+            label="Revenue Achievement"
+            value={revenueAchievement.achievedPct !== null ? formatPercent(revenueAchievement.achievedPct) : "—"}
+            sub={`${formatIndianCurrency(revenueAchievement.achieved)} of ${formatIndianCurrency(revenueAchievement.target)}`}
+            progress={revenueAchievement.achievedPct !== null ? { pct: revenueAchievement.achievedPct } : undefined}
+          />
           <StatTile label="Total Target" value={formatIndianCurrency(propertyTargetComparison.total.targetRevenue)} />
           <StatTile label="Total Achieved" value={formatIndianCurrency(propertyTargetComparison.total.achievedRevenue)} />
           <StatTile
