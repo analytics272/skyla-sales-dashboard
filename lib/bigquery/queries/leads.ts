@@ -180,13 +180,28 @@ function dayLabelOf(iso: string): string {
   return `${d.getDate()} ${MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}`;
 }
 
+// lead_tracker.date is a STRING column with genuinely mixed formatting —
+// confirmed live 2026-09-05: 5,942+ rows store it as 'YYYY-MM-DDT00:00:00'
+// (a full timestamp) instead of plain 'YYYY-MM-DD', which grows over time as
+// new rows sync in. A bare `CAST(date AS DATE)` throws ("Invalid date:
+// '...T00:00:00'") the moment it hits one of those rows — this is what took
+// the Leads page down (it worked when this code first shipped, then broke
+// as more mixed-format rows synced in — the query itself was never safe).
+// `SAFE_CAST(SUBSTR(date, 1, 10) AS DATE)` reads the first 10 characters
+// (the date portion in either format) and returns NULL instead of throwing
+// on anything unparseable, so one bad row can never take the whole query
+// down again. whereForRange's own WHERE clause doesn't need this — it
+// compares `date` as a plain STRING, and an ISO-prefixed timestamp string
+// still sorts correctly against plain-date BETWEEN bounds.
+const LEAD_DATE_EXPR = "SAFE_CAST(SUBSTR(date, 1, 10) AS DATE)";
+
 async function leadsTrendForRange(range: DateRange, properties: string[] | undefined, granularity: LeadsTrendGranularity): Promise<LeadsTrendPoint[]> {
   const { clause, params } = whereForRange(range, properties);
 
   if (granularity === "fy") {
     const rows = await runQuery<{ fy_start: number; total_leads: number; closed_leads: number }>(`
       SELECT
-        ${fyStartYearSqlExpr("CAST(date AS DATE)")} AS fy_start,
+        ${fyStartYearSqlExpr(LEAD_DATE_EXPR)} AS fy_start,
         COUNT(*) AS total_leads,
         COUNTIF(Stage = 'Closed') AS closed_leads
       FROM ${table("lead_tracker")}
@@ -200,7 +215,7 @@ async function leadsTrendForRange(range: DateRange, properties: string[] | undef
   const truncUnit = granularity === "day" ? "DAY" : "MONTH";
   const rows = await runQuery<{ bucket: string; total_leads: number; closed_leads: number }>(`
     SELECT
-      CAST(DATE_TRUNC(CAST(date AS DATE), ${truncUnit}) AS STRING) AS bucket,
+      CAST(DATE_TRUNC(${LEAD_DATE_EXPR}, ${truncUnit}) AS STRING) AS bucket,
       COUNT(*) AS total_leads,
       COUNTIF(Stage = 'Closed') AS closed_leads
     FROM ${table("lead_tracker")}
