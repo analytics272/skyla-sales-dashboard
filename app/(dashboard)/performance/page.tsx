@@ -28,13 +28,13 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
   // user explicitly picked one.
   const reviewsFilter = { properties: filter.properties, period: filter.period, customStart: filter.customStart, customEnd: filter.customEnd, compareYoY: filter.compareYoY };
   const fy = resolveTargetsFy(targetsFilter);
-  const range = resolveTargetsRange(targetsFilter, fy);
+  const range = resolveTargetsRange(targetsFilter);
   const resolved = resolveFilter(filter);
-  // "This FY" keeps the annual-plan reading ("Full FY 26-27"); every other
-  // tab now genuinely scopes the targets sections to its own window, so the
-  // caption should say which one rather than always claiming "Fixed — {fy}".
-  const targetsPeriod = resolvePeriodFromFilter(targetsFilter);
-  const targetsRangeLabel = targetsPeriod.key === "this_fy" ? `Full ${fy}` : targetsPeriod.currentLabel;
+  // 2026-09-07, twelfth pass: This FY's own currentLabel is now just the FY
+  // ("FY 26-27") since period.ts's This FY is the full fiscal year, not
+  // year-to-date — no more special-casing needed to show which range is in
+  // effect, every tab's own label already says it plainly.
+  const targetsRangeLabel = resolvePeriodFromFilter(targetsFilter).currentLabel;
 
   // monthlyRevenueTargets is always fetched for the FULL FY (its rollover
   // cascade needs every prior month regardless of what's displayed) and
