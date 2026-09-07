@@ -111,29 +111,41 @@ export default function PerformanceContent({
 
   return (
     <div className="space-y-4">
-      {/* Item #3 (2026-09-02, ninth pass): "Revenue Achievement" was alone in
-          its own row, leaving a large blank area beside its narrow card — it
-          now sits in the same stat row as the property-level rollup below it
-          (both are "achievement" summaries; there was no reason for two
-          separate rows here). */}
+      {/* 2026-09-07, tenth pass: "Revenue Achievement" (company-wide, from
+          leadership_targets — a separately-maintained target-tracking table)
+          and the four "Total Target/Achieved/..." tiles (this property's own
+          fixed reference plan vs a LIVE sales_booking sum) are two genuinely
+          different data sources that don't reconcile exactly — confirmed
+          live 2026-09-07: 11.11 Cr vs 10.74 Cr for FY 26-27, a real ~3.3%
+          gap between how the two systems track "achieved revenue", not a
+          filter or dashboard bug. The prior pass's merge into one undivided
+          row made that look like one consistent number when it isn't — a
+          divider and an explicit caption now separate the two groups. */}
       <div>
         <h3 className="text-base font-semibold text-zinc-800 dark:text-zinc-100">Revenue Targets By Property</h3>
         <p className="text-xs text-zinc-400 dark:text-zinc-500">Fixed reference plan — {fy}</p>
-        <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-5">
+        <p className="mt-1 text-[11px] text-zinc-400 dark:text-zinc-500">
+          Revenue Achievement (company-wide, leadership targets) and the property rollup beside it (fixed plan vs live bookings) are two
+          separate tracking systems — they won&apos;t match exactly.
+        </p>
+        <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,4fr)]">
           <StatTile
             label="Revenue Achievement"
             value={revenueAchievement.achievedPct !== null ? formatPercent(revenueAchievement.achievedPct) : "—"}
-            sub={`${formatIndianCurrency(revenueAchievement.achieved)} of ${formatIndianCurrency(revenueAchievement.target)}`}
+            sub={`${formatIndianCurrency(revenueAchievement.achieved)} of ${formatIndianCurrency(revenueAchievement.target)} · leadership_targets`}
             progress={revenueAchievement.achievedPct !== null ? { pct: revenueAchievement.achievedPct } : undefined}
           />
-          <StatTile label="Total Target" value={formatIndianCurrency(propertyTargetComparison.total.targetRevenue)} />
-          <StatTile label="Total Achieved" value={formatIndianCurrency(propertyTargetComparison.total.achievedRevenue)} />
-          <StatTile
-            label="Overall Achievement"
-            value={propertyTargetComparison.total.achievedPct !== null ? formatPercent(propertyTargetComparison.total.achievedPct, 0) : "—"}
-            progress={propertyTargetComparison.total.achievedPct !== null ? { pct: propertyTargetComparison.total.achievedPct } : undefined}
-          />
-          <StatTile label="Overall Occ %" value={propertyTargetComparison.total.achievedOccPct !== null ? formatPercent(propertyTargetComparison.total.achievedOccPct, 0) : "—"} />
+          <div className="hidden w-px bg-zinc-200 dark:bg-zinc-800 sm:block" />
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <StatTile label="Total Target" value={formatIndianCurrency(propertyTargetComparison.total.targetRevenue)} />
+            <StatTile label="Total Achieved" value={formatIndianCurrency(propertyTargetComparison.total.achievedRevenue)} sub="live sales_booking" />
+            <StatTile
+              label="Overall Achievement"
+              value={propertyTargetComparison.total.achievedPct !== null ? formatPercent(propertyTargetComparison.total.achievedPct, 0) : "—"}
+              progress={propertyTargetComparison.total.achievedPct !== null ? { pct: propertyTargetComparison.total.achievedPct } : undefined}
+            />
+            <StatTile label="Overall Occ %" value={propertyTargetComparison.total.achievedOccPct !== null ? formatPercent(propertyTargetComparison.total.achievedOccPct, 0) : "—"} />
+          </div>
         </div>
         {/* Item #3: bar chart + its own per-property drill-down, paired side
             by side — both are "property targets" reads and neither needs
