@@ -6,7 +6,7 @@
 import { runQuery, table } from "../client";
 import { PROPERTY_TARGETS_FY27, PROPERTY_TARGETS_FY } from "@/lib/reference/propertyTargets";
 import { fyMonthOverlapFraction, DateRange } from "@/lib/reference/financialYear";
-import { PeriodFilter, resolvePeriodFromFilter, clampRangeToToday } from "@/lib/reference/period";
+import { PeriodFilter, resolvePeriodFromFilter } from "@/lib/reference/period";
 import { getAvailableRoomNightsByProperty } from "./propertyWindows";
 import { safeDivide } from "@/lib/format/currency";
 
@@ -39,28 +39,20 @@ interface AchievedRow {
 }
 
 /**
- * 2026-09-07, twelfth pass: `period.current` for This FY is now the FULL
- * fiscal year, not year-to-date (see period.ts — This FY behaves like every
- * other tab and Custom Range now, so it always means exactly what it says).
- * That resurfaces the eleventh pass's exact bug shape if `current` were used
- * for the achieved side directly: the target reading is meant to be
- * "achieved so far vs. this year's full goal", not "everything already
- * booked for the whole year including months that haven't happened yet".
- * So `targetRange` (the whole selected window — full FY on This FY, prorated
- * per fyMonthOverlapFraction on every other tab) and `achievedRange`
- * (targetRange clamped to today via clampRangeToToday) are still two
- * different things here, same as the eleventh pass established — the only
- * change is that `targetRange` no longer needs its own This-FY special case,
- * since `period.current` already IS the full FY for that tab now. This also
- * now correctly handles This Month (also a full-month range that can extend
- * past today) and a future-extending Custom Range the same way, which the
- * eleventh pass's This-FY-only special case did not.
+ * 2026-09-07, thirteenth pass: per explicit direction — "no exceptions,
+ * filters standard to be everything, because if they want to-date they can
+ * use custom date filter" — the to-date clamp the twelfth pass put on the
+ * achieved side is gone. Target and achieved now share one plain `range`:
+ * exactly the selected period's own window, full stop, same as every other
+ * query on the dashboard. Picking "This Month" means the whole month for
+ * this section too, including its own already-booked future days — if a
+ * to-date reading is wanted, Custom Range with an end date of today is how
+ * to get one, same as anywhere else on the dashboard now.
  * `properties` still fully respects the global Property filter, as before.
  */
 export async function getPropertyTargetComparison(properties: string[], filter: PeriodFilter): Promise<PropertyTargetComparisonResult> {
   const period = resolvePeriodFromFilter(filter);
-  const targetRange: DateRange = period.current;
-  const achievedRange: DateRange = clampRangeToToday(targetRange);
+  const range: DateRange = period.current;
 
   const [achievedRows, availableByProperty] = await Promise.all([
     runQuery<AchievedRow>(`
@@ -69,8 +61,8 @@ export async function getPropertyTargetComparison(properties: string[], filter: 
       WHERE Property IN UNNEST(@properties)
         AND CAST(StayDate AS DATE) BETWEEN @start AND @end
       GROUP BY property
-    `, { properties, start: achievedRange.start, end: achievedRange.end }),
-    getAvailableRoomNightsByProperty(properties, achievedRange),
+    `, { properties, start: range.start, end: range.end }),
+    getAvailableRoomNightsByProperty(properties, range),
   ]);
 
   let totalTargetRevenue = 0;
@@ -86,7 +78,7 @@ export async function getPropertyTargetComparison(properties: string[], filter: 
     let targetSoldNights = 0;
     let targetAvailable = 0;
     for (const t of targets) {
-      const frac = fyMonthOverlapFraction(PROPERTY_TARGETS_FY, t.calendarMonth, targetRange);
+      const frac = fyMonthOverlapFraction(PROPERTY_TARGETS_FY, t.calendarMonth, range);
       if (frac <= 0) continue;
       targetRevenue += t.revenue * frac;
       targetSoldNights += t.available * t.occPct * frac;

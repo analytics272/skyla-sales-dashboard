@@ -110,16 +110,16 @@ function sameWindowLastYear(start: string, end: string): DateRange {
  * This Month no longer does either — every period tab now means exactly
  * what typing its own bounds as a Custom Range would mean.
  *
- * This does NOT reintroduce the to-date-vs-target problem the eleventh pass
- * fixed on the Performance page: `current` here is genuinely the whole
- * window (matching every other tab and Custom Range), and callers that
- * specifically need "how much of this window has actually elapsed as of
- * today" — i.e. an achieved-vs-target reading for a range that might extend
- * into the future — should call `clampRangeToToday(current)` themselves
- * (see getPropertyTargetComparison) rather than relying on `current` itself
- * to already stop at today. That's a narrower, more honest fix than making
- * the shared period model silently behave differently depending on which
- * page happens to be reading it.
+ * 2026-09-07, thirteenth pass: the twelfth pass carved out one exception —
+ * an achieved-vs-target reading on the Performance page clamped to today via
+ * a `clampRangeToToday()` helper, so a target attainment % wouldn't count
+ * not-yet-happened bookings as "achieved". Per explicit direction — "no
+ * exceptions, filters standard to be everything, because if they want
+ * to-date they can use custom date filter" — that clamp is gone too. Every
+ * KPI on every page, including Performance's target/achieved figures, now
+ * reads exactly the selected window with no clamping anywhere. A to-date
+ * reading is available to anyone who wants one: Custom Range with an end
+ * date of today.
  *
  * For every key, `previous` is either the immediately-preceding window of
  * the same length (compareYoY off — the default) or the identical window
@@ -161,22 +161,6 @@ export function resolvePeriod(key: PeriodKey, asOf: Date = new Date(), custom?: 
 
 export function periodLabel(key: PeriodKey): string {
   return PERIOD_OPTIONS.find((p) => p.key === key)?.label ?? key;
-}
-
-/**
- * Clamps a range's end to today (or `asOf`) if it extends past it — for a
- * caller that needs "how much of this window has actually elapsed" rather
- * than the window itself. Every period tab's `current` (This FY, This
- * Month, Custom Range, ...) can legitimately extend into the future now
- * (sales_booking carries real advance bookings), which is correct for a
- * plain "total for this window" reading but wrong for an achieved-vs-target
- * pacing metric — that always means "realized so far", never "including
- * bookings for days that haven't happened yet". No-op if the range doesn't
- * extend past today.
- */
-export function clampRangeToToday(range: DateRange, asOf: Date = new Date()): DateRange {
-  const todayIso = toIso(asOf);
-  return { start: range.start, end: range.end < todayIso ? range.end : todayIso };
 }
 
 /** Shared shape every filter interface extends for period scoping. */
