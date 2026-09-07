@@ -65,6 +65,28 @@ export function fyMonthBounds(fy: string, calendarMonth: number): DateRange {
   };
 }
 
+function daySpanInclusive(start: string, end: string): number {
+  const ms = new Date(`${end}T00:00:00`).getTime() - new Date(`${start}T00:00:00`).getTime();
+  return Math.round(ms / 86400000) + 1;
+}
+
+/**
+ * Day-count overlap between a fiscal month's calendar bounds and an
+ * arbitrary date range, as a fraction of that month's own length (0 = no
+ * overlap, 1 = fully contained). 2026-09-07: used to prorate a fixed
+ * monthly target/plan figure — or a monthly-grain actuals row, which has no
+ * finer date breakdown to re-query — down to whatever narrower period the
+ * dashboard's period filter has selected, instead of always showing the
+ * whole FY regardless of the filter.
+ */
+export function fyMonthOverlapFraction(fy: string, calendarMonth: number, range: DateRange): number {
+  const { start: monthStart, end: monthEnd } = fyMonthBounds(fy, calendarMonth);
+  const overlapStart = monthStart > range.start ? monthStart : range.start;
+  const overlapEnd = monthEnd < range.end ? monthEnd : range.end;
+  if (overlapStart > overlapEnd) return 0;
+  return daySpanInclusive(overlapStart, overlapEnd) / daySpanInclusive(monthStart, monthEnd);
+}
+
 /** True once a fiscal month's start date is still ahead of today — hasn't happened yet, nothing to plot as "actual". Still needed for the Targets tab's "This FY" view, whose governing FY can extend past today even though the new period model's own date ranges never do. */
 export function isFutureFiscalMonth(fy: string, calendarMonth: number, today: Date = new Date()): boolean {
   return fyMonthBounds(fy, calendarMonth).start > today.toISOString().slice(0, 10);

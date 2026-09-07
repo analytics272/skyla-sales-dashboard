@@ -18,6 +18,11 @@
 // `lib/bigquery/queries/propertyTargets.ts`.
 
 export const PROPERTY_TARGETS_FY = "FY 26-27";
+// 2026-09-07: this fixed sheet only ever covers FY 26-27's 12 calendar
+// months — when the dashboard's period filter narrows to something inside
+// that FY (a month, a week, a custom range), getPropertyTargetComparison
+// prorates each of the 12 rows below by day-overlap with the selected
+// range instead of always summing all 12 in full.
 
 export interface MonthlyPropertyTarget {
   calendarMonth: number; // 1-12
