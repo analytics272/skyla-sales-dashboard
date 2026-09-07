@@ -12,7 +12,10 @@
 // month that hasn't happened yet, so the ratio is already the right
 // to-date-vs-full-year-plan reading without any elapsed-months filtering.
 import { runQuery, table } from "../client";
-import { currentFYLabel, fyLabel, parseFyLabel, calendarMonthFromFiscal, isFutureFiscalMonth, fiscalMonthNumber } from "@/lib/reference/financialYear";
+import {
+  currentFYLabel, fyLabel, fyBounds, parseFyLabel, calendarMonthFromFiscal, isFutureFiscalMonth, fiscalMonthNumber,
+  fyMonthOverlapFraction, DateRange,
+} from "@/lib/reference/financialYear";
 import { PeriodFilter, resolvePeriodFromFilter } from "@/lib/reference/period";
 import { safeDivide } from "@/lib/format/currency";
 
@@ -26,6 +29,20 @@ export function resolveTargetsFy(filter: TargetsFilter): string {
   return currentFYLabel(new Date(`${period.current.start}T00:00:00`));
 }
 
+/**
+ * 2026-09-07: the display/proration range for every leadership_targets
+ * section below. "This FY" keeps the original whole-FY annual-attainment
+ * reading (target = the full year's plan, matching what "This FY" already
+ * means everywhere else that isn't a fixed annual plan); every other tab
+ * (Today/This Month/Last 7/30 Days/Custom Range) narrows target AND
+ * achieved down to that tab's actual date range instead of always showing
+ * the whole FY regardless of what's selected.
+ */
+export function resolveTargetsRange(filter: TargetsFilter, fy: string): DateRange {
+  const period = resolvePeriodFromFilter(filter);
+  return period.key === "this_fy" ? fyBounds(fy) : period.current;
+}
+
 export interface CategoryAchievement {
   category: "B2B" | "B2C" | "OTA";
   target: number;
@@ -33,7 +50,8 @@ export interface CategoryAchievement {
   achievedPct: number | null;
 }
 
-interface CategoryAchievementRow {
+interface CategoryAchievementMonthRow {
+  month_number: number;
   b2b_target: number | null;
   b2b_achieved: number | null;
   b2c_target: number | null;
@@ -42,25 +60,40 @@ interface CategoryAchievementRow {
   ota_achieved: number | null;
 }
 
+/**
+ * 2026-09-07: per-month rows, prorated by day-overlap with the active
+ * period's range and summed — instead of always summing the whole FY's 12
+ * months regardless of the period filter (see resolveTargetsRange).
+ */
 export async function getCategoryAchievement(filter: TargetsFilter): Promise<CategoryAchievement[]> {
   const fy = resolveTargetsFy(filter);
-  const rows = await runQuery<CategoryAchievementRow>(`
-    SELECT
+  const range = resolveTargetsRange(filter, fy);
+  const rows = await runQuery<CategoryAchievementMonthRow>(`
+    SELECT Month_Number AS month_number,
       SUM(B2B_Target) AS b2b_target, SUM(B2B_Achieved) AS b2b_achieved,
       SUM(B2C_Target) AS b2c_target, SUM(B2C_Achieved) AS b2c_achieved,
       SUM(OTA_Target) AS ota_target, SUM(OTA_Achieved) AS ota_achieved
     FROM ${table("leadership_targets")}
     WHERE Financial_Year = @fy
+    GROUP BY month_number
   `, { fy });
 
-  const r = rows[0] ?? {
-    b2b_target: 0, b2b_achieved: 0, b2c_target: 0, b2c_achieved: 0, ota_target: 0, ota_achieved: 0,
-  };
+  const totals = { b2bT: 0, b2bA: 0, b2cT: 0, b2cA: 0, otaT: 0, otaA: 0 };
+  for (const r of rows) {
+    const frac = fyMonthOverlapFraction(fy, calendarMonthFromFiscal(r.month_number), range);
+    if (frac <= 0) continue;
+    totals.b2bT += (r.b2b_target ?? 0) * frac;
+    totals.b2bA += (r.b2b_achieved ?? 0) * frac;
+    totals.b2cT += (r.b2c_target ?? 0) * frac;
+    totals.b2cA += (r.b2c_achieved ?? 0) * frac;
+    totals.otaT += (r.ota_target ?? 0) * frac;
+    totals.otaA += (r.ota_achieved ?? 0) * frac;
+  }
 
   return [
-    { category: "B2B", target: r.b2b_target ?? 0, achieved: r.b2b_achieved ?? 0, achievedPct: safeDivide(r.b2b_achieved ?? 0, r.b2b_target ?? 0) },
-    { category: "B2C", target: r.b2c_target ?? 0, achieved: r.b2c_achieved ?? 0, achievedPct: safeDivide(r.b2c_achieved ?? 0, r.b2c_target ?? 0) },
-    { category: "OTA", target: r.ota_target ?? 0, achieved: r.ota_achieved ?? 0, achievedPct: safeDivide(r.ota_achieved ?? 0, r.ota_target ?? 0) },
+    { category: "B2B", target: totals.b2bT, achieved: totals.b2bA, achievedPct: safeDivide(totals.b2bA, totals.b2bT) },
+    { category: "B2C", target: totals.b2cT, achieved: totals.b2cA, achievedPct: safeDivide(totals.b2cA, totals.b2cT) },
+    { category: "OTA", target: totals.otaT, achieved: totals.otaA, achievedPct: safeDivide(totals.otaA, totals.otaT) },
   ];
 }
 
@@ -157,34 +190,49 @@ function computeRollover(fy: string, rows: RawTargetMonthRow[], seedShortfall: n
 }
 
 /** Monthly "Revenue Targets with Roll Over" — dept target vs target-with-rollover vs achieved, matching the legacy dashboard's 3-line view. */
+/** Always computed across the FULL 12 fiscal months — the rollover cascade in computeRollover needs every prior month to get a later month's carry right, regardless of what the period filter narrows display down to. Callers needing a period-scoped view should filter/prorate this result, not re-fetch a partial range. */
 export async function getMonthlyRevenueTargets(fy?: string): Promise<MonthlyRevenueTarget[]> {
   const resolvedFy = fy ?? currentFYLabel();
   const [rows, seedShortfall] = await Promise.all([getRawMonthlyRows(resolvedFy), getPriorMarchShortfall(resolvedFy)]);
   return computeRollover(resolvedFy, rows, seedShortfall);
 }
 
-function summarize(data: MonthlyRevenueTarget[]): RevenueAchievement {
+/**
+ * 2026-09-07: prorates each month by its day-overlap with `range` before
+ * summing, instead of always summing the full FY regardless of the period
+ * filter (see resolveTargetsRange — "This FY" passes the whole FY's bounds
+ * here, which is a no-op prorate-wise and preserves the original
+ * to-date-vs-full-year-plan reading; every other tab narrows both sides to
+ * its own range). `data` should be the *full* 12-month array from
+ * getMonthlyRevenueTargets — proration happens here, not by pre-filtering
+ * the array, so the rollover cascade upstream is never affected by what's
+ * being displayed.
+ */
+export function summarizeRevenueAchievement(data: MonthlyRevenueTarget[], fy: string, range: DateRange): RevenueAchievement {
   let target = 0;
   let achieved = 0;
   let targetWithRollOver = 0;
   for (const r of data) {
-    target += r.deptTarget;
-    achieved += r.achievedRevenue;
-    targetWithRollOver += r.targetWithRollOver;
+    const frac = fyMonthOverlapFraction(fy, calendarMonthFromFiscal(r.monthNumber), range);
+    if (frac <= 0) continue;
+    target += r.deptTarget * frac;
+    achieved += r.achievedRevenue * frac;
+    targetWithRollOver += r.targetWithRollOver * frac;
   }
   return { target, achieved, achievedPct: safeDivide(achieved, target), targetWithRollOver };
 }
 
-/** Whole-FY summary — target sums the full planned year, achieved is naturally 0 for any month that hasn't happened, so this is already a "to-date vs full-year-plan" reading. Prefer this over re-fetching when `getMonthlyRevenueTargets` was already called for the chart. */
-export function summarizeRevenueAchievement(data: MonthlyRevenueTarget[]): RevenueAchievement {
-  return summarize(data);
+/** Filters a monthly-grain array down to just the months `range` actually touches — for trend-chart display once the period filter has narrowed below "the whole FY" ("This FY" itself touches every month up to today, so nothing is dropped for the default tab). No proration: a monthly figure is what it is, it isn't divisible mid-month for a chart point the way a summary total is above. */
+export function filterMonthlyToRange<T extends { monthNumber: number }>(data: T[], fy: string, range: DateRange): T[] {
+  return data.filter((r) => fyMonthOverlapFraction(fy, calendarMonthFromFiscal(r.monthNumber), range) > 0);
 }
 
 /** Convenience wrapper that fetches its own data. */
 export async function getRevenueAchievement(filter: TargetsFilter): Promise<RevenueAchievement> {
   const fy = resolveTargetsFy(filter);
+  const range = resolveTargetsRange(filter, fy);
   const data = await getMonthlyRevenueTargets(fy);
-  return summarize(data);
+  return summarizeRevenueAchievement(data, fy, range);
 }
 
 export interface MonthlyAdrTarget {
@@ -195,7 +243,9 @@ export interface MonthlyAdrTarget {
   achievedAdr: number;
 }
 
-export async function getAdrTargetVsAchieved(fy?: string): Promise<MonthlyAdrTarget[]> {
+/** `range`, when given, filters the returned months down to whatever the period filter touches (see filterMonthlyToRange) — omit it to get the full FY (e.g. for a caller that wants to do its own filtering). */
+export async function getAdrTargetVsAchieved(fy?: string, range?: DateRange): Promise<MonthlyAdrTarget[]> {
+  const resolvedFy = fy ?? currentFYLabel();
   const rows = await runQuery<{ fy: string; month_number: number; month: string; target_adr: number | null; achieved_adr: number | null }>(`
     SELECT Financial_Year AS fy, Month_Number AS month_number, Month AS month,
       AVG(Target_ADR) AS target_adr, AVG(Achieved_ADR) AS achieved_adr
@@ -203,15 +253,16 @@ export async function getAdrTargetVsAchieved(fy?: string): Promise<MonthlyAdrTar
     WHERE Financial_Year = @fy
     GROUP BY fy, month_number, month
     ORDER BY month_number
-  `, { fy: fy ?? currentFYLabel() });
+  `, { fy: resolvedFy });
 
-  return rows.map((r) => ({
+  const result = rows.map((r) => ({
     fy: r.fy,
     monthNumber: r.month_number,
     month: r.month,
     targetAdr: r.target_adr ?? 0,
     achievedAdr: r.achieved_adr ?? 0,
   }));
+  return range ? filterMonthlyToRange(result, resolvedFy, range) : result;
 }
 
 export interface MonthlyOccupancyTarget {
@@ -222,7 +273,8 @@ export interface MonthlyOccupancyTarget {
   achievedOccupancyPct: number;
 }
 
-export async function getOccupancyTargetVsAchieved(fy?: string): Promise<MonthlyOccupancyTarget[]> {
+export async function getOccupancyTargetVsAchieved(fy?: string, range?: DateRange): Promise<MonthlyOccupancyTarget[]> {
+  const resolvedFy = fy ?? currentFYLabel();
   const rows = await runQuery<{ fy: string; month_number: number; month: string; target_occ: number | null; achieved_occ: number | null }>(`
     SELECT Financial_Year AS fy, Month_Number AS month_number, Month AS month,
       AVG(Target_Occupancy_Percent) AS target_occ, AVG(Achieved_Occupancy_Percent) AS achieved_occ
@@ -230,13 +282,14 @@ export async function getOccupancyTargetVsAchieved(fy?: string): Promise<Monthly
     WHERE Financial_Year = @fy
     GROUP BY fy, month_number, month
     ORDER BY month_number
-  `, { fy: fy ?? currentFYLabel() });
+  `, { fy: resolvedFy });
 
-  return rows.map((r) => ({
+  const mapped = rows.map((r) => ({
     fy: r.fy,
     monthNumber: r.month_number,
     month: r.month,
     targetOccupancyPct: r.target_occ ?? 0,
     achievedOccupancyPct: r.achieved_occ ?? 0,
   }));
+  return range ? filterMonthlyToRange(mapped, resolvedFy, range) : mapped;
 }

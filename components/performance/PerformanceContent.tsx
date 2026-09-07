@@ -72,6 +72,7 @@ const REVIEWS_TABS: ReviewsTab[] = ["Google", "OTA"];
 
 export default function PerformanceContent({
   fy,
+  targetsRangeLabel,
   categoryAchievement,
   revenueAchievement,
   monthlyRevenueTargets,
@@ -85,6 +86,8 @@ export default function PerformanceContent({
   compareYoY,
 }: {
   fy: string;
+  /** "Full FY 26-27" on the This FY tab, otherwise the active period's own label (e.g. "August 2026", "Last 30 Days") — every targets section below is now scoped to this, not always the whole FY. */
+  targetsRangeLabel: string;
   categoryAchievement: CategoryAchievement[];
   revenueAchievement: RevenueAchievement;
   monthlyRevenueTargets: MonthlyRevenueTarget[];
@@ -120,10 +123,20 @@ export default function PerformanceContent({
           gap between how the two systems track "achieved revenue", not a
           filter or dashboard bug. The prior pass's merge into one undivided
           row made that look like one consistent number when it isn't — a
-          divider and an explicit caption now separate the two groups. */}
+          divider and an explicit caption now separate the two groups.
+          Also 2026-09-07: this whole section used to always show FY 26-27
+          regardless of the period filter (per explicit prior direction —
+          "these are fixed annual targets"). Per newer explicit direction —
+          "I want filter to apply to each and everything" — every tab other
+          than This FY now prorates the fixed plan down to its own date
+          range (see getPropertyTargetComparison / resolveTargetsRange);
+          This FY alone keeps the original whole-year-plan reading, since
+          prorating an annual target down to "today's slice of the year"
+          would make the attainment % meaningless (it'd land near 100% by
+          construction instead of reading as "on/behind/ahead of pace"). */}
       <div>
         <h3 className="text-base font-semibold text-zinc-800 dark:text-zinc-100">Revenue Targets By Property</h3>
-        <p className="text-xs text-zinc-400 dark:text-zinc-500">Fixed reference plan — {fy}</p>
+        <p className="text-xs text-zinc-400 dark:text-zinc-500">Reference plan — {targetsRangeLabel}</p>
         <p className="mt-1 text-[11px] text-zinc-400 dark:text-zinc-500">
           Revenue Achievement (company-wide, leadership targets) and the property rollup beside it (fixed plan vs live bookings) are two
           separate tracking systems — they won&apos;t match exactly.

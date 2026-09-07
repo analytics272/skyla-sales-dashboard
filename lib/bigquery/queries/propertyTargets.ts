@@ -5,7 +5,8 @@
 // always live BigQuery.
 import { runQuery, table } from "../client";
 import { PROPERTY_TARGETS_FY27, PROPERTY_TARGETS_FY } from "@/lib/reference/propertyTargets";
-import { fyLabelSqlExpr, fyBounds } from "@/lib/reference/financialYear";
+import { fyBounds, fyMonthOverlapFraction, DateRange } from "@/lib/reference/financialYear";
+import { PeriodFilter, resolvePeriodFromFilter } from "@/lib/reference/period";
 import { getAvailableRoomNightsByProperty } from "./propertyWindows";
 import { safeDivide } from "@/lib/format/currency";
 
@@ -38,25 +39,32 @@ interface AchievedRow {
 }
 
 /**
- * The active period tab is intentionally ignored — these fixed targets only
- * exist for FY 26-27, so this section always compares against the whole of
- * FY 26-27 regardless of which tab (Today/This FY/Last Year) is selected
- * elsewhere on the page (same convention as the real-time "pace" cards).
- * `properties` fully respects the global Property filter, unlike the rest of
- * the Targets tab (leadership_targets has no Property column to filter by —
- * a genuine data constraint) — this section's target side comes from the
- * fixed per-property reference data instead, so it can be, and is, scoped.
+ * 2026-09-07: the period filter now applies here too. The "This FY" tab
+ * keeps the original whole-FY-26-27 comparison (annual-attainment reading —
+ * "38% of this year's 28 Cr goal" is the number leadership actually wants
+ * from that tab, not a target re-prorated down to "today's slice of the
+ * year", which would land near 100% by construction and stop meaning
+ * anything). Every other tab (Today/This Month/Last 7/30 Days/Custom Range)
+ * scopes both sides to that tab's actual date range: the achieved side is a
+ * live sales_booking query (already fully re-scopable), and each of the
+ * fixed 12 monthly target rows below is prorated by its day-overlap with
+ * the selected range via fyMonthOverlapFraction (0 for a month the range
+ * doesn't touch, 1 for a month it fully contains, a fraction in between).
+ * `properties` still fully respects the global Property filter, as before.
  */
-export async function getPropertyTargetComparison(properties: string[]): Promise<PropertyTargetComparisonResult> {
+export async function getPropertyTargetComparison(properties: string[], filter: PeriodFilter): Promise<PropertyTargetComparisonResult> {
+  const period = resolvePeriodFromFilter(filter);
+  const range: DateRange = period.key === "this_fy" ? fyBounds(PROPERTY_TARGETS_FY) : period.current;
+
   const [achievedRows, availableByProperty] = await Promise.all([
     runQuery<AchievedRow>(`
       SELECT Property AS property, SUM(DailyRevenue) AS revenue, COUNT(*) AS nights
       FROM ${table("sales_booking")}
       WHERE Property IN UNNEST(@properties)
-        AND ${fyLabelSqlExpr("CAST(StayDate AS DATE)")} = @fy
+        AND CAST(StayDate AS DATE) BETWEEN @start AND @end
       GROUP BY property
-    `, { properties, fy: PROPERTY_TARGETS_FY }),
-    getAvailableRoomNightsByProperty(properties, fyBounds(PROPERTY_TARGETS_FY)),
+    `, { properties, start: range.start, end: range.end }),
+    getAvailableRoomNightsByProperty(properties, range),
   ]);
 
   let totalTargetRevenue = 0;
@@ -68,9 +76,16 @@ export async function getPropertyTargetComparison(properties: string[]): Promise
 
   const rows = properties.map((code) => {
     const targets = PROPERTY_TARGETS_FY27[code] ?? [];
-    const targetRevenue = targets.reduce((s, t) => s + t.revenue, 0);
-    const targetSoldNights = targets.reduce((s, t) => s + t.available * t.occPct, 0);
-    const targetAvailable = targets.reduce((s, t) => s + t.available, 0);
+    let targetRevenue = 0;
+    let targetSoldNights = 0;
+    let targetAvailable = 0;
+    for (const t of targets) {
+      const frac = fyMonthOverlapFraction(PROPERTY_TARGETS_FY, t.calendarMonth, range);
+      if (frac <= 0) continue;
+      targetRevenue += t.revenue * frac;
+      targetSoldNights += t.available * t.occPct * frac;
+      targetAvailable += t.available * frac;
+    }
 
     const achieved = achievedRows.find((r) => r.property === code);
     const achievedRevenue = achieved?.revenue ?? 0;
