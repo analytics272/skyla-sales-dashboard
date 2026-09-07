@@ -13,7 +13,7 @@
 // to-date-vs-full-year-plan reading without any elapsed-months filtering.
 import { runQuery, table } from "../client";
 import {
-  currentFYLabel, fyLabel, fyBounds, parseFyLabel, calendarMonthFromFiscal, isFutureFiscalMonth, fiscalMonthNumber,
+  currentFYLabel, fyLabel, parseFyLabel, calendarMonthFromFiscal, isFutureFiscalMonth, fiscalMonthNumber,
   fyMonthOverlapFraction, DateRange,
 } from "@/lib/reference/financialYear";
 import { PeriodFilter, resolvePeriodFromFilter } from "@/lib/reference/period";
@@ -30,17 +30,19 @@ export function resolveTargetsFy(filter: TargetsFilter): string {
 }
 
 /**
- * 2026-09-07: the display/proration range for every leadership_targets
- * section below. "This FY" keeps the original whole-FY annual-attainment
- * reading (target = the full year's plan, matching what "This FY" already
- * means everywhere else that isn't a fixed annual plan); every other tab
- * (Today/This Month/Last 7/30 Days/Custom Range) narrows target AND
- * achieved down to that tab's actual date range instead of always showing
- * the whole FY regardless of what's selected.
+ * The display/proration range for every leadership_targets section below.
+ * 2026-09-07, twelfth pass: simplified now that period.ts's This FY *is*
+ * the full fiscal year (no more special case needed here) — every tab just
+ * uses its own `current` range as-is. No to-date clamping is needed on this
+ * side the way propertyTargets.ts needs one: leadership_targets' own
+ * Achieved figures are pre-recorded per fiscal month and naturally read 0
+ * for a month that hasn't happened yet (there's nothing to prematurely
+ * "achieve" from a live query here), so including a not-yet-started month
+ * in the sum never inflates anything the way a live sales_booking query
+ * would.
  */
-export function resolveTargetsRange(filter: TargetsFilter, fy: string): DateRange {
-  const period = resolvePeriodFromFilter(filter);
-  return period.key === "this_fy" ? fyBounds(fy) : period.current;
+export function resolveTargetsRange(filter: TargetsFilter): DateRange {
+  return resolvePeriodFromFilter(filter).current;
 }
 
 export interface CategoryAchievement {
@@ -67,7 +69,7 @@ interface CategoryAchievementMonthRow {
  */
 export async function getCategoryAchievement(filter: TargetsFilter): Promise<CategoryAchievement[]> {
   const fy = resolveTargetsFy(filter);
-  const range = resolveTargetsRange(filter, fy);
+  const range = resolveTargetsRange(filter);
   const rows = await runQuery<CategoryAchievementMonthRow>(`
     SELECT Month_Number AS month_number,
       SUM(B2B_Target) AS b2b_target, SUM(B2B_Achieved) AS b2b_achieved,
@@ -230,7 +232,7 @@ export function filterMonthlyToRange<T extends { monthNumber: number }>(data: T[
 /** Convenience wrapper that fetches its own data. */
 export async function getRevenueAchievement(filter: TargetsFilter): Promise<RevenueAchievement> {
   const fy = resolveTargetsFy(filter);
-  const range = resolveTargetsRange(filter, fy);
+  const range = resolveTargetsRange(filter);
   const data = await getMonthlyRevenueTargets(fy);
   return summarizeRevenueAchievement(data, fy, range);
 }

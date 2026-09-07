@@ -5,8 +5,8 @@
 // always live BigQuery.
 import { runQuery, table } from "../client";
 import { PROPERTY_TARGETS_FY27, PROPERTY_TARGETS_FY } from "@/lib/reference/propertyTargets";
-import { fyBounds, fyMonthOverlapFraction, DateRange } from "@/lib/reference/financialYear";
-import { PeriodFilter, resolvePeriodFromFilter } from "@/lib/reference/period";
+import { fyMonthOverlapFraction, DateRange } from "@/lib/reference/financialYear";
+import { PeriodFilter, resolvePeriodFromFilter, clampRangeToToday } from "@/lib/reference/period";
 import { getAvailableRoomNightsByProperty } from "./propertyWindows";
 import { safeDivide } from "@/lib/format/currency";
 
@@ -39,33 +39,28 @@ interface AchievedRow {
 }
 
 /**
- * 2026-09-07: the period filter now applies here too — and 2026-09-07,
- * eleventh pass: fixed a real bug from that same-day change, caught by
- * comparing this section's "Total Achieved" against Overview's "Room
- * Revenue" for the identical This FY / All Properties selection and finding
- * they didn't match (11.48 Cr vs 10.12 Cr). The two sides of this comparison
- * need two DIFFERENT ranges on the "This FY" tab, not one shared range:
- *
- * - `targetRange`: the whole FY 26-27 on the This FY tab (annual-attainment
- *   reading — "38% of this year's 28 Cr goal" is the number leadership
- *   actually wants, not a target re-prorated down to "today's slice of the
- *   year", which would land near 100% by construction and stop meaning
- *   anything), prorated down to the actual range on every other tab.
- * - `achievedRange`: ALWAYS the period's own `current` range (to-date on
- *   This FY, exact bounds everywhere else) — the same "to-date" semantics
- *   Overview/Bookings/Leads already use for This FY. The bug: this used to
- *   share `targetRange`, so on This FY the achieved query scoped all the way
- *   to March 2027 — and since sales_booking carries real advance bookings
- *   for future StayDates, that silently pulled in months that haven't
- *   happened yet, overstating "achieved" against every other page's
- *   to-date reading of the same tab.
- *
+ * 2026-09-07, twelfth pass: `period.current` for This FY is now the FULL
+ * fiscal year, not year-to-date (see period.ts — This FY behaves like every
+ * other tab and Custom Range now, so it always means exactly what it says).
+ * That resurfaces the eleventh pass's exact bug shape if `current` were used
+ * for the achieved side directly: the target reading is meant to be
+ * "achieved so far vs. this year's full goal", not "everything already
+ * booked for the whole year including months that haven't happened yet".
+ * So `targetRange` (the whole selected window — full FY on This FY, prorated
+ * per fyMonthOverlapFraction on every other tab) and `achievedRange`
+ * (targetRange clamped to today via clampRangeToToday) are still two
+ * different things here, same as the eleventh pass established — the only
+ * change is that `targetRange` no longer needs its own This-FY special case,
+ * since `period.current` already IS the full FY for that tab now. This also
+ * now correctly handles This Month (also a full-month range that can extend
+ * past today) and a future-extending Custom Range the same way, which the
+ * eleventh pass's This-FY-only special case did not.
  * `properties` still fully respects the global Property filter, as before.
  */
 export async function getPropertyTargetComparison(properties: string[], filter: PeriodFilter): Promise<PropertyTargetComparisonResult> {
   const period = resolvePeriodFromFilter(filter);
-  const targetRange: DateRange = period.key === "this_fy" ? fyBounds(PROPERTY_TARGETS_FY) : period.current;
-  const achievedRange: DateRange = period.current;
+  const targetRange: DateRange = period.current;
+  const achievedRange: DateRange = clampRangeToToday(targetRange);
 
   const [achievedRows, availableByProperty] = await Promise.all([
     runQuery<AchievedRow>(`
