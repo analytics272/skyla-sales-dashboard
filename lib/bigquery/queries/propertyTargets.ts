@@ -39,22 +39,33 @@ interface AchievedRow {
 }
 
 /**
- * 2026-09-07: the period filter now applies here too. The "This FY" tab
- * keeps the original whole-FY-26-27 comparison (annual-attainment reading —
- * "38% of this year's 28 Cr goal" is the number leadership actually wants
- * from that tab, not a target re-prorated down to "today's slice of the
- * year", which would land near 100% by construction and stop meaning
- * anything). Every other tab (Today/This Month/Last 7/30 Days/Custom Range)
- * scopes both sides to that tab's actual date range: the achieved side is a
- * live sales_booking query (already fully re-scopable), and each of the
- * fixed 12 monthly target rows below is prorated by its day-overlap with
- * the selected range via fyMonthOverlapFraction (0 for a month the range
- * doesn't touch, 1 for a month it fully contains, a fraction in between).
+ * 2026-09-07: the period filter now applies here too — and 2026-09-07,
+ * eleventh pass: fixed a real bug from that same-day change, caught by
+ * comparing this section's "Total Achieved" against Overview's "Room
+ * Revenue" for the identical This FY / All Properties selection and finding
+ * they didn't match (11.48 Cr vs 10.12 Cr). The two sides of this comparison
+ * need two DIFFERENT ranges on the "This FY" tab, not one shared range:
+ *
+ * - `targetRange`: the whole FY 26-27 on the This FY tab (annual-attainment
+ *   reading — "38% of this year's 28 Cr goal" is the number leadership
+ *   actually wants, not a target re-prorated down to "today's slice of the
+ *   year", which would land near 100% by construction and stop meaning
+ *   anything), prorated down to the actual range on every other tab.
+ * - `achievedRange`: ALWAYS the period's own `current` range (to-date on
+ *   This FY, exact bounds everywhere else) — the same "to-date" semantics
+ *   Overview/Bookings/Leads already use for This FY. The bug: this used to
+ *   share `targetRange`, so on This FY the achieved query scoped all the way
+ *   to March 2027 — and since sales_booking carries real advance bookings
+ *   for future StayDates, that silently pulled in months that haven't
+ *   happened yet, overstating "achieved" against every other page's
+ *   to-date reading of the same tab.
+ *
  * `properties` still fully respects the global Property filter, as before.
  */
 export async function getPropertyTargetComparison(properties: string[], filter: PeriodFilter): Promise<PropertyTargetComparisonResult> {
   const period = resolvePeriodFromFilter(filter);
-  const range: DateRange = period.key === "this_fy" ? fyBounds(PROPERTY_TARGETS_FY) : period.current;
+  const targetRange: DateRange = period.key === "this_fy" ? fyBounds(PROPERTY_TARGETS_FY) : period.current;
+  const achievedRange: DateRange = period.current;
 
   const [achievedRows, availableByProperty] = await Promise.all([
     runQuery<AchievedRow>(`
@@ -63,8 +74,8 @@ export async function getPropertyTargetComparison(properties: string[], filter: 
       WHERE Property IN UNNEST(@properties)
         AND CAST(StayDate AS DATE) BETWEEN @start AND @end
       GROUP BY property
-    `, { properties, start: range.start, end: range.end }),
-    getAvailableRoomNightsByProperty(properties, range),
+    `, { properties, start: achievedRange.start, end: achievedRange.end }),
+    getAvailableRoomNightsByProperty(properties, achievedRange),
   ]);
 
   let totalTargetRevenue = 0;
@@ -80,7 +91,7 @@ export async function getPropertyTargetComparison(properties: string[], filter: 
     let targetSoldNights = 0;
     let targetAvailable = 0;
     for (const t of targets) {
-      const frac = fyMonthOverlapFraction(PROPERTY_TARGETS_FY, t.calendarMonth, range);
+      const frac = fyMonthOverlapFraction(PROPERTY_TARGETS_FY, t.calendarMonth, targetRange);
       if (frac <= 0) continue;
       targetRevenue += t.revenue * frac;
       targetSoldNights += t.available * t.occPct * frac;
