@@ -91,11 +91,27 @@ function sameWindowLastYear(start: string, end: string): DateRange {
  * given date (defaults to today — parameterized for testability).
  *
  * - "today": current = today only.
- * - "this_month": current = calendar-month-start .. today (to-date, not the
- *   full month — comparing a partial month to a full one would mislead).
+ * - "this_month": current = the FULL calendar month (1st .. last day) —
+ *   2026-09-07, ninth pass: previously truncated at today ("to-date"), which
+ *   made "This Month" silently show a different, smaller range than typing
+ *   the identical month as a Custom Range would (confirmed live: Sept 1-7
+ *   to-date vs. a Sept 1-30 custom range for the same month gave genuinely
+ *   different totals, reported as a bug). Stay-based data (sales_booking)
+ *   legitimately carries real, already-confirmed advance bookings for dates
+ *   later in the month — showing the full month isn't "projecting" anything
+ *   fabricated, it's the same real on-the-books data a custom range for that
+ *   month would show, so there's no more reason to truncate this tab than
+ *   any other period tab (none of which truncate at today either).
  * - "last_7_days" / "last_30_days": current = the trailing N days ending
- *   today (inclusive).
- * - "this_fy": current = FY-start .. today (year-to-date).
+ *   today (inclusive) — these are inherently backward-looking windows, not
+ *   "a unit that's still in progress", so there's no full-vs-to-date
+ *   ambiguity to resolve here the way there was for this_month.
+ * - "this_fy": current = FY-start .. today (year-to-date) — deliberately
+ *   NOT changed to the full FY the same way: unlike a month, "This FY"
+ *   backs the Performance page's whole target-attainment reading (Revenue
+ *   Achievement, Category Achievement, Property Targets), where "achieved
+ *   to date vs. this year's full target" is the actual metric leadership
+ *   wants — see resolveTargetsRange in targets.ts. Revisit only if asked.
  * - "custom": current = the caller-supplied range.
  *
  * For every key, `previous` is either the immediately-preceding window of
@@ -112,8 +128,9 @@ export function resolvePeriod(key: PeriodKey, asOf: Date = new Date(), custom?: 
     currentLabel = "Today";
   } else if (key === "this_month") {
     const monthStart = `${asOf.getFullYear()}-${pad(asOf.getMonth() + 1)}-01`;
-    current = { start: monthStart, end: todayIso };
-    currentLabel = `${MONTH_NAMES_FULL[asOf.getMonth()]} (to date)`;
+    const monthEnd = addDays(addMonths(monthStart, 1), -1);
+    current = { start: monthStart, end: monthEnd };
+    currentLabel = MONTH_NAMES_FULL[asOf.getMonth()];
   } else if (key === "last_7_days") {
     current = { start: addDays(todayIso, -6), end: todayIso };
     currentLabel = "Last 7 Days";
