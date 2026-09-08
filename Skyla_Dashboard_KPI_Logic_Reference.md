@@ -260,6 +260,47 @@ authoritative source in the meantime.
   top-row Conversion Rate KPI (§7) narrowed to one segment. A progress bar
   implies progress toward a goal, which doesn't apply to a plain rate.
 
+**2026-09-08 (later, same day) — real bug, dashboard-wide: 26.9% of all-time
+`sales_booking` revenue was silently misclassified by B2B/B2C/OTA category.**
+Found while investigating why Overview's "Business Category Mix" donut
+(§2/§1.3) looked wrong. `classifyBookingSource()`/`bookingCategorySqlExpr()`
+(`lib/reference/bookingSourceMap.ts`) match a booking's raw `Source` text
+against `BOOKING_SOURCE_MAP` (ported from the original `Mapping.gs`), then
+fall back to a handful of pattern regexes, then default to `'B2C'` for
+anything that matches neither — silently, with no error and no visible flag
+(a `bookingIsUnmappedSqlExpr()` triage helper existed for exactly this but
+was never actually wired into any query or UI). Four real `Source` values in
+the live data weren't in the original map and were falling through to that
+default:
+
+| Raw Source | All-time revenue | Was defaulting to | User-confirmed meaning | Now maps to |
+|---|---|---|---|---|
+| `CS` | ₹12.6 Cr (22.7% of all revenue) | B2C | shorthand for "Corporate Sales" | **B2B** |
+| `TS` | ₹1.36 Cr (2.4%) | B2C | shorthand for "Tele Sales" | B2C (no change) |
+| `Sales` | ₹91.5 L (1.6%) | B2C | shorthand for "Corporate Sales" | **B2B** |
+| `Walk in` (no hyphen — `Walk-in` was already mapped) | ₹1.9 L | B2C | same as `Walk-in` | B2C (no change) |
+
+`CS` alone is not a small edge case — confirmed NOT a rename-over-time
+artifact (it runs in parallel with the full "Corporate Sales" label every
+single month from Apr 2024 through Sept 2026, neither ever replacing the
+other; both are shorthand-vs-full-name labels for the same real channel,
+entered inconsistently depending on who logs the booking). Verified live:
+before this fix, Sept 2026's live B2B revenue (₹51.5L, from `sales_booking`)
+was 29% off the independently-tracked `leadership_targets.B2B_Achieved`
+figure for that month (₹72.7L); after moving `CS`/`Sales` to B2B, live B2B
+revenue is ₹72.2L — within 0.6%. Fixed in `BOOKING_SOURCE_MAP` directly
+(`lib/reference/bookingSourceMap.ts`) — reaches every chart/KPI that groups
+by B2B/B2C/OTA category dashboard-wide: Business Category Mix and Revenue/
+Room-Nights by Source (§2), Business Category ADR (§4), Occupancy by Brand
+(§5), Category Achievement (§6.1), and B2B Contribution % (§ B2B section,
+since its denominator is total company-wide `sales_booking` revenue by
+category). Also found and left unfixed, out of scope for this pass: a
+`Source = '33'` garbage value (₹4.3L, obviously a data-entry glitch, still
+silently defaulting to B2C — too small to chase further) and 33 `lead_tracker`
+leads (`Enquiry mail`/`Keystack`/`low budget` sources, ~0.6% of all leads)
+that count toward Total/Closed Leads (§7) but don't appear in any of the New/
+Existing/Reference per-segment breakdown cards.
+
 ---
 
 ## 1. Shared reference logic
@@ -291,7 +332,17 @@ These building blocks are reused across multiple tabs.
 - File: `lib/reference/bookingSourceMap.ts`.
 - An `isUnmapped` flag exists internally for any source that only matched via
   the fallback pattern (not an exact entry) — used to keep the mapping table
-  maintainable, not surfaced as its own dashboard KPI in v1.
+  maintainable, not surfaced as its own dashboard KPI in v1. **This flag was
+  built but never actually wired into any query or UI** — which is exactly
+  how the 2026-09-08 `CS`/`Sales` misclassification (₹13.5 Cr combined,
+  wrongly bucketed as B2C — see revision history) went undetected. Still not
+  surfaced anywhere; if another unmapped `Source` value shows up in the
+  future, nothing on the dashboard will flag it automatically.
+- **Four entries added 2026-09-08, confirmed directly by the user (not from
+  `Mapping.gs`, which doesn't have them)**: `CS` → B2B (shorthand for
+  "Corporate Sales"), `Sales` → B2B (same), `TS` → B2C (shorthand for "Tele
+  Sales"), `Walk in` (no hyphen) → B2C (same as the already-mapped
+  `Walk-in`). See revision history for the full before/after evidence.
 
 ### 1.4 OTA Commission Table
 - Editable rate table, not hardcoded per-query. Rates: Goibibo 20%, go-mmt 20%,
