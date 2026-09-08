@@ -343,6 +343,23 @@ dashboard audit** (`Skyla_Dashboard_Full_Audit_2026-09-08.md`, findings G1/G4/G5
    140 bookings, ₹4.3L; `MakemytripXml`, 3 bookings, ₹10.6K) and correctly
    stays silent on `CS`/`Sales`/`TS`/`Walk in` now that those are mapped.
 
+**2026-09-08 (later still, same day) — the two remaining flagged sources
+resolved, both user-confirmed against BigQuery directly:**
+- `'33'` → **B2B** (not B2C, and not the data-entry glitch it was assumed to
+  be when the unmapped-source indicator first flagged it — see §1.3).
+- `MakemytripXml` → **OTA**, grouped into the OTA Breakdown tab's "GoMMT"
+  display bucket alongside `makemytrip`/`go-mmt`/`easemytrip` (`OTA_DISPLAY_GROUPS`,
+  `lib/reference/bookingSourceMap.ts`) — this was already the correct
+  category via the fallback pattern match, so no totals moved; it now just
+  displays grouped with its sibling MakeMyTrip-family Source values instead
+  of appearing as a separate row.
+
+Verified: `getUnmappedSourceStats()` now reports **zero** unmapped Source
+values across `sales_booking`'s entire history — every distinct raw value
+in the table has a real classification. Both entries added to
+`BOOKING_SOURCE_MAP` in `lib/reference/bookingSourceMap.ts`; existing
+mappings untouched.
+
 ---
 
 ## 1. Shared reference logic
@@ -386,11 +403,24 @@ These building blocks are reused across multiple tabs.
   additive — flags, doesn't reclassify. Verified: correctly flags only the
   two remaining known gaps (`'33'` and `MakemytripXml`, see below) and stays
   silent on `CS`/`Sales`/`TS`/`Walk in` now that those are mapped.
-- **Four entries added 2026-09-08, confirmed directly by the user (not from
-  `Mapping.gs`, which doesn't have them)**: `CS` → B2B (shorthand for
-  "Corporate Sales"), `Sales` → B2B (same), `TS` → B2C (shorthand for "Tele
-  Sales"), `Walk in` (no hyphen) → B2C (same as the already-mapped
-  `Walk-in`). See revision history for the full before/after evidence.
+- **Six entries added 2026-09-08, all confirmed directly by the user (not
+  from `Mapping.gs`, which doesn't have any of them)**: `CS` → B2B (shorthand
+  for "Corporate Sales"), `Sales` → B2B (same), `TS` → B2C (shorthand for
+  "Tele Sales"), `Walk in` (no hyphen) → B2C (same as the already-mapped
+  `Walk-in`), `'33'` → B2B (a numeric-looking Source value, 140 bookings/
+  ₹4.3L all-time — user confirmed against the raw BigQuery rows this is real
+  B2B, not the data-entry glitch it looked like when first flagged),
+  `MakemytripXml` → OTA (an XML-feed variant of `makemytrip`; was already
+  correctly classified OTA via the fallback pattern match, so this doesn't
+  change any total — added as an exact entry, and grouped into the OTA
+  Breakdown tab's "GoMMT" display bucket in `OTA_DISPLAY_GROUPS` alongside
+  `makemytrip`/`go-mmt`/`easemytrip`, so it no longer shows as a stray
+  separate row there). See revision history for the full before/after
+  evidence. As of this pass, `getUnmappedSourceStats()` (§ revision history,
+  2026-09-08) reports **zero** unmapped Source values dashboard-wide,
+  all-time — every raw value found across `sales_booking`'s entire history is
+  now either an exact map entry or correctly caught by the OTA/B2B fallback
+  patterns.
 
 ### 1.4 OTA Commission Table
 - Editable rate table, not hardcoded per-query. Rates: Goibibo 20%, go-mmt 20%,
