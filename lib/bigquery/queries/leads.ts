@@ -37,8 +37,38 @@ function comparisonMetric(current: number | null, previous: number | null): Comp
   return { current, previous, pctChange: current !== null && previous !== null ? safeDivide(current - previous, previous) : null };
 }
 
+// lead_tracker.date is a STRING column with genuinely mixed formatting —
+// confirmed live 2026-09-05: 5,942+ rows store it as 'YYYY-MM-DDT00:00:00'
+// (a full timestamp) instead of plain 'YYYY-MM-DD', which grows over time as
+// new rows sync in. A bare `CAST(date AS DATE)` throws ("Invalid date:
+// '...T00:00:00'") the moment it hits one of those rows — this is what took
+// the Leads page down (it worked when this code first shipped, then broke
+// as more mixed-format rows synced in — the query itself was never safe).
+// `SAFE_CAST(SUBSTR(date, 1, 10) AS DATE)` reads the first 10 characters
+// (the date portion in either format) and returns NULL instead of throwing
+// on anything unparseable, so one bad row can never take the whole query
+// down again.
+//
+// 2026-09-08: whereForRange below used to compare `date` as a plain STRING
+// against @start/@end instead of using this expression, on the reasoning
+// that "an ISO-prefixed timestamp string still sorts correctly against
+// plain-date BETWEEN bounds" — true for the START bound only
+// ('2026-09-01T00:00:00' >= '2026-09-01' holds, since the longer string
+// extends the shorter one it shares a prefix with) but FALSE for the END
+// bound ('2026-09-30T00:00:00' <= '2026-09-30' does NOT hold, for the same
+// reason in reverse) — so any lead captured on the exact last day of the
+// selected range, if stored in timestamp format, was silently excluded from
+// every Leads KPI. Verified live across every month with data (Jul 2024 -
+// Jul 2026): every single month undercounted Total Leads by 3-16 rows
+// (roughly 1-5%) except one where no timestamp-format row happened to land
+// on that month's last day. Fixed by using this DATE expression in the WHERE
+// clause too, not just in leadsTrendForRange's GROUP BY bucketing below
+// (which was already safe on its own, but still lost the same rows upstream
+// via whereForRange's WHERE clause before they ever reached the bucketing).
+const LEAD_DATE_EXPR = "SAFE_CAST(SUBSTR(date, 1, 10) AS DATE)";
+
 function whereForRange(range: DateRange, properties?: string[]): { clause: string; params: Record<string, unknown> } {
-  const conditions = [BASELINE_FILTER, "date BETWEEN @start AND @end"];
+  const conditions = [BASELINE_FILTER, `${LEAD_DATE_EXPR} BETWEEN @start AND @end`];
   const params: Record<string, unknown> = { start: range.start, end: range.end };
   if (properties && properties.length > 0) {
     params.properties = properties;
@@ -179,21 +209,6 @@ function dayLabelOf(iso: string): string {
   const d = new Date(`${iso}T00:00:00`);
   return `${d.getDate()} ${MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}`;
 }
-
-// lead_tracker.date is a STRING column with genuinely mixed formatting —
-// confirmed live 2026-09-05: 5,942+ rows store it as 'YYYY-MM-DDT00:00:00'
-// (a full timestamp) instead of plain 'YYYY-MM-DD', which grows over time as
-// new rows sync in. A bare `CAST(date AS DATE)` throws ("Invalid date:
-// '...T00:00:00'") the moment it hits one of those rows — this is what took
-// the Leads page down (it worked when this code first shipped, then broke
-// as more mixed-format rows synced in — the query itself was never safe).
-// `SAFE_CAST(SUBSTR(date, 1, 10) AS DATE)` reads the first 10 characters
-// (the date portion in either format) and returns NULL instead of throwing
-// on anything unparseable, so one bad row can never take the whole query
-// down again. whereForRange's own WHERE clause doesn't need this — it
-// compares `date` as a plain STRING, and an ISO-prefixed timestamp string
-// still sorts correctly against plain-date BETWEEN bounds.
-const LEAD_DATE_EXPR = "SAFE_CAST(SUBSTR(date, 1, 10) AS DATE)";
 
 async function leadsTrendForRange(range: DateRange, properties: string[] | undefined, granularity: LeadsTrendGranularity): Promise<LeadsTrendPoint[]> {
   const { clause, params } = whereForRange(range, properties);

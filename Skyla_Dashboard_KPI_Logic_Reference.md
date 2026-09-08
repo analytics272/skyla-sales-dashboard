@@ -301,6 +301,48 @@ leads (`Enquiry mail`/`Keystack`/`low budget` sources, ~0.6% of all leads)
 that count toward Total/Closed Leads (§7) but don't appear in any of the New/
 Existing/Reference per-segment breakdown cards.
 
+**2026-09-08 (later still, same day) — three fixes from a full end-to-end
+dashboard audit** (`Skyla_Dashboard_Full_Audit_2026-09-08.md`, findings G1/G4/G5):
+
+1. **Real bug, Leads page (§7): every KPI undercounted the last day of every
+   selected period by 1-5%.** `whereForRange()` (`lib/bigquery/queries/leads.ts`)
+   compared `lead_tracker.date` (a STRING column) as a plain string against
+   `@start`/`@end` instead of casting it — correct for the start bound
+   (`'2026-09-01T00:00:00' >= '2026-09-01'` holds) but wrong for the end bound
+   (`'2026-09-30T00:00:00' <= '2026-09-30'` does NOT hold in lexicographic
+   string comparison — the longer, timestamp-format string sorts *after* the
+   plain-date bound it shares a prefix with). Verified live across every
+   month with data (Jul 2024 - Jul 2026): every month undercounted Total
+   Leads by 3-16 rows except one where no timestamp-format row happened to
+   land on the last day. Fixed by using the file's own existing
+   `LEAD_DATE_EXPR` (`SAFE_CAST(SUBSTR(date, 1, 10) AS DATE)`) in the WHERE
+   clause too — it was already used for `getLeadsTrend`'s day/month/FY
+   bucketing, just not in the WHERE clause every Leads query shares via
+   `whereForRange`/`whereForFilter`. Verified post-fix: July 2026 (a month the
+   audit flagged as under by 16) now returns exactly the correct 507, matching
+   an independent reference count; the trend chart's own July 31 bucket now
+   shows the 16 previously-missing leads. `lead_tracker`'s sync itself was
+   NOT touched — it stops at 2026-08-30 regardless of this fix (a data-sync
+   issue, out of scope, reported separately).
+2. **Defensive-only, Reviews §9: OTA review date now `SAFE_CAST`, not a bare
+   `CAST`.** `ota.DATE` is a STRING column (unlike `rating_sheet.Date`, a real
+   DATETIME) — a bare `CAST(DATE AS DATE)` is the same latent-crash shape that
+   took down the Leads page once a malformed row synced in. No row in the
+   live data fails a `SAFE_CAST` today (checked), so this changes nothing
+   observable right now — it only prevents a future repeat of that crash.
+   `getOtaReviewStats`/`getOtaRatingTrend` (`lib/bigquery/queries/reviews.ts`).
+3. **New: unmapped-Source warning indicator (§1.3).** `bookingIsUnmappedSqlExpr()`
+   existed but was never wired into anything — the exact gap that let
+   `CS`/`Sales`/`TS`/`Walk in` silently default to B2C for two years (see the
+   entry above). `getUnmappedSourceStats()` (`lib/bigquery/queries/overview.ts`)
+   now uses it to report count/revenue/culprit-source for the active
+   Period+Property scope; Overview's "Business Category Mix" card shows a
+   small amber caption when it's non-zero, silent otherwise. Purely additive —
+   doesn't reclassify anything or change any existing total. Verified live:
+   all-time, it correctly flags only the two remaining known gaps (`'33'`,
+   140 bookings, ₹4.3L; `MakemytripXml`, 3 bookings, ₹10.6K) and correctly
+   stays silent on `CS`/`Sales`/`TS`/`Walk in` now that those are mapped.
+
 ---
 
 ## 1. Shared reference logic
@@ -335,9 +377,15 @@ These building blocks are reused across multiple tabs.
   maintainable, not surfaced as its own dashboard KPI in v1. **This flag was
   built but never actually wired into any query or UI** — which is exactly
   how the 2026-09-08 `CS`/`Sales` misclassification (₹13.5 Cr combined,
-  wrongly bucketed as B2C — see revision history) went undetected. Still not
-  surfaced anywhere; if another unmapped `Source` value shows up in the
-  future, nothing on the dashboard will flag it automatically.
+  wrongly bucketed as B2C — see revision history) went undetected.
+  **2026-09-08, later same day: now wired up.** `getUnmappedSourceStats()`
+  (`lib/bigquery/queries/overview.ts`) uses the SQL-side twin,
+  `bookingIsUnmappedSqlExpr()`, to report count/revenue/culprit-source for
+  the active Property+Period scope; Overview's "Business Category Mix" card
+  shows a small caption when it's non-zero (silent otherwise). Purely
+  additive — flags, doesn't reclassify. Verified: correctly flags only the
+  two remaining known gaps (`'33'` and `MakemytripXml`, see below) and stays
+  silent on `CS`/`Sales`/`TS`/`Walk in` now that those are mapped.
 - **Four entries added 2026-09-08, confirmed directly by the user (not from
   `Mapping.gs`, which doesn't have them)**: `CS` → B2B (shorthand for
   "Corporate Sales"), `Sales` → B2B (same), `TS` → B2C (shorthand for "Tele
@@ -636,7 +684,12 @@ Source: `lib/bigquery/queries/leads.ts`, table `lead_tracker`.
 inflated ~8× — the raw table has 45,282 rows, but the real underlying sheet
 has 5,694; the rest is sync-side empty padding.
 
-Date scoping uses the `date` column (lead capture date), not `Check_in_date_2`
+Date scoping uses `LEAD_DATE_EXPR` (`SAFE_CAST(SUBSTR(date, 1, 10) AS DATE)`),
+**both for filtering (`whereForRange`'s WHERE clause) and for bucketing**
+(`getLeadsTrend`'s day/month/FY grouping) — fixed 2026-09-08 (see revision
+history) after the WHERE clause was found comparing `date` as a plain STRING,
+which silently dropped every lead recorded on the exact last day of whatever
+period was selected. Scoping is on the `date` column (lead capture date), not `Check_in_date_2`
 (the guest's future stay date) — lead-generation KPIs are about when the lead
 came in, not the eventual stay.
 
@@ -714,7 +767,7 @@ explicit Property selection narrows it.
 | Overall Avg Rating (Google) | `AVG(Rating)` over `rating_sheet` |
 | Total Reviews (Google) | `COUNT(*)` |
 | Overall Avg Rating (OTA) | `AVG(SAFE_CAST(Rating AS FLOAT64))` over `ota` (`ota.Rating` is stored as a string) |
-| Total Reviews (OTA) | `COUNT(*)` |
+| Total Reviews (OTA) | `COUNT(*)`, date-scoped via `SAFE_CAST(DATE AS DATE)` — `ota.DATE` is also a STRING column (unlike `rating_sheet.Date`, a real DATETIME); switched from a bare `CAST` 2026-09-08, defensively, after the same bare-CAST pattern crashed the Leads page once a malformed row synced in (§7) — no row in `ota` currently fails the cast, this only prevents a future repeat |
 | Rating Count Trend (both) | `COUNT(*)` by fiscal month, **for the single selected FY only** |
 
 The trend is deliberately scoped to one FY, not "one line per FY" like the
