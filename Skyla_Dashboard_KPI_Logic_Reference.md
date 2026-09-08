@@ -385,6 +385,23 @@ per explicit request:**
   fully-past scope reduces to the old plain formula exactly; a fully-future
   scope reads 0).
 
+**2026-09-08 (later still) — new "Reports" tab built**
+(`Skyla_Dashboard_Reports_Tab_PRD.md`): Folio Based Report FY 26-27 and FY
+26-27 B2B Details. Full detail in **§12** below. Governing principle carried
+through from the PRD verbatim: both reports reproduce the source workbook's
+*formulas* from live `sales_booking`/`b2b_bills` queries — never its
+*values* — since the live sheet's Oct26-Mar27 columns are confirmed frozen
+on April's figures (a sheet-side bug). Two real bugs caught during the build
+(both fixed before commit, not shipped): (1) a `LEFT JOIN ... USING`
+comparing a bare SQL `NULL` on both sides for the "Overall" scope's repeat-
+guest detection — `NULL = NULL` is never true, so it silently zeroed every
+repeat count for that one block only (fixed with a constant placeholder
+instead of `NULL`); (2) the frontend rendered a fixed 6-column set instead
+of whichever columns the Property filter had actually narrowed the report
+to, crashing the moment fewer than all 5 properties were selected (fixed by
+threading the report's own actual column list through instead of a static
+constant).
+
 ---
 
 ## 1. Shared reference logic
@@ -1008,3 +1025,82 @@ folded into the dashboard-wide Studio Room total alongside the other
 properties that also have Studio Room units; `getCategoryMix` with LP
 selected reproduces the same B2B/B2C/OTA totals already verified for
 Revenue Details (internally consistent, as expected — same source data).
+
+---
+
+## 12. Reports tab (2026-09-08)
+
+Source: `Skyla_Dashboard_Reports_Tab_PRD.md`, `lib/bigquery/queries/reports.ts`.
+One nav item ("Reports"), two reports switched by an in-page toggle
+(`ReportsContent.tsx`) rather than a second route. **Both reports are fixed
+to FY 26-27 and ignore the global period-tab filter** — only Property
+narrows them (same convention as Property Targets' fixed-FY section on
+Performance). Property universe is fixed to `KDP/HTC/JHS/BH4/GB` — no LP (no
+live PMS feed, not a column in either source sheet) and no FO (not a room
+property) — narrowed further by the Property filter, never widened past
+this set (`lib/reference/reportProperties.ts`).
+
+**Governing principle** (PRD §0, load-bearing for the whole tab): the source
+Revenue Workbook sheets are a template for structure/labels/formulas only —
+never the source of values. Confirmed live: the sheet's Oct26–Mar27 columns
+are frozen on April's exact figures (checked on two independent rows, Room
+Revenue and F&B Revenue Share) — a sheet-side formula bug. Both reports
+below compute every cell fresh from `sales_booking`/`b2b_bills`, so they're
+unaffected by that bug and will show real (if currently unverifiable
+against the live sheet) figures for those months.
+
+### 12.1 Folio Based Report FY 26-27
+
+Table: metric rows × (Property ∪ TOTAL) columns, grouped into 13 blocks —
+"Overall – till date" (FY start through today, inclusive) then one full
+calendar month per block, Apr 26 → Mar 27. Month blocks include real
+advance-booking data for months after today (`sales_booking` legitimately
+carries forward bookings) — not zeroed, not projected.
+
+| Metric | Formula | Status |
+|---|---|---|
+| Room Revenue | `SUM(DailyRevenue)`, excl. Void/No-Show | Confirmed |
+| F&B Revenue | `SUM(DailyOtherRevenueExclusiveTax)` | Confirmed |
+| Total Revenue | Room + F&B | Confirmed |
+| F&B Revenue Share | `SAFE_DIVIDE(F&B, Total)` | Confirmed |
+| Available Room Nights | `getAvailableRoomNightsByProperty` (§1.5), scoped per block | Confirmed |
+| Sold Room Nights | `COUNT(*)` excl. Void/No-Show | Confirmed pattern |
+| Occupancy % | Sold ÷ Available | Confirmed |
+| Guests Served | `SUM(MAX(NoOfGuest) per booking)`, booking bucketed to whichever month(s) its own nights fall in — a booking spanning a month boundary contributes to each month it touches | Confirmed pattern |
+| RevPAR / ADR / Rev per Guest | Revenue ÷ Available / Sold / Guests | Confirmed |
+| B2B/B2C/OTA Nights, Revenue, ADR | `bookingCategorySqlExpr` classification (§1.3), same as Booking Details' Category Mix | B2B confirmed; B2C/OTA **not yet independently confirmed against the sheet** (PRD §1.3) |
+| **B2B Revenue Share** | `SAFE_DIVIDE(b2b_bills' ALL-TIME SUM(Room_Revenue) for the property, RoomRevenue)` — **not the same B2B Revenue as the row above**, not ÷ Total Revenue, and **legitimately exceeds 100%** by design | Reconstructed from one confirmed data point (PRD's own KDP-Overall example, 265%) — verified live match: 260.2%. **Only the Overall column's magnitude was checked**; individual month columns produce much larger percentages (the same large all-time numerator against a much smaller one-month denominator) and are not independently confirmed |
+| B2C/OTA Revenue Share | `SAFE_DIVIDE(category revenue, RoomRevenue)` — a normal, always-≤100% share, unlike B2B's | Not yet independently confirmed (PRD §1.3) |
+| Total Bookings, Repeat Count, Unique Count, Repeat %, ALOS | Booking-grain, same guest-key/ReservationNo logic as `getBookingStats`/`getRepeatBookingShare`, reapplied per block's own range — a guest who stayed in two different *month* blocks isn't "repeat" in either individual month, only in a range spanning both (e.g. Overall) | Row grouping not yet independently confirmed against the sheet (PRD §1.3) |
+| Expat Bookings/Revenue/Revenue%/Nights/ALOS/Repeat Count/Repeat Share | Same `Country != 'India'` filter as §3, restricted to expat bookings for the repeat calc too | Not yet independently confirmed (PRD §1.3) |
+
+Two real bugs found and fixed during the build (see revision history for
+full detail): a NULL-vs-NULL SQL join silently zeroing the "Overall"
+block's repeat counts specifically, and the frontend crashing when the
+Property filter narrowed the column set below the full 5 properties. Both
+verified fixed live before commit.
+
+### 12.2 FY 26-27 B2B Details
+
+Two zones, both from `b2b_bills`, `Financial_Year = 'FY 26-27'` (junk `'FY
+99-00'` rows excluded, same as every other `b2b_bills` query — §3's B2B
+section):
+
+- **Zone A** — Company × Month pivot (`Bills_due_from` as identity, same
+  convention as Contract Status & Ranking, §3): Total Revenue/Nights/ADR
+  (`SUM(Room_Revenue)`, `SUM(Nights)`, `SAFE_DIVIDE`), then one Revenue/
+  Nights/ADR triplet per fiscal month present in the data. Sortable by any
+  total column (default: Revenue desc). A totals row is computed from the
+  true summed Revenue/Nights across every company, not averaged from
+  per-company ADRs.
+- **Zone B** — one row per bill: Property, Guest Name, Check In, Bill Date,
+  Inv No, Business Source, Nights, Bills due from, Room Revenue, POC, Month
+  — a direct `SELECT` off `b2b_bills`' own columns (`Guest_Name`,
+  `SUBSTR(Check_In, 1, 10)`, `Bill_Date`, `Inv_No`, `Business_Source`,
+  `Nights`, `Bills_due_from`, `Room_Revenue`, `POC`, `Month`), sorted by
+  Property then Check In.
+
+Both zones respect the Property filter (pre-filters `b2b_bills` rows before
+pivoting/listing). Verified live: KDP-filtered Zone A total revenue (₹2.11
+Cr) exactly matches an independent all-time-FY26-27 KDP query run during
+the build's own investigation of the B2B Revenue Share formula above.
