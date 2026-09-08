@@ -116,14 +116,29 @@ export async function getBookingStats(filter: KpiFilter): Promise<BookingStats> 
   };
 }
 
-// --- Unsold / Remaining Room Nights ---
-// "Available − Sold" for the selected scope; "remaining" narrows the same
-// Available/Sold computation to [today, scope end] — 0 if the scope is entirely
-// in the past. Implementation call (PRD doesn't give an exact remaining-nights
-// formula beyond "available nights from today forward").
-
+// --- Sold / Unsold (till date) / Remaining Room Nights ---
+// `availableRoomNights`/`soldRoomNights` are the plain, unclamped selected
+// scope (ties to Overview's own Available/Sold Room Nights for the same
+// filter — no exceptions, matches every other KPI). "Remaining" narrows the
+// same Available/Sold computation to [today, scope end] — 0 if the scope is
+// entirely in the past.
+//
+// 2026-09-08: `unsoldRoomNights` ("Till Date Unsold Nights" in the UI) is
+// deliberately DIFFERENT from the plain Available−Sold you'd get from the
+// two fields above — per explicit request, it's Available-till-yesterday
+// minus Sold-till-yesterday, i.e. clamped to the completed portion of the
+// selected scope only. This is intentionally a to-date reading (a genuinely
+// meaningful "how much of what's already happened went unsold" question),
+// the same kind of deliberate, explicitly-named exception the "no
+// exceptions" period-model rule always allowed for — it just needs to be
+// named as one, which "Till Date" in the label does. It does not touch how
+// `availableRoomNights`/`soldRoomNights` themselves are computed, and it's
+// unrelated to `remainingRoomNights` below, which looks forward from today
+// instead of back from yesterday — together the two no longer overlap on
+// "today" itself (till-date stops at yesterday, remaining starts at today).
 export interface RoomNightsGap {
   availableRoomNights: number;
+  soldRoomNights: number;
   unsoldRoomNights: number;
   remainingRoomNights: number;
 }
@@ -147,10 +162,34 @@ export async function getRoomNightsGap(filter: KpiFilter): Promise<RoomNightsGap
     includeLp ? getLpOverviewTotals(resolved.period.current) : Promise.resolve(null),
   ]);
   const sold = (soldRows[0]?.n ?? 0) + (lpTotals?.soldRoomNights ?? 0);
-  const unsoldRoomNights = Math.max(0, available - sold);
 
-  const today = new Date().toISOString().slice(0, 10);
+  const todayMs = Date.now();
+  const today = new Date(todayMs).toISOString().slice(0, 10);
+  const yesterday = new Date(todayMs - 86400000).toISOString().slice(0, 10);
+  const scopeStart = resolved.period.current.start;
   const scopeEnd = resolved.period.current.end;
+
+  // Till-date window: the selected scope, clamped to end no later than
+  // yesterday. If the scope hasn't started yet as of yesterday (e.g. a
+  // future Custom Range), there's nothing "completed" to read yet — both
+  // sides are 0, same as `remainingRoomNights` below being 0 for a
+  // fully-past scope.
+  let unsoldRoomNights = 0;
+  if (scopeStart <= yesterday) {
+    const tillDateEnd = scopeEnd < yesterday ? scopeEnd : yesterday;
+    const tillDateRange = { start: scopeStart, end: tillDateEnd };
+    const [tillDateAvailable, tillDateSoldRows, tillDateLpTotals] = await Promise.all([
+      getAvailableRoomNights(resolved.properties, tillDateRange),
+      runQuery<{ n: number }>(`
+        SELECT COUNT(*) AS n FROM ${table("sales_booking")}
+        WHERE Property IN UNNEST(@properties) AND CAST(StayDate AS DATE) BETWEEN @start AND @end AND ${SALES_BOOKING_STAY_FILTER}
+      `, { properties: resolved.properties, start: tillDateRange.start, end: tillDateRange.end }),
+      includeLp ? getLpOverviewTotals(tillDateRange) : Promise.resolve(null),
+    ]);
+    const tillDateSold = (tillDateSoldRows[0]?.n ?? 0) + (tillDateLpTotals?.soldRoomNights ?? 0);
+    unsoldRoomNights = Math.max(0, tillDateAvailable - tillDateSold);
+  }
+
   let remainingRoomNights = 0;
   if (scopeEnd >= today) {
     const forwardRange = { start: today, end: scopeEnd };
@@ -162,7 +201,7 @@ export async function getRoomNightsGap(filter: KpiFilter): Promise<RoomNightsGap
     remainingRoomNights = Math.max(0, forwardAvailable - (forwardSoldRows[0]?.n ?? 0));
   }
 
-  return { availableRoomNights: available, unsoldRoomNights, remainingRoomNights };
+  return { availableRoomNights: available, soldRoomNights: sold, unsoldRoomNights, remainingRoomNights };
 }
 
 // --- Night/Revenue Mix by Category (§3.1) ---

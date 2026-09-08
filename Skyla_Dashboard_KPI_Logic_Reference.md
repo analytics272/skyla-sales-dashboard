@@ -360,6 +360,31 @@ in the table has a real classification. Both entries added to
 `BOOKING_SOURCE_MAP` in `lib/reference/bookingSourceMap.ts`; existing
 mappings untouched.
 
+**2026-09-08 (later still) — Business Category Mix gained a "Nights" tab**
+(alongside Revenue and ADR) on Overview, showing room-nights sold by
+category. No "Occupancy % by category" tab was added — occupancy needs an
+available-room-nights denominator, and there is no such thing as available
+room nights for a business category (a room isn't pre-allocated to B2B/B2C/
+OTA before it's booked, unlike a property or brand, which have a real,
+summable room count) — see §10. Uses `getOverviewKpis`' existing `bySource`
+data, no new query. See §2's "Room Nights by Source" row.
+
+**2026-09-08 (later still) — Booking Details' room-nights tiles reworked
+per explicit request:**
+- **Sold Room Nights added as its own stat tile**, next to Available — the
+  plain, unclamped figure `getRoomNightsGap()` already computed internally,
+  now also returned and shown directly. Ties exactly to Overview's own Sold
+  Room Nights for the same filter.
+- **"Unsold Room Nights" renamed to "Till Date Unsold Nights" and
+  reformulated** to Available-till-yesterday minus Sold-till-yesterday
+  (clamped to the completed portion of the selected scope), replacing the
+  old plain Available − Sold for the whole scope. A deliberate, explicitly
+  labeled to-date exception, not a reinterpretation of what any period tab
+  means — Available/Sold Room Nights beside it are untouched. See §3's
+  updated formula row for the full reasoning and verified edge cases (a
+  fully-past scope reduces to the old plain formula exactly; a fully-future
+  scope reads 0).
+
 ---
 
 ## 1. Shared reference logic
@@ -527,9 +552,10 @@ column each of those needs (guest identity, cancellation records, or
 | Repeat Bookings | Bookings sharing a guest key (`Mobile`, falling back to `Email`, then `GuestName`) with >1 distinct booking; share % = repeat ÷ total. **LP excluded** — neither LP table has any guest-identity column, at monthly or room-type grain; not computable without fabricating guest identities. |
 | Cancellations % | Cancelled bookings ÷ (active + cancelled bookings), both counted the same way as Total Bookings. **LP excluded** — the backfill only covers realized (checked-out) stays; no cancellation records exist in either LP table. |
 | Avg Cancellation Lead Time | `AVG(ArrivalDate − CancelDate)` in days, over `sales_booking_cancelled`. **LP excluded** — depends on `sales_booking_cancelled`, which has (and will always have) zero LP rows. |
-| Available Room Nights | Same value already computed by `getAvailableRoomNights()` inside `getRoomNightsGap()` (§1.5) — **added as its own stat tile 2026-08-27**, no new query and no change to the calculation; `RoomNightsGap` just also returns the `available` figure it already had. Shown next to Unsold and Remaining Room Nights so all three read together. |
-| Unsold Room Nights | Available − Sold, for the selected scope. **LP's real sold nights now subtracted when selected** (2026-08-26 fix) — Available already included LP via §1.5's window fix, but Sold didn't, which was silently overstating LP as 100% unsold. Verified: FY 25-26 delta between with/without LP is exactly 1,995 nights = LP's own Available (5,840) − Sold (3,845). |
-| Remaining Room Nights | Available − Sold, narrowed to **[today, scope end]** — 0 if the whole scope is already in the past. **LP naturally contributes 0** — its entire data window (Apr 2024–Mar 2026) is already in the past relative to any realistic "today," so the forward-looking slice never overlaps it; no LP-specific code needed here. |
+| Available Room Nights | Same value already computed by `getAvailableRoomNights()` inside `getRoomNightsGap()` (§1.5) — **added as its own stat tile 2026-08-27**, no new query and no change to the calculation; `RoomNightsGap` just also returns the `available` figure it already had. Shown next to Sold, Till Date Unsold, and Remaining Room Nights so all four read together. |
+| Sold Room Nights | **Added as its own stat tile 2026-09-08** — same plain, unclamped Sold Room Nights `getRoomNightsGap()` already computed internally to derive Unsold; now also returned and shown directly, next to Available. Ties exactly to Overview's own Sold Room Nights for the same filter (both are the whole selected scope, no exceptions). |
+| Till Date Unsold Nights | **Renamed and reformulated 2026-09-08** (was "Unsold Room Nights" = plain Available − Sold for the whole selected scope). Per explicit request, now Available-till-yesterday minus Sold-till-yesterday — i.e. clamped to the *completed* portion of the selected scope only, not the whole thing. A scope that hasn't started as of yesterday (e.g. a future Custom Range) reads 0, same as Remaining Room Nights reads 0 for a scope entirely in the past. This is a deliberate, explicitly-named to-date exception (the label says "Till Date"), not a silent reinterpretation of what a period tab means — the plain Available/Sold Room Nights tiles beside it are untouched and still mean exactly their own selected scope. **LP's real sold nights are subtracted here too** (2026-08-26 fix, carried into the new till-date calculation) — Available already included LP via §1.5's window fix, but Sold didn't, which was silently overstating LP as 100% unsold. Verified live: a fully-past scope's Till Date figure exactly equals its own plain Available − Sold (e.g. July 2026: 5,270 − 3,857 = 1,413, matching exactly); a fully-future scope reads 0. |
+| Remaining Room Nights | Available − Sold, narrowed to **[today, scope end]** — 0 if the whole scope is already in the past. **LP naturally contributes 0** — its entire data window (Apr 2024–Mar 2026) is already in the past relative to any realistic "today," so the forward-looking slice never overlaps it; no LP-specific code needed here. Together with Till Date Unsold Nights above, the two no longer overlap on "today" itself (till-date stops at yesterday, remaining starts at today). |
 | Expat Bookings / Revenue / Nights / ALOS | `Country IS NOT NULL AND Country != 'India'`, same booking/night/ALOS logic as above. **LP excluded** — neither LP table has a `Country` column at any grain. |
 | ADR by Room Format | Room Revenue ÷ nights, grouped by Room Type (§1.6). **LP merged in when selected** (2026-08-26) via `sales_booking_lp_monthly_roomtype` — see §11 for the nights-allocation caveat. |
 | Nights Share by Room Format | Each room type's nights ÷ total nights (no separate room-count-by-type reference exists, so this is a nights-share reading rather than a true occupancy %). LP included in both the per-type and total-nights figures when selected. |
