@@ -73,8 +73,13 @@ export async function getGoogleReviewStats(filter: ReviewsFilter): Promise<Revie
   return ratingStats("rating_sheet", "Rating", "CAST(Date AS DATE)", filter);
 }
 
+// 2026-09-08: `ota.DATE` is a STRING column (unlike rating_sheet.Date, a real
+// DATETIME) — a bare CAST is the same latent-crash shape that took down the
+// Leads page once a mixed-format row synced in (see leads.ts). No row in the
+// live data fails a SAFE_CAST today, so this is purely defensive, not a fix
+// for any currently-observed bug.
 export async function getOtaReviewStats(filter: ReviewsFilter): Promise<ReviewStats> {
-  return ratingStats("ota", "SAFE_CAST(Rating AS FLOAT64)", "CAST(DATE AS DATE)", filter);
+  return ratingStats("ota", "SAFE_CAST(Rating AS FLOAT64)", "SAFE_CAST(DATE AS DATE)", filter);
 }
 
 export interface RatingTrendPoint {
@@ -127,5 +132,5 @@ export async function getGoogleRatingTrend(filter: ReviewsFilter): Promise<Ratin
 }
 
 export async function getOtaRatingTrend(filter: ReviewsFilter): Promise<RatingTrendSeries> {
-  return ratingTrend("ota", "CAST(DATE AS DATE)", filter);
+  return ratingTrend("ota", "SAFE_CAST(DATE AS DATE)", filter);
 }

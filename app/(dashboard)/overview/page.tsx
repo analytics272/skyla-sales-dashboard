@@ -1,4 +1,4 @@
-import { getOverviewKpis, getAdrByProperty, getOccupancyPace } from "@/lib/bigquery/queries/overview";
+import { getOverviewKpis, getAdrByProperty, getOccupancyPace, getUnmappedSourceStats } from "@/lib/bigquery/queries/overview";
 import { getMonthlyTrends } from "@/lib/bigquery/queries/trends";
 import { getBrandOccupancy } from "@/lib/bigquery/queries/brandCategory";
 import { parseKpiFilter, SearchParams } from "@/lib/filters/parseSearchParams";
@@ -16,12 +16,13 @@ export default async function OverviewPage({ searchParams }: { searchParams: Pro
   const filter = parseKpiFilter(sp);
   const resolved = resolveFilter(filter);
 
-  const [overview, adrByProperty, occupancyPace, monthlyTrends, brandOccupancy] = await Promise.all([
+  const [overview, adrByProperty, occupancyPace, monthlyTrends, brandOccupancy, unmappedSource] = await Promise.all([
     getOverviewKpis(filter),
     getAdrByProperty(filter),
     getOccupancyPace(resolved.properties),
     getMonthlyTrends(filter),
     getBrandOccupancy(filter),
+    getUnmappedSourceStats(filter),
   ]);
 
   return (
@@ -31,6 +32,7 @@ export default async function OverviewPage({ searchParams }: { searchParams: Pro
       occupancyPace={occupancyPace}
       monthlyTrends={monthlyTrends}
       brandOccupancy={brandOccupancy}
+      unmappedSource={unmappedSource}
       compareYoY={filter.compareYoY ?? false}
     />
   );

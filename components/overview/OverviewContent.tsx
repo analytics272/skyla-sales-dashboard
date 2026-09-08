@@ -18,7 +18,7 @@
 //   - ADR By Property (Revenue) and Occupancy By Brand (Brand) are the two
 //     genuinely distinct "rank by property/brand" bars — grouped into one
 //     tabbed card rather than left as two standalone ones.
-import { OverviewKpis, PropertyAdr, OccupancyPace } from "@/lib/bigquery/queries/overview";
+import { OverviewKpis, PropertyAdr, OccupancyPace, UnmappedSourceStats } from "@/lib/bigquery/queries/overview";
 import { TrendSeries } from "@/lib/bigquery/queries/trends";
 import { BrandOccupancy } from "@/lib/bigquery/queries/brandCategory";
 import Card from "@/components/ui/Card";
@@ -97,6 +97,7 @@ export default function OverviewContent({
   occupancyPace,
   monthlyTrends,
   brandOccupancy,
+  unmappedSource,
   compareYoY,
 }: {
   overview: OverviewKpis;
@@ -104,6 +105,7 @@ export default function OverviewContent({
   occupancyPace: OccupancyPace;
   monthlyTrends: TrendSeries;
   brandOccupancy: BrandOccupancy[];
+  unmappedSource: UnmappedSourceStats;
   compareYoY: boolean;
 }) {
   const { comparison } = overview;
@@ -205,6 +207,17 @@ export default function OverviewContent({
             <DonutChart data={revenueDonut} valueFormatter={(v) => formatIndianCurrency(v)} />
           ) : (
             <SingleMetricBarChart data={categoryAdrBars} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} />
+          )}
+          {/* 2026-09-08: lightweight data-quality indicator (§1.3) — a raw
+              Source value this dashboard doesn't recognize is silently
+              counted as B2C by bookingCategorySqlExpr's fallback, exactly
+              how CS/Sales went unnoticed for two years. Shown only when
+              there's something to flag; doesn't change any category total. */}
+          {unmappedSource.count > 0 && (
+            <p className="mt-2 border-t border-zinc-100 pt-2 text-[11px] text-amber-600 dark:border-zinc-800 dark:text-amber-400">
+              ⚠ {unmappedSource.count.toLocaleString("en-IN")} booking{unmappedSource.count === 1 ? "" : "s"} ({formatIndianCurrency(unmappedSource.revenue)}) from an unrecognized Source
+              {unmappedSource.sources.length > 0 && ` (e.g. "${unmappedSource.sources[0].source}")`} — counted as B2C by default above pending a mapping review.
+            </p>
           )}
         </TabbedCard>
 

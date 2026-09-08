@@ -8,7 +8,7 @@ import { runQuery, table } from "../client";
 import { KpiFilter, resolveFilter, buildScopeClause, buildPreviousScopeClause, SALES_BOOKING_STAY_FILTER } from "./filters";
 import { getAvailableRoomNights } from "./propertyWindows";
 import { getLpOverviewTotals, getLpAdr, LP_PROPERTY } from "./lpMonthly";
-import { bookingCategorySqlExpr, BookingCategory } from "@/lib/reference/bookingSourceMap";
+import { bookingCategorySqlExpr, bookingIsUnmappedSqlExpr, BookingCategory } from "@/lib/reference/bookingSourceMap";
 import { safeDivide } from "@/lib/format/currency";
 
 export interface SourceBreakdown {
@@ -160,6 +160,44 @@ export async function getOverviewKpis(filter: KpiFilter): Promise<OverviewKpis> 
       revPar: comparisonMetric(revPar, prevRevPar),
       soldRoomNights: comparisonMetric(soldRoomNights, prevSoldRoomNights),
     },
+  };
+}
+
+export interface UnmappedSourceStats {
+  count: number;
+  revenue: number;
+  /** Distinct raw Source values behind `count`/`revenue`, largest revenue first — enough to name the culprit in a caption without a separate drill-down UI. */
+  sources: { source: string; count: number; revenue: number }[];
+}
+
+/**
+ * 2026-09-08, data-quality warning (§1.3): `bookingCategorySqlExpr` silently
+ * defaults any Source value it doesn't recognize to B2C — which is exactly
+ * how `CS`/`Sales`/`TS`/`Walk in` went unnoticed for two years (₹13.5 Cr
+ * combined, fixed this same day — see Skyla_Dashboard_KPI_Logic_Reference.md
+ * revision history). `bookingIsUnmappedSqlExpr` already existed for this but
+ * was never wired into anything. This surfaces it as a lightweight, purely
+ * additive indicator — does NOT change how any booking is classified or
+ * counted anywhere else; a Source already covered by the map (including the
+ * fallback OTA/B2B pattern regexes bookingCategorySqlExpr also checks) never
+ * shows up here, only genuinely unrecognized ones like the known `'33'`
+ * data-entry glitch (§10).
+ */
+export async function getUnmappedSourceStats(filter: KpiFilter): Promise<UnmappedSourceStats> {
+  const resolved = resolveFilter(filter);
+  const { clause: where, params } = buildScopeClause("Property", "CAST(StayDate AS DATE)", resolved, "");
+  const rows = await runQuery<{ source: string | null; count: number; revenue: number | null }>(`
+    SELECT Source AS source, COUNT(*) AS count, SUM(DailyRevenue) AS revenue
+    FROM ${table("sales_booking")}
+    WHERE ${where} AND ${bookingIsUnmappedSqlExpr("Source")}
+    GROUP BY source
+    ORDER BY revenue DESC
+  `, params);
+  const sources = rows.map((r) => ({ source: r.source ?? "(blank)", count: r.count, revenue: r.revenue ?? 0 }));
+  return {
+    count: sources.reduce((s, r) => s + r.count, 0),
+    revenue: sources.reduce((s, r) => s + r.revenue, 0),
+    sources,
   };
 }
 
