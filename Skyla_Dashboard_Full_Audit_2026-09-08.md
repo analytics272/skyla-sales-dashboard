@@ -263,3 +263,15 @@ rename, and no other UI changes were made.
 Build (`rm -rf .next && npx next build`) and lint (`npx eslint . --quiet`)
 both clean after every step. Full detail in
 `Skyla_Dashboard_KPI_Logic_Reference.md`'s revision history.
+
+### Update — the two remaining flagged sources resolved (2026-09-08, later still)
+
+User checked both directly against BigQuery: `'33'` → **B2B** (not the
+data-entry glitch it was assumed to be), `MakemytripXml` → **OTA**, grouped
+into the OTA Breakdown "GoMMT" bucket alongside `makemytrip`/`go-mmt`/
+`easemytrip` (was already correctly OTA via the fallback pattern, so no
+totals moved — just stops appearing as a stray separate row). Both added to
+`BOOKING_SOURCE_MAP`; existing mappings (including all four from the prior
+round) untouched. Verified: `getUnmappedSourceStats()` now reports **zero**
+unmapped Source values across `sales_booking`'s entire history — G4 is fully
+closed, not just mitigated.

@@ -5,7 +5,7 @@
 
 export type BookingCategory = "B2B" | "B2C" | "OTA";
 
-// 2026-09-08: four raw Source values NOT in Mapping.gs's original list, added
+// 2026-09-08: raw Source values NOT in Mapping.gs's original list, added
 // after the user confirmed their meaning directly — found while auditing why
 // Overview's "Business Category Mix" donut looked wrong. Before this fix
 // they fell through to classifyBookingSource's generic "else -> B2C"
@@ -18,6 +18,10 @@ export type BookingCategory = "B2B" | "B2C" | "OTA";
 // Reclassifying CS/Sales as B2B moved Sept-2026's live B2B revenue from
 // ₹51.5L to ₹69.3L, within 5% of leadership_targets' independently-tracked
 // B2B Achieved figure for that month (₹72.7L) — it had been 29% off before.
+//
+// 2026-09-08 (later, same day): two more values, found by the new
+// unmapped-Source warning indicator (getUnmappedSourceStats, overview.ts)
+// and confirmed by the user directly against the raw BigQuery rows.
 const USER_CONFIRMED_SOURCE_MAP: Record<string, BookingCategory> = {
   CS: "B2B", // shorthand for "Corporate Sales" (below)
   Sales: "B2B", // shorthand for "Corporate Sales" (below)
@@ -26,6 +30,14 @@ const USER_CONFIRMED_SOURCE_MAP: Record<string, BookingCategory> = {
   // silently relying on that default.
   "Walk in": "B2C", // no-hyphen variant of "Walk-in" (below) — same reasoning
   // as TS: already B2C via fallback, now explicit.
+  "33": "B2B", // a numeric-looking Source value (140 bookings, ₹4.3L
+  // all-time) — user-confirmed against BigQuery to be B2B, not the garbage
+  // data-entry glitch it was assumed to be when first flagged.
+  MakemytripXml: "OTA", // an XML-feed variant of "makemytrip" (below) — was
+  // already correctly classified OTA via the fallback pattern match, so this
+  // doesn't change any total; added as an exact entry (and grouped into
+  // "GoMMT" in OTA_DISPLAY_GROUPS below, same as makemytrip/go-mmt/
+  // easemytrip) so it stops showing up as a separate unmapped/ungrouped row.
 };
 
 export const BOOKING_SOURCE_MAP: Record<string, BookingCategory> = {
@@ -281,6 +293,7 @@ const OTA_DISPLAY_GROUPS: Record<string, string> = {
   easemytrip: "GoMMT",
   makemytrip: "GoMMT",
   "go-mmt": "GoMMT",
+  makemytripxml: "GoMMT", // 2026-09-08: same brand as makemytrip above, just its XML-feed Source value
 };
 
 /** Wraps `canonicalSourceNameSqlExpr` with the OTA Breakdown-specific grouping above. Use this (not the bare canonical name) for OTA Breakdown's per-OTA GROUP BY. */
