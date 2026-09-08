@@ -490,7 +490,7 @@ construction, so LP naturally contributes 0 to them already.
 | Unsold Room Nights | Available − Sold |
 | Room Revenue / ADR / Occupancy / RevPAR YoY | Current FY vs the prior FY's, **always the full FY** regardless of any Month/Quarter narrowing — YoY is a year-level comparison by design. Displayed as "▲/▼ X% vs {prior FY} (₹prior value)" — same pattern used everywhere a YoY comparison is shown (§ "Comparison pattern" note below) |
 | Revenue by Source | Room Revenue grouped by B2B/B2C/OTA (§1.3) |
-| Room Nights by Source | Sold Room Nights grouped the same way |
+| Room Nights by Source | Sold Room Nights grouped the same way. **Wired into the UI 2026-09-08** as the "Nights" tab on Overview's "Business Category Mix" card (alongside Revenue and ADR) — the formula/data already existed via `getOverviewKpis`'s `bySource`, just wasn't rendered as its own tab before. Added in place of a true "Occupancy % by category," which isn't computable (occupancy needs an available-room-nights denominator, and there's no such thing as available room nights for a business category — see §10) |
 | ADR by Property | Room Revenue ÷ Sold Room Nights, one bar per property. **LP appears as its own bar** (2026-08-26) when selected — its revenue/nights come from `sales_booking_lp_monthly`, not `sales_booking` (§11) |
 
 **Comparison pattern** (2026-08-24, per the Looker Studio reference the
