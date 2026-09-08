@@ -5,7 +5,31 @@
 
 export type BookingCategory = "B2B" | "B2C" | "OTA";
 
+// 2026-09-08: four raw Source values NOT in Mapping.gs's original list, added
+// after the user confirmed their meaning directly — found while auditing why
+// Overview's "Business Category Mix" donut looked wrong. Before this fix
+// they fell through to classifyBookingSource's generic "else -> B2C"
+// default, which is a serious problem for "CS" specifically: 31,000+ rows,
+// ₹12.6 Cr all-time (22.7% of all sales_booking revenue), silently counted
+// as B2C. Confirmed NOT a rename-over-time artifact (CS and "Corporate
+// Sales" run in parallel every month from Apr 2024 through Sept 2026, never
+// one replacing the other) — both are shorthand-vs-full-name labels for the
+// same real channels, used inconsistently by whoever enters each booking.
+// Reclassifying CS/Sales as B2B moved Sept-2026's live B2B revenue from
+// ₹51.5L to ₹69.3L, within 5% of leadership_targets' independently-tracked
+// B2B Achieved figure for that month (₹72.7L) — it had been 29% off before.
+const USER_CONFIRMED_SOURCE_MAP: Record<string, BookingCategory> = {
+  CS: "B2B", // shorthand for "Corporate Sales" (below)
+  Sales: "B2B", // shorthand for "Corporate Sales" (below)
+  TS: "B2C", // shorthand for "Tele Sales" (below) — was already B2C via the
+  // fallback default, so this doesn't change any figure; added so it stops
+  // silently relying on that default.
+  "Walk in": "B2C", // no-hyphen variant of "Walk-in" (below) — same reasoning
+  // as TS: already B2C via fallback, now explicit.
+};
+
 export const BOOKING_SOURCE_MAP: Record<string, BookingCategory> = {
+  ...USER_CONFIRMED_SOURCE_MAP,
   "Relocation (B2B)": "B2B",
   "Tele Sales": "B2C",
   "Corporate Sales": "B2B",
