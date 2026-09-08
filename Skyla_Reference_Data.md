@@ -12,9 +12,17 @@ Claude Code as-is.
 
 ## 1. Property Reference (current, as of this build)
 
+**Correction (2026-09-08):** KDP's room count below is superseded — corrected
+63 → 64 in `lib/reference/propertyReference.ts` after the live PMS Annual
+Sales Report showed 64 rooms × days-in-month for all 12 of KDP's months
+(Sep 2026 – Aug 2027), not 63. See `Skyla_Dashboard_KPI_Logic_Reference.md`'s
+revision history and §1.5 for the full reasoning. Also note LP's status row
+below ("Permanently removed") is superseded by the 2026-08-26 LP
+re-integration — see that same doc's §11.
+
 | Property | Brand grouping | Room count | Status |
 |---|---|---|---|
-| KDP | Skyla | 63 | Active |
+| KDP | Skyla | 63 (corrected to 64 — see note above) | Active |
 | HTC | Skyla | 34 | Active |
 | JHS | Skyla | 33 | Active |
 | BH4 | Aptly | 18 | Active |

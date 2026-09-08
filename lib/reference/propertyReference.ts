@@ -34,8 +34,22 @@ export interface PropertyRef {
   status: PropertyStatus;
 }
 
+// 2026-09-08: KDP corrected 63 -> 64. The FY27 planning workbook (see
+// propertyTargets.ts's own header comment) used 63 and this file matched it
+// to cross-check the workbook's column order — but the live PMS Annual Sales
+// Report (annualsalesreport_skyla, user-provided 2026-09-08) shows KDP's
+// "Rooms Available" as 1920/1984/1792 across every one of its 12 months
+// (Sep 2026 - Aug 2027), which is 64 rooms x days-in-month in every single
+// case, not 63. roomCountOf() drives live Available Room Nights (Occupancy%,
+// ADR, RevPAR) sourced from sales_booking — it should match the PMS's actual
+// physical room count, not the planning workbook's. This does NOT touch
+// PROPERTY_TARGETS_FY27's own per-month `available` figures (still the
+// workbook's 63-based numbers, per "targets are static, confirmed not to
+// change") — only the live/achieved side changes, which is the correct side
+// to fix since the discrepancy is in physical inventory, not in the target
+// plan.
 export const PROPERTIES: PropertyRef[] = [
-  { code: "KDP", name: "KDP", brand: "Skyla", roomCount: 63, status: "active" },
+  { code: "KDP", name: "KDP", brand: "Skyla", roomCount: 64, status: "active" },
   { code: "HTC", name: "HTC", brand: "Skyla", roomCount: 34, status: "active" },
   { code: "JHS", name: "JHS", brand: "Skyla", roomCount: 33, status: "active" },
   { code: "BH4", name: "BH4", brand: "Aptly", roomCount: 18, status: "active" },

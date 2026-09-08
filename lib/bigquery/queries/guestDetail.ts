@@ -1,7 +1,7 @@
 // PRD §6.2 — Guest & Revenue Detail.
 // 2026-09-02: rewritten for the Today/This FY/Last Year period-tabs model.
 import { runQuery, table } from "../client";
-import { KpiFilter, resolveFilter, buildScopeClause, buildPreviousScopeClause } from "./filters";
+import { KpiFilter, resolveFilter, buildScopeClause, buildPreviousScopeClause, SALES_BOOKING_STAY_FILTER } from "./filters";
 import { getAvailableRoomNights } from "./propertyWindows";
 import { getLpOverviewTotals, getLpRoomTypeStats, LP_PROPERTY } from "./lpMonthly";
 import { bookingCategorySqlExpr, BookingCategory } from "@/lib/reference/bookingSourceMap";
@@ -157,7 +157,7 @@ export async function getRoomNightsGap(filter: KpiFilter): Promise<RoomNightsGap
     const forwardAvailable = await getAvailableRoomNights(resolved.properties, forwardRange);
     const forwardSoldRows = await runQuery<{ n: number }>(`
       SELECT COUNT(*) AS n FROM ${table("sales_booking")}
-      WHERE Property IN UNNEST(@properties) AND CAST(StayDate AS DATE) >= @today AND CAST(StayDate AS DATE) <= @scopeEnd
+      WHERE Property IN UNNEST(@properties) AND CAST(StayDate AS DATE) >= @today AND CAST(StayDate AS DATE) <= @scopeEnd AND ${SALES_BOOKING_STAY_FILTER}
     `, { properties: resolved.properties, today, scopeEnd });
     remainingRoomNights = Math.max(0, forwardAvailable - (forwardSoldRows[0]?.n ?? 0));
   }
@@ -518,7 +518,7 @@ export async function getGuestServedAccuracyCheck(): Promise<GuestServedAccuracy
   const rows = await runQuery<{ property: string; guests_served: number | null }>(`
     SELECT Property AS property, SUM(NoOfGuest) AS guests_served
     FROM ${table("sales_booking")}
-    WHERE Property IN UNNEST(@properties) AND CAST(StayDate AS DATE) BETWEEN @start AND @end
+    WHERE Property IN UNNEST(@properties) AND CAST(StayDate AS DATE) BETWEEN @start AND @end AND ${SALES_BOOKING_STAY_FILTER}
     GROUP BY property
   `, { properties, start: GUEST_SERVED_SNAPSHOT_RANGE.start, end: GUEST_SERVED_SNAPSHOT_RANGE.end });
 

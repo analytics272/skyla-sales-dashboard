@@ -4,7 +4,7 @@
 // the active period's months, grouped by calendar month within
 // resolved.period.current (naturally a single point under "Today").
 import { runQuery, table } from "../client";
-import { KpiFilter, resolveFilter } from "./filters";
+import { KpiFilter, resolveFilter, SALES_BOOKING_STAY_FILTER } from "./filters";
 import { getAvailableRoomNightsByProperty } from "./propertyWindows";
 import { getLpMonthlyPoints, getLpCategoryMix, LP_PROPERTY } from "./lpMonthly";
 import { bookingCategorySqlExpr, BookingCategory } from "@/lib/reference/bookingSourceMap";
@@ -46,7 +46,7 @@ async function fetchMonthlyPoints(properties: string[], range: DateRange, includ
         COUNT(*) AS nights,
         SUM(DailyRevenue) AS revenue
       FROM ${table("sales_booking")}
-      WHERE Property IN UNNEST(@properties) AND CAST(StayDate AS DATE) BETWEEN @start AND @end
+      WHERE Property IN UNNEST(@properties) AND CAST(StayDate AS DATE) BETWEEN @start AND @end AND ${SALES_BOOKING_STAY_FILTER}
       GROUP BY month_start
       ORDER BY month_start
     `, { properties, start: range.start, end: range.end }),
@@ -118,7 +118,7 @@ async function fetchCategoryMix(properties: string[], range: DateRange, includeL
     runQuery<{ category: BookingCategory; nights: number; revenue: number | null }>(`
       SELECT ${bookingCategorySqlExpr("Source")} AS category, COUNT(*) AS nights, SUM(DailyRevenue) AS revenue
       FROM ${table("sales_booking")}
-      WHERE Property IN UNNEST(@properties) AND CAST(StayDate AS DATE) BETWEEN @start AND @end
+      WHERE Property IN UNNEST(@properties) AND CAST(StayDate AS DATE) BETWEEN @start AND @end AND ${SALES_BOOKING_STAY_FILTER}
       GROUP BY category
     `, { properties, start: range.start, end: range.end }),
     includeLp ? getLpCategoryMix(range) : Promise.resolve([]),

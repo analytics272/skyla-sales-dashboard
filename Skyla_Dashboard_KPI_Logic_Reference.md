@@ -197,6 +197,69 @@ relevant tab section below for the current formula.
   Verified identical to a direct `getAvailableRoomNights()` call for the same
   scope. See §3.
 
+**2026-09-02 through 2026-09-07 (not individually logged here — see
+`lib/reference/period.ts`'s docstring for the full history):** the dashboard's
+global filtering moved from the old multi-select Property/Month/Quarter/FY
+model this section still describes to a single-select **period-tab** model —
+Today / This Month / Last 7 Days / Last 30 Days / This FY / Custom Range,
+plus an opt-in `compareYoY` toggle (off = compare to the immediately
+preceding window of the same length; on = the same window one year back).
+Every tab now means exactly what typing its own bounds as Custom Range would
+mean — no tab silently truncates at "today." Below and throughout this
+document, treat any mention of "Month/Quarter/FY filter" or "always the full
+FY regardless of Month/Quarter" as describing the pre-redesign model; the
+underlying formulas (Room Revenue = `SUM(DailyRevenue)`, Occupancy % = Sold ÷
+Available, etc.) are unchanged, only how the date range is chosen is
+different. This doc's tab-by-tab sections have not all been reworded for the
+new filter yet — `period.ts` and each query file's own comments are the
+authoritative source in the meantime.
+
+**2026-09-08:**
+- **Real bug, dashboard-wide: Sold Room Nights (and everything derived from
+  it — Occupancy %, ADR, RevPAR) was inflated by `COUNT(*)`-counting rows
+  that never represented an actual occupied room.** Found while cross-checking
+  the Overview page against the business's own PMS Annual Sales Report for
+  September 2026 (user-provided): `sales_booking` carries a `BookingStatus`
+  column, and two of its values — `Void` (a corrected/rebooked folio; the
+  superseded row is left in the table marked Void) and `No Show` (guest never
+  arrived) — are 100% `DailyRevenue = 0` across the entire table (2,635 Void +
+  64 No Show rows, confirmed live, zero of them carrying any revenue) but were
+  never excluded from any `COUNT(*)` "nights" query. Revenue figures were
+  therefore always correct (₹0 either way); every nights-derived figure
+  wasn't. Reproduced for Sept 2026: BigQuery counted 800 KDP room-nights
+  against the PMS report's 748 actual occupied rooms (148 Void + No Show rows
+  dashboard-wide that month). **Fixed once, centrally**: `BookingStatus NOT
+  IN ('Void', 'No Show')` is now baked into `scopeClauseForRange()`
+  (`lib/bigquery/queries/filters.ts`, exported as `SALES_BOOKING_STAY_FILTER`
+  for the handful of call sites that build their own raw WHERE clause instead
+  of going through `buildScopeClause`/`buildPreviousScopeClause`) — reaches
+  every `sales_booking` nights query dashboard-wide: Overview (§2), Property
+  Targets' achieved side (§6.1), Trends (§4), Brand (§5), OTA Breakdown (§8),
+  Booking Details (§3, including the Guest-Served-vs-sheet accuracy check,
+  which sums `NoOfGuest` and was also inflated the same way), and Booking
+  Pace. A small residual gap against the PMS report remains after this fix
+  (Sept 2026: BigQuery ~1,999 nights vs the report's 2,072, split
+  inconsistently by property — some over, some under) — that remainder looks
+  like ordinary PMS-to-BigQuery sync timing lag, not a further logic bug; see
+  §10.
+- **KDP room count corrected 63 → 64** in `lib/reference/propertyReference.ts`
+  — the same PMS report shows KDP's "Rooms Available" as 64 rooms × days in
+  the month for all 12 of its months (Sep 2026 – Aug 2027 — e.g. 1,920 = 64×30
+  for September), not 63. This only affects the *live* Available Room Nights
+  figure (Occupancy %, ADR, RevPAR); the fixed FY 26-27 target sheet in
+  `lib/reference/propertyTargets.ts` still uses its own workbook-confirmed
+  63-based `available` figures per §6.1's "targets are static, not read from
+  BigQuery" rule — the planning workbook and the PMS's physical room count
+  simply disagree by one room for KDP, and the live side is the one that
+  should match the PMS.
+- **Lead Tracker's New/Existing/Reference Leads tiles (§7) relabeled**: the
+  "X closed → Y% achieved" caption with a progress bar is now "X closed → Y%
+  conversion rate" with no bar — there's no target being "achieved" here
+  (this isn't the FY 26-27 target-vs-actual context §6.1's progress bars
+  describe), just closed ÷ total for that lead segment, the same basis as the
+  top-row Conversion Rate KPI (§7) narrowed to one segment. A progress bar
+  implies progress toward a goal, which doesn't apply to a plain rate.
+
 ---
 
 ## 1. Shared reference logic
@@ -242,10 +305,10 @@ These building blocks are reused across multiple tabs.
 ### 1.5 Property Reference
 | Property | Brand | Rooms | Status |
 |---|---|---|---|
-| KDP | Skyla | 63 | Active |
+| KDP | Skyla | 64 (corrected 2026-09-08, was 63 — see revision history) | Active |
 | HTC | Skyla | 34 | Active |
 | JHS | Skyla | 33 | Active |
-| BH4 | Aptly | 18 | Active (zero rows in `sales_booking` currently — see §10) |
+| BH4 | Aptly | 18 | Active — has live `sales_booking` rows as of 2026-09-08 (the "zero rows currently" pipeline-gap note from this doc's original build no longer holds; not re-verified end-to-end beyond confirming non-zero volume) |
 | GB | Hyber | 21 | Active |
 | LP | Aptly | 16 | Active (re-activated 2026-08-26) — zero rows in `sales_booking` (retired, no PMS feed), real data sourced from `sales_booking_lp_monthly` instead — see §11 |
 
@@ -293,7 +356,7 @@ construction, so LP naturally contributes 0 to them already.
 | ADR | Room Revenue ÷ Sold Room Nights |
 | Occupancy % | Sold Room Nights ÷ Available Room Nights |
 | RevPAR | Room Revenue ÷ Available Room Nights |
-| Sold Room Nights | `COUNT(*)` (row grain = one occupied night) |
+| Sold Room Nights | `COUNT(*)` (row grain = one occupied night), **excluding `BookingStatus IN ('Void', 'No Show')`** (2026-09-08 fix — see revision history; these rows are always ₹0 revenue and were never a real occupied night) |
 | Available Room Nights | see §1.5 |
 | Unsold Room Nights | Available − Sold |
 | Room Revenue / ADR / Occupancy / RevPAR YoY | Current FY vs the prior FY's, **always the full FY** regardless of any Month/Quarter narrowing — YoY is a year-level comparison by design. Displayed as "▲/▼ X% vs {prior FY} (₹prior value)" — same pattern used everywhere a YoY comparison is shown (§ "Comparison pattern" note below) |
@@ -537,10 +600,10 @@ dropped.
 | Closed Leads | `COUNTIF(Stage = 'Closed')` |
 | Conversion Rate | Closed ÷ Total |
 | Revenue | `SUM(SAFE_CAST(REPLACE(Total, ',', '') AS FLOAT64))` |
-| B2C Leads | `COUNTIF(Source IN ('Exotel', 'Business WA', 'Website'))` — broadened 2026-08-24 from `Exotel` only to also include WhatsApp (`Business WA`) and `Website` inquiries, all genuine B2C acquisition channels. Card sub-label now also shows "closed → XX% achieved". |
+| B2C Leads | `COUNTIF(Source IN ('Exotel', 'Business WA', 'Website'))` — broadened 2026-08-24 from `Exotel` only to also include WhatsApp (`Business WA`) and `Website` inquiries, all genuine B2C acquisition channels. Displayed on the dashboard as "New Leads". Card sub-label shows "X closed → Y% conversion rate" (relabeled 2026-09-08 from "→ Y% achieved", progress bar removed — see revision history) — Y% here is that segment's own Closed ÷ Total, same basis as the top-row Conversion Rate above but narrowed to this one lead segment. |
 | B2C Leads Closed | Same source set, `AND Stage = 'Closed'` |
-| Existing Leads Closed | `COUNTIF(Source = 'Existing' AND Stage = 'Closed')` |
-| Reference Leads Closed | `COUNTIF(Source = 'Reference' AND Stage = 'Closed')` |
+| Existing Leads Closed | `COUNTIF(Source = 'Existing' AND Stage = 'Closed')` — same "X closed → Y% conversion rate" caption pattern as New Leads above, no progress bar |
+| Reference Leads Closed | `COUNTIF(Source = 'Reference' AND Stage = 'Closed')` — same "X closed → Y% conversion rate" caption pattern as New Leads above, no progress bar |
 | Booking Pace | `AVG(Booking_Pace)` — a precomputed sheet column |
 | Leads MoM | Total vs Closed, by fiscal month, for the selected FY. **Now respects the Property filter** (previously ignored it despite `lead_tracker` having a `Property` column — fixed 2026-08-24). |
 | Leads by Property | Grouped by the remapped display property |
@@ -614,15 +677,27 @@ the FY filter like every other section rather than showing full history.
 
 ## 10. Known data caveats (accepted, not bugs)
 
-- **BH4 has zero rows in `sales_booking`/`sales_booking_cancelled`** right
-  now, despite being an Active property — confirmed as a pipeline gap, not a
-  dashboard bug. Stay-based KPIs (Revenue Details, Booking Details, Trends,
-  Brand, the per-property Revenue Targets table) show 0/blank for BH4; B2B,
-  Leads, and Reviews are unaffected since those tables do have BH4 data.
-  Known, accepted, will resolve once the eZee sync backfills. **LP had the
-  same gap but it's now resolved differently** — see §11; LP will never get a
-  live PMS feed (retired hotel), so its numbers come from a one-time backfill
-  instead of waiting on a sync.
+- **BH4's `sales_booking` pipeline gap has closed.** This doc originally
+  noted BH4 at zero rows in `sales_booking`/`sales_booking_cancelled` despite
+  being Active; confirmed 2026-09-08 that BH4 now has live, non-trivial
+  volume (e.g. 294 Sept-2026 room-nights). Not re-audited beyond confirming
+  non-zero volume — if a BH4-specific figure still looks off, don't assume
+  this note's old "known gap" explanation still applies. **LP is a different,
+  still-current case** — see §11; LP will never get a live PMS feed (retired
+  hotel), so its numbers come from a one-time backfill instead of a sync.
+- **Residual PMS-vs-BigQuery gap on room-nights, small and inconsistent by
+  property** (2026-09-08): after excluding Void/No-Show rows (see revision
+  history), Sold Room Nights still doesn't tie out exactly to the business's
+  own PMS Annual Sales Report — Sept 2026 was ~1,999 (BigQuery) vs 2,072
+  (PMS report), and the per-property direction isn't consistent (BH4 and JHS
+  read lower in BigQuery, KDP/HTC/GB read close to the report). This doesn't
+  match any single-cause explanation found so far (not Void/No-Show — already
+  excluded; not a room-count error — Available Room Nights now ties out
+  exactly to the report at 5,100). Treated as ordinary PMS→BigQuery sync
+  timing lag rather than a dashboard logic bug, but not independently
+  confirmed — if it grows or a specific property's gap looks large, it's
+  worth asking whoever owns the eZee/BigQuery sync rather than assuming it's
+  this dashboard's calculation.
 - **GB's active window** uses the empirical `MIN/MAX(StayDate)` in the data
   (starts 2024-04-02), not the "added mid-2026" date originally documented —
   real data contradicted that date, so the true window is used instead.

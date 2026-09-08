@@ -88,6 +88,14 @@ export default function LeadsContent({
   byOwnerSource: OwnerSourceCell[];
   compareYoY: boolean;
 }) {
+  // Conversion rate = closed leads / total leads for that segment (Stage =
+  // 'Closed' in lead_tracker), the same closed/total basis as the top-row
+  // "Conversion Rate" KPI (getLeadsSummary in lib/bigquery/queries/leads.ts)
+  // — just narrowed to New/Existing/Reference instead of all sources
+  // combined. 2026-09-08: relabeled from "% achieved" (there's no target
+  // being achieved here, just a share of leads that closed) and dropped the
+  // progress bar per explicit request — a bar implies progress toward a
+  // goal, which doesn't apply to a conversion rate.
   const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 100) : 0);
   const b2cAchievedPct = pct(summary.b2cLeadsClosed, summary.b2cLeads);
   const existingAchievedPct = pct(summary.existingClosedLeads, summary.existingLeads);
@@ -151,22 +159,19 @@ export default function LeadsContent({
           <StatTile
             label="New Leads"
             value={summary.b2cLeads.toLocaleString("en-IN")}
-            sub={`${summary.b2cLeadsClosed.toLocaleString("en-IN")} closed → ${b2cAchievedPct}% achieved`}
-            progress={{ pct: b2cAchievedPct / 100 }}
+            sub={`${summary.b2cLeadsClosed.toLocaleString("en-IN")} closed → ${b2cAchievedPct}% conversion rate`}
             delta={summary.comparison.b2cLeads.pctChange !== null ? { pct: summary.comparison.b2cLeads.pctChange * 100, label: "vs previous" } : undefined}
           />
           <StatTile
             label="Existing Leads"
             value={summary.existingLeads.toLocaleString("en-IN")}
-            sub={`${summary.existingClosedLeads.toLocaleString("en-IN")} closed → ${existingAchievedPct}% achieved`}
-            progress={{ pct: existingAchievedPct / 100 }}
+            sub={`${summary.existingClosedLeads.toLocaleString("en-IN")} closed → ${existingAchievedPct}% conversion rate`}
             delta={summary.comparison.existingLeads.pctChange !== null ? { pct: summary.comparison.existingLeads.pctChange * 100, label: "vs previous" } : undefined}
           />
           <StatTile
             label="Reference Leads"
             value={summary.referenceLeads.toLocaleString("en-IN")}
-            sub={`${summary.referenceClosedLeads.toLocaleString("en-IN")} closed → ${referenceAchievedPct}% achieved`}
-            progress={{ pct: referenceAchievedPct / 100 }}
+            sub={`${summary.referenceClosedLeads.toLocaleString("en-IN")} closed → ${referenceAchievedPct}% conversion rate`}
             delta={summary.comparison.referenceLeads.pctChange !== null ? { pct: summary.comparison.referenceLeads.pctChange * 100, label: "vs previous" } : undefined}
           />
         </div>
