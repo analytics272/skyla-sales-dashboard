@@ -85,8 +85,16 @@ function mergeSeries(
 type TrendTab = "Revenue" | "Occupancy" | "RevPAR" | "ADR";
 const TREND_TABS: TrendTab[] = ["Revenue", "Occupancy", "RevPAR", "ADR"];
 
-type MixTab = "Revenue" | "ADR";
-const MIX_TABS: MixTab[] = ["Revenue", "ADR"];
+// "Occupancy %" specifically isn't addable here — occupancy needs an
+// available-room-nights denominator, and there's no such thing as "available
+// room nights for B2B" (a room isn't pre-allocated to a business category
+// before it's booked, unlike a property or brand, which have a real,
+// summable room count). What IS a real, correct metric along the same
+// "share of the total, by category" lines as the Revenue tab: Nights sold —
+// already computed by getOverviewKpis' bySource (same query, no new fetch),
+// same pattern as Bookings page's own "Revenue Mix" nights-share donut.
+type MixTab = "Revenue" | "Nights" | "ADR";
+const MIX_TABS: MixTab[] = ["Revenue", "Nights", "ADR"];
 
 type RankTab = "By Property" | "By Brand";
 const RANK_TABS: RankTab[] = ["By Property", "By Brand"];
@@ -144,6 +152,10 @@ export default function OverviewContent({
   const categoryAdrBars: BarDatum[] = categoriesPresent.map((c) => {
     const s = overview.bySource.find((x) => x.category === c)!;
     return { name: c, value: safeDivide(s.revenue, s.nights) ?? 0, color: CATEGORY_COLOR[c] };
+  });
+  const nightsDonut = categoriesPresent.map((c) => {
+    const s = overview.bySource.find((x) => x.category === c)!;
+    return { name: c, value: s.nights, color: CATEGORY_COLOR[c] };
   });
 
   const adrByPropertyData: BarDatum[] = adrByProperty.map((r) => ({ name: r.property, value: r.adr ?? 0, color: "var(--series-4)" }));
@@ -203,11 +215,9 @@ export default function OverviewContent({
           horizontal space on its own row. */}
       <div className="grid gap-3 lg:grid-cols-2">
         <TabbedCard title="Business Category Mix" tabs={MIX_TABS} active={mixTab} onChange={setMixTab}>
-          {mixTab === "Revenue" ? (
-            <DonutChart data={revenueDonut} valueFormatter={(v) => formatIndianCurrency(v)} />
-          ) : (
-            <SingleMetricBarChart data={categoryAdrBars} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} />
-          )}
+          {mixTab === "Revenue" && <DonutChart data={revenueDonut} valueFormatter={(v) => formatIndianCurrency(v)} />}
+          {mixTab === "Nights" && <DonutChart data={nightsDonut} valueFormatter={(v) => v.toLocaleString("en-IN")} />}
+          {mixTab === "ADR" && <SingleMetricBarChart data={categoryAdrBars} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} />}
           {/* 2026-09-08: lightweight data-quality indicator (§1.3) — a raw
               Source value this dashboard doesn't recognize is silently
               counted as B2C by bookingCategorySqlExpr's fallback, exactly
