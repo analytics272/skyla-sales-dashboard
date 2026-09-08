@@ -184,9 +184,15 @@ export default function BookingsContent({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         <StatTile label="Available Room Nights" value={roomNightsGap.availableRoomNights.toLocaleString("en-IN")} />
-        <StatTile label="Unsold Room Nights" value={roomNightsGap.unsoldRoomNights.toLocaleString("en-IN")} />
+        <StatTile label="Sold Room Nights" value={roomNightsGap.soldRoomNights.toLocaleString("en-IN")} />
+        {/* 2026-09-08: renamed from "Unsold Room Nights" — the formula
+            changed at the same time to a genuine to-date reading (Available
+            minus Sold, both clamped to yesterday), not the whole selected
+            scope like the two tiles beside it, so the label says so
+            explicitly rather than looking like the same kind of number. */}
+        <StatTile label="Till Date Unsold Nights" value={roomNightsGap.unsoldRoomNights.toLocaleString("en-IN")} sub="through yesterday" />
         <StatTile label="Remaining Room Nights" value={roomNightsGap.remainingRoomNights.toLocaleString("en-IN")} sub="from today forward" />
         <StatTile
           label="Avg Cancellation Lead Time"
