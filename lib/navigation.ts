@@ -8,4 +8,13 @@ export const TABS = [
   { slug: "bookings", label: "Bookings" }, // was: Booking Details + OTA Breakdown
   { slug: "leads", label: "Leads" }, // unchanged
   { slug: "performance", label: "Performance" }, // was: Targets + Reviews
+  // 2026-09-08: new tab, Skyla_Dashboard_Reports_Tab_PRD.md. One nav slot for
+  // both new reports (Folio Based Report FY 26-27, FY 26-27 B2B Details) —
+  // switched via an in-page toggle in ReportsContent.tsx, not a second route,
+  // so the existing pathname === `/${slug}` matching in Sidebar/FilterBar
+  // needs no changes for this. Both reports are fixed to FY 26-27 and ignore
+  // the global period-tab filter (Property filter still applies) — same
+  // "one nav item, its own filter scope" precedent as Property Targets'
+  // fixed-FY section on Performance.
+  { slug: "reports", label: "Reports" },
 ] as const;
