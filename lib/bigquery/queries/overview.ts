@@ -5,7 +5,7 @@
 // getYoyComparison() call (comparison is no longer specifically "vs last
 // FY" — it's "vs whatever the active tab's previous range is").
 import { runQuery, table } from "../client";
-import { KpiFilter, resolveFilter, buildScopeClause, buildPreviousScopeClause } from "./filters";
+import { KpiFilter, resolveFilter, buildScopeClause, buildPreviousScopeClause, SALES_BOOKING_STAY_FILTER } from "./filters";
 import { getAvailableRoomNights } from "./propertyWindows";
 import { getLpOverviewTotals, getLpAdr, LP_PROPERTY } from "./lpMonthly";
 import { bookingCategorySqlExpr, BookingCategory } from "@/lib/reference/bookingSourceMap";
@@ -251,7 +251,7 @@ async function occupancyForRange(properties: string[], start: string, end: strin
   const [soldRows, available] = await Promise.all([
     runQuery<{ n: number }>(`
       SELECT COUNT(*) AS n FROM ${table("sales_booking")}
-      WHERE Property IN UNNEST(@properties) AND CAST(StayDate AS DATE) BETWEEN @start AND @end
+      WHERE Property IN UNNEST(@properties) AND CAST(StayDate AS DATE) BETWEEN @start AND @end AND ${SALES_BOOKING_STAY_FILTER}
     `, { properties, start, end }),
     getAvailableRoomNights(properties, { start, end }),
   ]);

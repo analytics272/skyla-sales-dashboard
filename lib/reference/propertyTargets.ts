@@ -8,10 +8,17 @@
 // month equals the sum of every property's `revenue` below, exactly —
 // cross-checked against live BigQuery data before adding this file).
 //
-// Property codes cross-checked against `propertyReference.ts` by room count
-// (KDP=63, HTC=34, JHS=33, BH4=18, GB=21 — all match exactly, confirming the
-// workbook's "Kondapur/Hitec City/Jubilee Hills/Banjara Hills Rd No 11/
-// Gachibowli" columns map to these codes in this order).
+// Property codes originally cross-checked against `propertyReference.ts` by
+// room count (KDP=63, HTC=34, JHS=33, BH4=18, GB=21 — all matched exactly at
+// the time, confirming the workbook's "Kondapur/Hitec City/Jubilee Hills/
+// Banjara Hills Rd No 11/Gachibowli" columns map to these codes in this
+// order). 2026-09-08: propertyReference.ts's KDP roomCount was since
+// corrected 63 -> 64 against the live PMS Annual Sales Report (see that
+// file's own comment) — this workbook's `available` figures below are
+// untouched (still 63-based, e.g. `available: 1890` = 63 x 30 for April) per
+// "targets are static, confirmed not to change"; only the live/achieved room
+// count differs from this plan now, which is a real (if small) discrepancy
+// between the planning workbook and PMS inventory, not a bug in either file.
 //
 // Actual/achieved figures for comparison against these targets still come
 // from `sales_booking` (real PMS data) — see

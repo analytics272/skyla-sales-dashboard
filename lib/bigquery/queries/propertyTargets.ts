@@ -8,6 +8,7 @@ import { PROPERTY_TARGETS_FY27, PROPERTY_TARGETS_FY } from "@/lib/reference/prop
 import { fyMonthOverlapFraction, DateRange } from "@/lib/reference/financialYear";
 import { PeriodFilter, resolvePeriodFromFilter } from "@/lib/reference/period";
 import { getAvailableRoomNightsByProperty } from "./propertyWindows";
+import { SALES_BOOKING_STAY_FILTER } from "./filters";
 import { safeDivide } from "@/lib/format/currency";
 
 export interface PropertyTargetComparison {
@@ -60,6 +61,7 @@ export async function getPropertyTargetComparison(properties: string[], filter: 
       FROM ${table("sales_booking")}
       WHERE Property IN UNNEST(@properties)
         AND CAST(StayDate AS DATE) BETWEEN @start AND @end
+        AND ${SALES_BOOKING_STAY_FILTER}
       GROUP BY property
     `, { properties, start: range.start, end: range.end }),
     getAvailableRoomNightsByProperty(properties, range),
