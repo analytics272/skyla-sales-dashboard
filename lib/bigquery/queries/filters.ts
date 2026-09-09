@@ -42,6 +42,44 @@ export function resolveFilter(filter: KpiFilter): ResolvedFilter {
 export const SALES_BOOKING_STAY_FILTER = "BookingStatus NOT IN ('Void', 'No Show')";
 
 /**
+ * 2026-09-09: a bare `COUNT(*)` "sold room nights" undercounts BH4
+ * specifically. BH4 has six real "3BHK Apartment" units (`RoomShortCode =
+ * '3 Bedroom Apartments'`, `RoomNo` 100/200/300/400/500/600) that the
+ * business's own reporting (confirmed live against Looker Studio, the
+ * user's BI tool) credits as **3 room-nights per stay-night**, not 1 — one
+ * night in that apartment occupies the equivalent of 3 standard rooms'
+ * worth of capacity, even though it's physically one unit and Available
+ * Room Nights correctly stays at BH4's 18-room count (these apartments
+ * aren't additional bookable inventory — see the 2026-09-09 room-count
+ * revert in propertyReference.ts's own comment; this is a completely
+ * separate, additive fix on the SOLD side only, not a reversal of that
+ * revert). Verified live: Sept 2026 BH4 had 257 standard-room nights + 25
+ * "3 Bedroom Apartments" nights; `COUNT(*)` gives 282, but
+ * `257*1 + 25*3 = 332` — exactly Looker Studio's reported Sold Room Nights,
+ * and `332/540 = 61.48%` occupancy / `revenue/332 = ~₹4,516` ADR both match
+ * Looker Studio's own figures for the same month too.
+ *
+ * This is deliberately scoped to the exact `RoomShortCode` text, not a
+ * generic "parse the bedroom count out of the room name" rule — `JHS` has
+ * 1,790+ nights of its own "Two Bedroom Suite" (and HTC/KDP have "One
+ * Bedroom Suite" types), which are ordinary single-room product tiers, one
+ * physical room each, already correctly inside those properties' own room
+ * counts — those three properties already tied out to Looker Studio using
+ * a plain `COUNT(*)` (checked directly), so a broad "any *Bedroom* type
+ * gets multiplied" rule would have been wrong and would have broken them.
+ * No other property currently has a `RoomShortCode` matching this pattern.
+ *
+ * Applies only to metrics that represent physical room-night capacity
+ * (Sold Room Nights and everything computed from it — Occupancy %, ADR,
+ * RevPAR, category/brand/room-format nights breakdowns) — NOT to Total
+ * Bookings (a 3BHK stay is still one booking) or Guests Served (a
+ * multi-bedroom apartment sleeping N guests is still N guests, not N×3).
+ */
+export function roomNightUnitsSqlExpr(alias = ""): string {
+  return `CASE WHEN ${alias}RoomShortCode = '3 Bedroom Apartments' THEN 3 ELSE 1 END`;
+}
+
+/**
  * WHERE-clause fragment + params scoping a date-bearing table by property
  * list + the active period's CURRENT date range. Use `buildPreviousScopeClause`
  * for the comparison side of a current-vs-previous KPI.

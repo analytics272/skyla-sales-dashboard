@@ -4,7 +4,7 @@
 // the active period's months, grouped by calendar month within
 // resolved.period.current (naturally a single point under "Today").
 import { runQuery, table } from "../client";
-import { KpiFilter, resolveFilter, SALES_BOOKING_STAY_FILTER } from "./filters";
+import { KpiFilter, resolveFilter, SALES_BOOKING_STAY_FILTER, roomNightUnitsSqlExpr } from "./filters";
 import { getAvailableRoomNightsByProperty } from "./propertyWindows";
 import { getLpMonthlyPoints, getLpCategoryMix, LP_PROPERTY } from "./lpMonthly";
 import { bookingCategorySqlExpr, BookingCategory } from "@/lib/reference/bookingSourceMap";
@@ -43,7 +43,7 @@ async function fetchMonthlyPoints(properties: string[], range: DateRange, includ
     runQuery<RawTrendRow>(`
       SELECT
         CAST(DATE_TRUNC(CAST(StayDate AS DATE), MONTH) AS STRING) AS month_start,
-        COUNT(*) AS nights,
+        SUM(${roomNightUnitsSqlExpr()}) AS nights,
         SUM(DailyRevenue) AS revenue
       FROM ${table("sales_booking")}
       WHERE Property IN UNNEST(@properties) AND CAST(StayDate AS DATE) BETWEEN @start AND @end AND ${SALES_BOOKING_STAY_FILTER}
@@ -116,7 +116,7 @@ export interface CategoryAdrStat {
 async function fetchCategoryMix(properties: string[], range: DateRange, includeLp: boolean): Promise<CategoryAdrStat[]> {
   const [rows, lpRows] = await Promise.all([
     runQuery<{ category: BookingCategory; nights: number; revenue: number | null }>(`
-      SELECT ${bookingCategorySqlExpr("Source")} AS category, COUNT(*) AS nights, SUM(DailyRevenue) AS revenue
+      SELECT ${bookingCategorySqlExpr("Source")} AS category, SUM(${roomNightUnitsSqlExpr()}) AS nights, SUM(DailyRevenue) AS revenue
       FROM ${table("sales_booking")}
       WHERE Property IN UNNEST(@properties) AND CAST(StayDate AS DATE) BETWEEN @start AND @end AND ${SALES_BOOKING_STAY_FILTER}
       GROUP BY category

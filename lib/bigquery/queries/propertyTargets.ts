@@ -8,7 +8,7 @@ import { PROPERTY_TARGETS_FY27, PROPERTY_TARGETS_FY } from "@/lib/reference/prop
 import { fyMonthOverlapFraction, DateRange } from "@/lib/reference/financialYear";
 import { PeriodFilter, resolvePeriodFromFilter } from "@/lib/reference/period";
 import { getAvailableRoomNightsByProperty } from "./propertyWindows";
-import { SALES_BOOKING_STAY_FILTER } from "./filters";
+import { SALES_BOOKING_STAY_FILTER, roomNightUnitsSqlExpr } from "./filters";
 import { safeDivide } from "@/lib/format/currency";
 
 export interface PropertyTargetComparison {
@@ -57,7 +57,7 @@ export async function getPropertyTargetComparison(properties: string[], filter: 
 
   const [achievedRows, availableByProperty] = await Promise.all([
     runQuery<AchievedRow>(`
-      SELECT Property AS property, SUM(DailyRevenue) AS revenue, COUNT(*) AS nights
+      SELECT Property AS property, SUM(DailyRevenue) AS revenue, SUM(${roomNightUnitsSqlExpr()}) AS nights
       FROM ${table("sales_booking")}
       WHERE Property IN UNNEST(@properties)
         AND CAST(StayDate AS DATE) BETWEEN @start AND @end

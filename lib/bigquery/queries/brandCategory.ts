@@ -4,7 +4,7 @@
 // (both computed the same B2B/B2C/OTA current-period breakdown) — Brand's
 // page reuses that instead of duplicating the query.
 import { runQuery, table } from "../client";
-import { KpiFilter, resolveFilter, buildScopeClause } from "./filters";
+import { KpiFilter, resolveFilter, buildScopeClause, roomNightUnitsSqlExpr } from "./filters";
 import { getAvailableRoomNightsByProperty } from "./propertyWindows";
 import { getLpSoldRoomNights, LP_PROPERTY } from "./lpMonthly";
 import { Brand, brandOf } from "@/lib/reference/propertyReference";
@@ -28,7 +28,7 @@ export async function getBrandOccupancy(filter: KpiFilter): Promise<BrandOccupan
   // has zero LP rows.
   const [nightsRows, availableByProperty, lpSoldNights] = await Promise.all([
     runQuery<{ property: string; nights: number }>(`
-      SELECT Property AS property, COUNT(*) AS nights
+      SELECT Property AS property, SUM(${roomNightUnitsSqlExpr()}) AS nights
       FROM ${table("sales_booking")}
       WHERE ${where}
       GROUP BY property

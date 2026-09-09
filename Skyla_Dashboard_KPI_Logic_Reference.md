@@ -470,6 +470,47 @@ normal range and worth flagging to whoever owns the sync pipeline
 specifically for BH4, but is not something a dashboard code change can
 close.
 
+**2026-09-09 (later, same day) — the above conclusion was WRONG: that "gap"
+was a real, fixable formula bug, not a sync-completeness issue.** User
+supplied the actual business rule, direct from the PMS/Looker convention:
+a stay-night in BH4's 3BHK apartment is credited as **3 room-nights sold**,
+not 1 — the same "one physical unit, multiple room-capacity units" logic
+that already governs why the 3BHK doesn't get *added* to Available Room
+Nights (§ the 18-vs-24 revert two entries up) but its activity still counts
+several-fold on the *sold* side. Verified live: Sept 2026 BH4 had 257
+standard-room nights + 25 "3 Bedroom Apartments" nights; a plain `COUNT(*)`
+gives 282 (the "gap" reported above), but `257×1 + 25×3 = 332` — exactly
+Looker Studio's figure, and `332/540 = 61.48%` / `revenue÷332 = ₹4,516.11`
+both match Looker Studio's Occ% and ADR exactly too. Fixed by adding
+`roomNightUnitsSqlExpr()` to `lib/bigquery/queries/filters.ts` — a `CASE
+WHEN RoomShortCode = '3 Bedroom Apartments' THEN 3 ELSE 1 END` used in place
+of a bare `COUNT(*)` everywhere a query computes room-night capacity
+(Sold Room Nights and everything derived from it: Occupancy %, ADR, RevPAR,
+and every category/brand/room-format nights breakdown), rolled out across
+every file that previously needed the same treatment for the Void/No-Show
+fix (`overview.ts`, `trends.ts`, `brandCategory.ts`, `otaBreakdown.ts`,
+`guestDetail.ts`, `propertyTargets.ts`, `reports.ts`) — **not** applied to
+Total Bookings (a 3BHK stay is still one booking) or Guests Served (a
+3BHK sleeping 4 people is 4 guests, not 12).
+
+Deliberately scoped to the exact `RoomShortCode` text, not a general "parse
+the bedroom count out of the room name" rule: `JHS` has 1,790+ nights of its
+own "Two Bedroom Suite" (and HTC/KDP have "One Bedroom Suite" types) — these
+are ordinary single-room product tiers, one physical room each, already
+correctly inside those properties' own room counts, and applying a ×2/×1
+multiplier there would have wrongly inflated numbers that already tied out
+to Looker Studio using a plain `COUNT(*)` (confirmed directly — JHS/HTC/KDP
+were re-checked after this fix and are byte-identical to before it). No
+other property currently has a `RoomShortCode` matching the "3 Bedroom
+Apartments" pattern.
+
+Verified live, every page, Sept 2026 BH4 — now an exact match to Looker
+Studio on every figure: Available 540, Sold 332, Revenue ₹14,99,350,
+Occupancy 61.48%, ADR ₹4,516.11, RevPAR ₹2,776.57. Category Mix's B2B (183
+nights) + B2C (149 nights) sums to exactly 332. Confirmed unchanged for
+GB/JHS/HTC/KDP (their Sold Room Nights are byte-identical to their pre-fix
+values — 117/450/449/811 respectively).
+
 ---
 
 ## 1. Shared reference logic
@@ -595,7 +636,7 @@ construction, so LP naturally contributes 0 to them already.
 | ADR | Room Revenue ÷ Sold Room Nights |
 | Occupancy % | Sold Room Nights ÷ Available Room Nights |
 | RevPAR | Room Revenue ÷ Available Room Nights |
-| Sold Room Nights | `COUNT(*)` (row grain = one occupied night), **excluding `BookingStatus IN ('Void', 'No Show')`** (2026-09-08 fix — see revision history; these rows are always ₹0 revenue and were never a real occupied night) |
+| Sold Room Nights | `SUM(roomNightUnitsSqlExpr())` (row grain = one occupied night, **weighted 3× for BH4's "3 Bedroom Apartments" rows** — 2026-09-09 fix, see revision history; every other room type weighs 1), **excluding `BookingStatus IN ('Void', 'No Show')`** (2026-09-08 fix — see revision history; these rows are always ₹0 revenue and were never a real occupied night) |
 | Available Room Nights | see §1.5 |
 | Unsold Room Nights | Available − Sold |
 | Room Revenue / ADR / Occupancy / RevPAR YoY | Current FY vs the prior FY's, **always the full FY** regardless of any Month/Quarter narrowing — YoY is a year-level comparison by design. Displayed as "▲/▼ X% vs {prior FY} (₹prior value)" — same pattern used everywhere a YoY comparison is shown (§ "Comparison pattern" note below) |
@@ -942,18 +983,17 @@ the FY filter like every other section rather than showing full history.
   timing lag rather than a dashboard logic bug, but not independently
   confirmed — if it grows or a specific property's gap looks large, it's
   worth asking whoever owns the eZee/BigQuery sync rather than assuming it's
-  this dashboard's calculation. **Update 2026-09-09**: confirmed BH4 specifically
-  has a materially larger gap than the rest of the portfolio — Sept 2026 Sold
-  Room Nights read 282 (BigQuery) vs 332 (the business's live Looker Studio
-  report), a ≈15% gap, vs single-digit-percent gaps for JHS/HTC/KDP the same
-  month. Checked directly: BH4's raw `sales_booking` row count for the month
-  (306, every status including `Void`) is itself below Looker's 332 — the
-  rows aren't all synced yet, confirmed not a dashboard classification issue.
-  Room Revenue and Available Room Nights both match Looker Studio exactly
-  for BH4 that month (see revision history's BH4 room-count revert) — only
-  the nights-count side has this gap, and it's specific to BH4's own sync
-  pipeline, worth flagging to its owner by name rather than folded into the
-  general note above.
+  this dashboard's calculation. **Update 2026-09-09, then corrected same
+  day**: BH4 specifically had a materially larger gap than the rest of the
+  portfolio (Sept 2026 Sold Room Nights read 282 vs Looker Studio's 332),
+  first suspected to be a sync-completeness gap — but it turned out to be a
+  real, fixable formula bug, not a sync issue: BH4's "3 Bedroom Apartments"
+  rows needed a ×3 room-night weighting that a plain `COUNT(*)` didn't apply
+  (see §2's Sold Room Nights row and the revision history entry for the
+  full fix). Fixed; BH4 now matches Looker Studio exactly. JHS/HTC/KDP's own
+  small single-digit-percent gaps against Looker Studio remain and are still
+  believed to be ordinary sync lag (unaffected by this fix, re-confirmed
+  unchanged) — this general note otherwise still stands for them.
 - **GB's active window** uses the empirical `MIN/MAX(StayDate)` in the data
   (starts 2024-04-02), not the "added mid-2026" date originally documented —
   real data contradicted that date, so the true window is used instead.
@@ -1143,7 +1183,7 @@ carries forward bookings) — not zeroed, not projected.
 | Total Revenue | Room + F&B | Confirmed |
 | F&B Revenue Share | `SAFE_DIVIDE(F&B, Total)` | Confirmed |
 | Available Room Nights | `getAvailableRoomNightsByProperty` (§1.5), scoped per block | Confirmed |
-| Sold Room Nights | `COUNT(*)` excl. Void/No-Show | Confirmed pattern |
+| Sold Room Nights | `SUM(roomNightUnitsSqlExpr())` excl. Void/No-Show — BH4's "3 Bedroom Apartments" rows weigh 3× (2026-09-09 fix, §2/revision history), every other room type weighs 1 | Confirmed — exact match to Looker Studio for BH4 Sept 2026 |
 | Occupancy % | Sold ÷ Available | Confirmed |
 | Guests Served | `SUM(MAX(NoOfGuest) per booking)`, booking bucketed to whichever month(s) its own nights fall in — a booking spanning a month boundary contributes to each month it touches | Confirmed pattern |
 | RevPAR / ADR / Rev per Guest | Revenue ÷ Available / Sold / Guests | Confirmed |
