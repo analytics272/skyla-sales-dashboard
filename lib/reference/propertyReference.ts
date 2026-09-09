@@ -49,33 +49,34 @@ export interface PropertyRef {
 // to fix since the discrepancy is in physical inventory, not in the target
 // plan.
 //
-// 2026-09-09: BH4 corrected 18 -> 24, user-confirmed as real bookable rooms
-// (not a separate product) after finding a room-count/room-type mismatch —
-// sales_booking has 24 distinct RoomNo values under BH4 (100/101/102/103,
-// 200/201/202/203, ... 600/601/602/603 — six blocks of four), and
-// lib/reference/roomTypeMapping.ts's own BH4 list already enumerates all 24
-// (e.g. "100-3BHK Apartment"), but roomCount here only counted 18 — missing
-// the six "X00" units ("3BHK Apartment", ~₹16,000/night, mostly long-stay
-// "Relocation (B2B)" bookings, vs ~₹3,400-5,000/night and near-continuous
-// turnover for the other 18). Because Available Room Nights used 18 while
-// Sold Room Nights/Room Revenue already included all 24 rooms' activity,
-// BH4's Occupancy % was inflated (nights from 24 rooms measured against an
-// 18-room denominator) and its ADR was a distorted blend of two very
-// different rate tiers relative to what an 18-room reading implied — the
-// exact "ADR and Occupancy wrong only for BH4" symptom reported live. The
-// business's own PMS Annual Sales Report still shows 18 for BH4 (unlike
-// KDP's case, where the PMS report was the source of the correction) — this
-// fix trusts the live per-room booking data plus the codebase's own
-// already-24-room mapping over that summary report, per explicit user
-// confirmation these are real rooms, not a separate revenue stream. Same
-// "static target sheet stays untouched, only the live side changes"
-// treatment as KDP: PROPERTY_TARGETS_FY27.BH4 keeps its own workbook-based
-// 18-room `available` figures unchanged.
+// 2026-09-09, REVERTED same day: BH4 was briefly changed 18 -> 24 after
+// finding 24 distinct RoomNo values under BH4 in sales_booking (100-103,
+// 200-203, ... 600-603 — six blocks of four, the "X00" ones being a "3BHK
+// Apartment" unit type at ~₹16,000/night, mostly long-stay "Relocation
+// (B2B)" bookings) and lib/reference/roomTypeMapping.ts's BH4 list already
+// enumerating all 24. That was wrong. The user cross-checked against the
+// business's live Looker Studio report (their actual BI tool, not a static
+// export) for the same September window, across all 5 operating
+// properties: GB matched the dashboard exactly on every figure (Available,
+// Sold, Revenue, Occ%, ADR, RevPAR, zero difference), confirming Looker
+// Studio is a reliable reference here — and BH4's "Rooms Available" was
+// 540, not 720: exactly 180 = 6×30 less, i.e. exactly the six 3BHK rooms
+// this fix had added. Room Revenue matched the dashboard exactly either way
+// (₹14,99,350) — the 3BHK units' revenue really is counted in Room Revenue
+// — but Looker Studio's own "Rooms Available" deliberately excludes them
+// from capacity. So the six 3BHK apartments are real, billed, revenue-
+// generating rooms, but the business's own occupancy/capacity convention
+// doesn't count them as part of BH4's 18-room inventory — a genuine "extra,
+// off-inventory revenue" case, not the "real rooms, count is 24" reading
+// this fix assumed. Reverted to 18. (KDP's 63->64 correction two days
+// earlier is unaffected and still confirmed correct — Looker Studio's own
+// KDP "Rooms Available" for the same September window is 1,920 = 64×30,
+// matching that fix exactly.)
 export const PROPERTIES: PropertyRef[] = [
   { code: "KDP", name: "KDP", brand: "Skyla", roomCount: 64, status: "active" },
   { code: "HTC", name: "HTC", brand: "Skyla", roomCount: 34, status: "active" },
   { code: "JHS", name: "JHS", brand: "Skyla", roomCount: 33, status: "active" },
-  { code: "BH4", name: "BH4", brand: "Aptly", roomCount: 24, status: "active" },
+  { code: "BH4", name: "BH4", brand: "Aptly", roomCount: 18, status: "active" },
   { code: "LP", name: "LP", brand: "Aptly", roomCount: 16, status: "active" },
   { code: "GB", name: "GB", brand: "Hyber", roomCount: 21, status: "active" },
 ];

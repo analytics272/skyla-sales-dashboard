@@ -432,6 +432,44 @@ Sept 2026 BH4 Available Room Nights now reads 720 (24×30, was 540) and
 Occupancy % now reads 39.17% (was 52.2%) — in line with the portfolio's
 ~39-40% that month instead of a standout outlier.
 
+**2026-09-09 (later, same day) — the above was WRONG, reverted: BH4's room
+count is 18 after all, not 24.** The user cross-checked the dashboard
+against the business's live **Looker Studio** report (their actual BI tool,
+not a static export) for the same September window, across all 5 operating
+properties. GB matched the dashboard **exactly** on every figure —
+Available, Sold, Revenue, Occ%, ADR, RevPAR, zero difference on any of
+them — establishing Looker Studio as a reliable reference here. BH4's own
+Looker "Rooms Available" was **540**, not 720: exactly 180 = 6×30 less,
+i.e. precisely the six 3BHK rooms the reverted fix had added. Room Revenue
+matched the dashboard exactly either way (₹14,99,350 — the 3BHK units'
+revenue really is counted there) and RevPAR now matches Looker's exactly
+too (₹2,776.57 both) once Available reverted to 540. So the six 3BHK
+apartments are real, billed, revenue-generating rooms, but the business's
+own occupancy/capacity convention (as Looker Studio reports it) doesn't
+count them as part of BH4's 18-room inventory — the earlier "real rooms,
+count is 24" read was a reasonable inference from the raw booking data
+alone, but wrong once checked against the business's actual reporting
+convention. Reverted `roomCount` to 18 in `propertyReference.ts` (see that
+file's own comment for the full evidence) and undid the matching
+`propertyTargets.ts` comment. KDP's 63→64 correction two days earlier is
+**unaffected and re-confirmed** by this same cross-check — Looker Studio's
+own KDP "Rooms Available" for the same window is 1,920 = 64×30, matching
+that fix exactly.
+
+A second, separate, smaller issue surfaced by the same cross-check and
+**not fixed** (it isn't a dashboard bug): BH4's Sold Room Nights still reads
+282 against Looker's 332 for September — a genuine gap even *before*
+considering room count. Checked directly: `sales_booking`'s raw row count
+for BH4 that month (306, every `BookingStatus` including `Void`) is itself
+below Looker's 332 — the rows simply aren't all in BigQuery yet, not a
+classification or filtering issue on the dashboard's side. Every other
+property's own residual gap that month was much smaller (JHS −15/465
+≈ 3.2%, HTC +2/447, KDP +6/805 — all in the range already documented as
+ordinary PMS-to-BigQuery sync lag) — BH4's ≈15% gap is larger than that
+normal range and worth flagging to whoever owns the sync pipeline
+specifically for BH4, but is not something a dashboard code change can
+close.
+
 ---
 
 ## 1. Shared reference logic
@@ -509,7 +547,7 @@ These building blocks are reused across multiple tabs.
 | KDP | Skyla | 64 (corrected 2026-09-08, was 63 — see revision history) | Active |
 | HTC | Skyla | 34 | Active |
 | JHS | Skyla | 33 | Active |
-| BH4 | Aptly | 24 (corrected 2026-09-09, was 18 — see revision history) | Active — has live `sales_booking` rows as of 2026-09-08 (the "zero rows currently" pipeline-gap note from this doc's original build no longer holds; not re-verified end-to-end beyond confirming non-zero volume) |
+| BH4 | Aptly | 18 (briefly changed to 24 on 2026-09-09, reverted same day after a Looker Studio cross-check — see revision history) | Active — has live `sales_booking` rows as of 2026-09-08 (the "zero rows currently" pipeline-gap note from this doc's original build no longer holds; not re-verified end-to-end beyond confirming non-zero volume) |
 | GB | Hyber | 21 | Active |
 | LP | Aptly | 16 | Active (re-activated 2026-08-26) — zero rows in `sales_booking` (retired, no PMS feed), real data sourced from `sales_booking_lp_monthly` instead — see §11 |
 
@@ -904,7 +942,18 @@ the FY filter like every other section rather than showing full history.
   timing lag rather than a dashboard logic bug, but not independently
   confirmed — if it grows or a specific property's gap looks large, it's
   worth asking whoever owns the eZee/BigQuery sync rather than assuming it's
-  this dashboard's calculation.
+  this dashboard's calculation. **Update 2026-09-09**: confirmed BH4 specifically
+  has a materially larger gap than the rest of the portfolio — Sept 2026 Sold
+  Room Nights read 282 (BigQuery) vs 332 (the business's live Looker Studio
+  report), a ≈15% gap, vs single-digit-percent gaps for JHS/HTC/KDP the same
+  month. Checked directly: BH4's raw `sales_booking` row count for the month
+  (306, every status including `Void`) is itself below Looker's 332 — the
+  rows aren't all synced yet, confirmed not a dashboard classification issue.
+  Room Revenue and Available Room Nights both match Looker Studio exactly
+  for BH4 that month (see revision history's BH4 room-count revert) — only
+  the nights-count side has this gap, and it's specific to BH4's own sync
+  pipeline, worth flagging to its owner by name rather than folded into the
+  general note above.
 - **GB's active window** uses the empirical `MIN/MAX(StayDate)` in the data
   (starts 2024-04-02), not the "added mid-2026" date originally documented —
   real data contradicted that date, so the true window is used instead.

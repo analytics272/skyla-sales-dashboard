@@ -19,12 +19,16 @@
 // "targets are static, confirmed not to change"; only the live/achieved room
 // count differs from this plan now, which is a real (if small) discrepancy
 // between the planning workbook and PMS inventory, not a bug in either file.
-// 2026-09-09: same treatment for BH4, corrected 18 -> 24 (a larger gap this
-// time — six "3BHK Apartment" rooms the live booking data and the room-type
-// mapping already knew about, user-confirmed as real bookable rooms, not a
-// separate product — see propertyReference.ts's own comment). This
-// workbook's BH4 `available` figures below are likewise untouched, still
-// 18-room-based (e.g. `available: 540` = 18 x 30 for April).
+// 2026-09-09: BH4 was briefly corrected 18 -> 24 (six "3BHK Apartment"
+// rooms found in the live booking data), then reverted the same day after
+// cross-checking against the business's live Looker Studio report — Looker
+// Studio's own BH4 "Rooms Available" is 540 = 18x30, confirming the 3BHK
+// units are real, revenue-generating rooms but not part of BH4's 18-room
+// capacity for occupancy purposes (see propertyReference.ts's own comment
+// for the full evidence). BH4's roomCount is 18 again, matching this
+// workbook's own 18-room `available` figures below (e.g. `available: 540` =
+// 18 x 30 for April) — no discrepancy between the workbook and live
+// inventory for BH4 after all, unlike KDP's genuine 63-vs-64 gap above.
 //
 // Actual/achieved figures for comparison against these targets still come
 // from `sales_booking` (real PMS data) — see
