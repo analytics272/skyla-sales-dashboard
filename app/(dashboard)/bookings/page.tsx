@@ -11,7 +11,6 @@ import {
 } from "@/lib/bigquery/queries/guestDetail";
 import {
   getB2bContractRanking,
-  getB2bTopAdrContracts,
   getCorporateAccountRetention,
   summarizeB2bContracts,
 } from "@/lib/bigquery/queries/b2bContracts";
@@ -43,7 +42,6 @@ export default async function BookingsPage({ searchParams }: { searchParams: Pro
     cancellationLeadTime,
     categoryMix,
     b2bRanking,
-    b2bTopAdr,
     b2bRetention,
     guestServedAccuracy,
     otaBreakdown,
@@ -57,7 +55,6 @@ export default async function BookingsPage({ searchParams }: { searchParams: Pro
     getCancellationLeadTime(filter),
     getCategoryMix(filter),
     getB2bContractRanking(resolved.properties, filter),
-    getB2bTopAdrContracts(resolved.properties, filter),
     getCorporateAccountRetention(resolved.properties),
     getGuestServedAccuracyCheck(),
     getOtaBreakdown(filter),
@@ -75,7 +72,6 @@ export default async function BookingsPage({ searchParams }: { searchParams: Pro
       categoryMix={categoryMix}
       b2bRanking={b2bRanking}
       b2bContractSummary={summarizeB2bContracts(b2bRanking)}
-      b2bTopAdr={b2bTopAdr}
       b2bRangeLabel={b2bRangeLabel}
       b2bRetention={b2bRetention}
       guestServedAccuracy={guestServedAccuracy}

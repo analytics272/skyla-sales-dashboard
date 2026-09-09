@@ -655,6 +655,98 @@ tabbed card.** Two follow-ups from the same 3-screenshot review:
   being a presentation change, so it's flagged for the user to confirm
   before implementing either way.
 
+**2026-09-09 (later still, same day) — real bug, architectural: Company
+Rankings read Nights/Revenue/ADR from `b2b_bills` itself, which
+undercounts and lags. Rewritten to source those figures from `sales_booking`
+(PMS), using `b2b_bills` ONLY for company identity.** Triggered by the user
+sharing a live screenshot of the actual "B2B Bills" Google Sheet with
+`Bill Month = Sep-26` rows already present, directly contradicting the
+`b2b_bills` BigQuery table's own `Month`/`Bill_Month` columns (both showed
+**zero** `Sep 26` rows, table-wide, confirmed by direct query) — and an
+explicit correction: *"data should come from PMS not from b2b bills, b2b is
+only for mapping... b2b bills only captures pending bills, but PMS has all
+data for these B2B metrics."*
+- **Confirmed live, two ways, that the old design was wrong, not just
+  differently-scoped:**
+  1. April 2026 (a month everyone agreed was fully billed): `b2b_bills`'
+     own `SUM(Room_Revenue)` totalled ₹1.08 Cr — only **75%** of that
+     month's true PMS B2B total (₹1.44 Cr, matching Booking Category
+     Mix's own B2B figure exactly). The missing 25% was real B2B revenue
+     already in `sales_booking` whose bill either wasn't fully entered
+     yet or was entered at a different (partial/adjusted) amount.
+  2. BH4's real September B2B revenue (~₹7.83L across 22 folios, directly
+     confirmed in `sales_booking`) had **zero** matching rows in
+     `b2b_bills` under any `Bill_Month`/`Financial_Year` — not mislabeled,
+     genuinely absent from BigQuery's copy of the sheet.
+- **Fix**: join `sales_booking` to `b2b_bills` on `(Property, FolioNo =
+  Folio_No)`, deduplicating `b2b_bills` to one row per `(Property,
+  Folio_No)` first (`ANY_VALUE`) — 28 `(Property, Folio_No)` pairs
+  table-wide have duplicate rows (mostly the legacy `Hyber-GB` property
+  code, plus a handful of historical FY24-25/25-26 folios on GB/KDP/HTC)
+  that would otherwise fan out against `sales_booking`'s one-row-per-night
+  grain and inflate revenue. Verified the join key matches cleanly (BH4
+  FolioNo `F2627BHMG9`: 3 nights/₹9,000 in `sales_booking`, exactly
+  `Nights=3`/`Room_Revenue=₹9,000` in `b2b_bills` for the same folio, for
+  an already-billed example) and re-validated April 2026 end-to-end: the
+  join now recovers **99%** of that month's true PMS B2B revenue as
+  company-mapped (₹1.424 Cr of ₹1.44 Cr; 70 companies, up from 69 —
+  Synergy Apts Services now correctly tops the list at ₹23.4L/332 nights,
+  where it was previously buried lower under the undercounted figures).
+- **`getB2bTopAdrContracts` retired** — Nights/Revenue/ADR now all come
+  from the same single join-based query, so the ADR tab is just that same
+  ranking re-sorted by its own `adr` field (`roomRevenue ÷ nights`, a
+  weighted average — matching how ADR is computed everywhere else on this
+  dashboard) instead of a separate `AVG(ADR)`-over-individual-bills query.
+  `resolveB2bFy`/`monthLabelsInRange`/`MONTH_ABBR` (the FY/Month-label
+  scoping machinery from the previous fix, earlier the same day) are now
+  dead code and were removed with it — scoping is just the real PMS date
+  range (`CAST(StayDate AS DATE) BETWEEN @start AND @end`), same as every
+  other KPI on this dashboard.
+- **A folio not yet in `b2b_bills` at all still drops out of the ranking**
+  — same as before, just for a narrower, more honest reason (no bill
+  raised yet, not "no bill yet AND miscategorized by a billing-workflow
+  month label"). Added a coverage line under the B2B Contracts heading
+  (`b2bMappedCoveragePct` in `BookingsContent.tsx`, computed client-side
+  from `categoryMix`'s already-fetched true PMS B2B total — no new query):
+  *"X% of this period's B2B revenue is mapped to a company below."* Reads
+  ~99% for already-billed months (April) and 0% for BH4/September
+  specifically (BH4 has zero September folios in `b2b_bills` yet, any
+  Bill_Month) — both texts confirmed live.
+- **`getCorporateAccountRetention` is untouched** — `Contract_Status` is a
+  `b2b_bills`-only concept (`sales_booking` has no notion of a contract),
+  so retention is inherently a question about `b2b_bills`' own records,
+  not something a PMS join changes.
+- **Open item, NOT something this fix can resolve**: BigQuery's `b2b_bills`
+  table is itself stale relative to the live Google Sheet — the sheet the
+  user screenshotted already has `Sep-26` `Bill_Month` rows that are not
+  yet present in BigQuery at all (confirmed via direct query: 0 rows
+  table-wide, any property, for `Bill_Month = 'Sep 26'`). This is a
+  sync/ETL lag between the Google Sheet and BigQuery, not a query-logic
+  problem — no dashboard code change can make already-billed September
+  data appear before BigQuery's copy of the sheet is actually refreshed.
+  Whoever owns that sync job needs to run/schedule it; flagged to the user
+  directly rather than worked around.
+- **Whole-dashboard sanity pass after this change**: `b2bContracts.ts` is
+  only imported by `bookings/page.tsx` and `BookingsContent.tsx` — no
+  other tab depends on it. Clean `next build` + `eslint`, and Overview,
+  Leads, Performance, and Reports all confirmed to render with no console
+  errors after the rewrite.
+- **Checked every period filter tab, not just September, per explicit
+  follow-up request** — Today/This Month/Last 7 Days all read 0% mapped
+  (all fall entirely within September); Last 30 Days (spans mostly
+  August) read a surprising 0%, investigated directly: August's own true
+  PMS B2B total for the month is ~₹57.75L, but only ~₹14.4L (25%) has a
+  matching `b2b_bills` row even now — **August, itself over five weeks
+  old, is still mostly unbilled**, not just September. This FY read 73%
+  (a revenue-weighted blend of ~99% for Apr–Jul, ~25% for Aug, 0% for
+  Sep); BH4+This FY read 70%, 15 companies — internally consistent, no
+  crashes, nothing negative/NaN across any combination tested. **This
+  reset the earlier "b2b_bills typically lags live bookings by about a
+  month" claim in the UI copy** (`BookingsContent.tsx`'s empty-state
+  text) — that specific number was itself wrong given August's real
+  state; reworded to not name a specific catch-up time, just that billing
+  is entered progressively after checkout.
+
 ---
 
 ## 1. Shared reference logic
@@ -832,11 +924,11 @@ column each of those needs (guest identity, cancellation records, or
 | Revenue by Room Format & FY | Room Revenue by Room Type, grouped by FY. **Chart type changed 2026-08-24**: room type on the x-axis, one bar per FY per cluster (was: FY on x-axis, stacked by room type — stacking hid the per-segment baseline, making cross-FY comparison hard). **LP merged in when selected** (2026-08-26) — exact, not estimated (see §11). |
 | **Additional Occupancy Bookings/Revenue** | **Not available.** No supporting column found across the 7 in-scope tables (PRD §3.6). Shown as an explicit placeholder, not fabricated. |
 | Corporate Account Retention | For each consecutive FY pair: % of companies with `Contract_Status = 'Contract'` in the earlier FY that also appear (any status) in the later FY. **Not period-filter-scoped** (2026-09-09) — inherently an FY-vs-FY question, unaffected by the narrowing below. |
-| **Company Rankings** (Revenue / Nights / ADR / Contribution % tabs) | **One `TabbedCard`, 2026-09-09** — was three separate cards (Contract Status & Ranking, the old "Company Contribution By" 3-column table, and a standalone Contribution % chart) all ranking the same ~70 companies by a different metric; merged per explicit "keep tabs, shift internal for metric" direction. Every tab is scoped to the active period tab, not always the whole FY (2026-09-09 fix — `b2b_bills`' own `Month` column narrows on top of `Financial_Year`; **Corporate Account Retention above is the one exception**). Each tab shows the full ranked company list inside the same `Expandable` (was: a top-5 taste on three of the four metrics). |
-| — Revenue tab | Companies ranked by `SUM(Room_Revenue)` (tax-exclusive), bars color-coded by `Contract_Status` (green/amber), each bar's own ADR shown as a text label to its right. Chart type changed 2026-09-09: Treemap → sorted horizontal bar chart — a treemap's area-encoding was hard to compare precisely across ~70 companies; bars rank and scale better. The contract-status donut + "X of Y companies under contract" caption above the chart is specific to this tab (contract-status coloring doesn't apply to the other three metrics). |
-| — Nights tab | Same companies, re-sorted by `SUM(Nights)` descending. |
-| — ADR tab | Companies ranked by `AVG(ADR)` (`getB2bTopAdrContracts`), filtered to `SUM(Nights) > 0` — a genuinely different ranking from the Revenue tab's own per-company ADR figure: it surfaces low-volume/high-rate companies the revenue ranking would never show near the top, the same way the reference Looker Studio report keeps these as two separate rankings rather than one. |
-| — Contribution % tab | Each company's `SUM(Room_Revenue)` ÷ **total company-wide revenue across every channel** (B2B+B2C+OTA, from `sales_booking`, same Property+period scope) — i.e. what share of Skyla's *entire* business this one B2B company represents, not its share of the B2B channel alone. Went through two earlier, narrower definitions (share of Contract-status revenue only, then share of all-B2B revenue only) before landing here 2026-08-24. Denominator switched from FY-label matching to a real `sales_booking` date-range query 2026-09-09, same fix that scoped the ranking itself to the active period. **Open question (2026-09-09, not yet resolved)**: the equivalent Looker Studio panel appears to be a lifetime/all-time ranking rather than period-scoped — see revision history's "Verified against the user's own This FY Looker Studio reference" entry. |
+| **Company Rankings** (Revenue / Nights / ADR / Contribution % tabs) | **One `TabbedCard`, 2026-09-09** — was three separate cards (Contract Status & Ranking, the old "Company Contribution By" 3-column table, and a standalone Contribution % chart) all ranking the same ~70 companies by a different metric; merged per explicit "keep tabs, shift internal for metric" direction. Every tab is scoped to the active period tab, not always the whole FY (**Corporate Account Retention above is the one exception**). Each tab shows the full ranked company list inside the same `Expandable`. **Sourcing rewritten 2026-09-09, later same day**: Nights/Revenue/ADR now come from `sales_booking` (PMS), joined to `b2b_bills` on `(Property, FolioNo = Folio_No)` purely for company identity (`Bills_due_from`) and `Contract_Status` — not read from `b2b_bills`' own `Nights`/`Room_Revenue`/`ADR` columns anymore. That old design undercounted (75% of true PMS B2B revenue for a fully-billed month) and lagged real stays by however long a bill takes to reach `b2b_bills` (BH4's real September B2B revenue had zero matching `b2b_bills` rows under any label). See revision history for the full before/after validation. A "X% of this period's B2B revenue is mapped to a company below" line under the B2B Contracts heading states current coverage — ~99% for an already-billed month, 0% where no bills have been raised yet for that scope. |
+| — Revenue tab | Companies ranked by `SUM(sales_booking.DailyRevenue)` for their matched folios (tax-exclusive), bars color-coded by `Contract_Status` (green/amber), each bar's own ADR shown as a text label to its right. Chart type changed 2026-09-09: Treemap → sorted horizontal bar chart — a treemap's area-encoding was hard to compare precisely across ~70 companies; bars rank and scale better. The contract-status donut + "X of Y companies under contract" caption above the chart is specific to this tab (contract-status coloring doesn't apply to the other three metrics). |
+| — Nights tab | Same companies, re-sorted by `SUM(roomNightUnitsSqlExpr())` descending — weighted the same way every other nights figure on the dashboard is (BH4's "3 Bedroom Apartments" rows count 3×). |
+| — ADR tab | **Simplified 2026-09-09, later same day** — used to be a separate `getB2bTopAdrContracts` query, `AVG(ADR)` over individual `b2b_bills` rows; now that Nights/Revenue/ADR all come from the same PMS-sourced ranking, this tab is just that same array re-sorted by its own `adr` field (`roomRevenue ÷ nights`, a weighted average, matching how ADR is computed everywhere else on this dashboard), filtered to `nights > 0`. `getB2bTopAdrContracts` was retired. |
+| — Contribution % tab | Each company's `SUM(Room_Revenue)` ÷ **total company-wide revenue across every channel** (B2B+B2C+OTA, from `sales_booking`, same Property+period scope) — i.e. what share of Skyla's *entire* business this one B2B company represents, not its share of the B2B channel alone. Went through two earlier, narrower definitions (share of Contract-status revenue only, then share of all-B2B revenue only) before landing here 2026-08-24. **Open question (2026-09-09, not yet resolved)**: the equivalent Looker Studio panel appears to be a lifetime/all-time ranking rather than period-scoped — see revision history's "Verified against the user's own This FY Looker Studio reference" entry. |
 | — "Contract revenue achieved" (summary tiles above the Revenue tab) | `SUM(Room_Revenue)` **restricted to `Contract_Status = 'Contract'` rows only** — deliberately narrower than that tab's own bars, which show each company's total revenue regardless of status. Not to be confused with each other. |
 
 **Company identity, 2026-08-24**: all of the above now group by `Bills_due_from`
@@ -1153,6 +1245,24 @@ the FY filter like every other section rather than showing full history.
 - **Generic "OTA" source label and Travex** for OTA net-revenue commission:
   "OTA" is still unresolved (0%, no rate ever supplied); Travex is now
   resolved (20% flat, confirmed).
+- **Corporate Account Retention's most recent FY-to-FY point can understate
+  the current FY's true company count**, checked 2026-09-09 during the
+  Company Rankings PMS-join rewrite (see §3/revision history) — deliberately
+  NOT fixed the same way, so documenting it here instead. Retention still
+  determines "did company X appear in FY Y" by checking `b2b_bills`
+  directly (`Contract_Status` is a `b2b_bills`-only concept with no PMS
+  equivalent, so a join can't fully replace this the way it did for
+  Nights/Revenue/ADR). A company that has genuinely already returned in the
+  current FY per `sales_booking` won't count as "retained" here until its
+  bill is entered — so the FY25-26→FY26-27 point (72%, 52 of 84) is likely
+  a floor, not the true figure, and will drift upward on its own as
+  billing for FY26-27 catches up. The completed FY24-25→FY25-26 point
+  (79%) isn't affected the same way (both its FYs are long-since fully
+  billed). Not fixed because it would require redefining "presence in a
+  FY" via a `sales_booking` join for this one metric while every other
+  Retention concept (`Contract_Status` itself) stays `b2b_bills`-only —
+  a bigger, more invasive change than this pass's scope; flagged instead
+  of silently left.
 
 ## 11. LP (Lotus Pond) Integration (2026-08-26)
 
