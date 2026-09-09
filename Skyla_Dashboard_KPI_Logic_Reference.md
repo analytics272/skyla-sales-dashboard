@@ -511,6 +511,30 @@ nights) + B2C (149 nights) sums to exactly 332. Confirmed unchanged for
 GB/JHS/HTC/KDP (their Sold Room Nights are byte-identical to their pre-fix
 values — 117/450/449/811 respectively).
 
+**2026-09-09 (later still, same day) — Remaining Room Nights needed the
+OPPOSITE treatment: explicitly NOT the ×3 weighting the fix above just
+added everywhere else.** User checked BH4's Remaining Room Nights next —
+dashboard read 186, Looker Studio read 230. Traced it to a genuine, deliberate
+distinction Looker Studio itself draws (not an inconsistency to normalize
+away): `396 available (forward, today→scope end) − 166 (plain COUNT of
+forward nights: 144 standard + 22 "3 Bedroom Apartments", unweighted) = 230`
+is Looker's own Remaining figure; `396 − 210` (the same 166 nights ×3-weighted
+where they're "3 Bedroom Apartments") `= 186` is what the newly-added
+weighting would give if applied here too. Confirmed Looker's own `Unsold`
+(till-date) DOES use the weighted figure — it already matched this
+function's `unsoldRoomNights` (22) exactly, both before and after re-
+checking — so Looker isn't being inconsistent, it's answering two different
+questions with two different bases: `Unsold`/`Sold` measure capacity
+consumed (a 3BHK night is worth 3× there), `Remaining` measures physical
+unit-nights left to sell (one apartment is still one bookable slot per
+future night, whatever its capacity weighting). Fixed by reverting just the
+`forwardSoldRows` query inside `getRoomNightsGap()` back to a plain
+`COUNT(*)`, leaving every other room-night figure in that same function
+(and everywhere else) on the ×3-weighted basis added by the fix above.
+Verified live: BH4 This Month now reads Remaining=230 exactly; GB/JHS/HTC/
+KDP's own Remaining figures are unaffected (no room type of theirs is
+weighted either way, so the two formulas were always identical for them).
+
 ---
 
 ## 1. Shared reference logic
@@ -681,7 +705,7 @@ column each of those needs (guest identity, cancellation records, or
 | Available Room Nights | Same value already computed by `getAvailableRoomNights()` inside `getRoomNightsGap()` (§1.5) — **added as its own stat tile 2026-08-27**, no new query and no change to the calculation; `RoomNightsGap` just also returns the `available` figure it already had. Shown next to Sold, Till Date Unsold, and Remaining Room Nights so all four read together. |
 | Sold Room Nights | **Added as its own stat tile 2026-09-08** — same plain, unclamped Sold Room Nights `getRoomNightsGap()` already computed internally to derive Unsold; now also returned and shown directly, next to Available. Ties exactly to Overview's own Sold Room Nights for the same filter (both are the whole selected scope, no exceptions). |
 | Till Date Unsold Nights | **Renamed and reformulated 2026-09-08** (was "Unsold Room Nights" = plain Available − Sold for the whole selected scope). Per explicit request, now Available-till-yesterday minus Sold-till-yesterday — i.e. clamped to the *completed* portion of the selected scope only, not the whole thing. A scope that hasn't started as of yesterday (e.g. a future Custom Range) reads 0, same as Remaining Room Nights reads 0 for a scope entirely in the past. This is a deliberate, explicitly-named to-date exception (the label says "Till Date"), not a silent reinterpretation of what a period tab means — the plain Available/Sold Room Nights tiles beside it are untouched and still mean exactly their own selected scope. **LP's real sold nights are subtracted here too** (2026-08-26 fix, carried into the new till-date calculation) — Available already included LP via §1.5's window fix, but Sold didn't, which was silently overstating LP as 100% unsold. Verified live: a fully-past scope's Till Date figure exactly equals its own plain Available − Sold (e.g. July 2026: 5,270 − 3,857 = 1,413, matching exactly); a fully-future scope reads 0. |
-| Remaining Room Nights | Available − Sold, narrowed to **[today, scope end]** — 0 if the whole scope is already in the past. **LP naturally contributes 0** — its entire data window (Apr 2024–Mar 2026) is already in the past relative to any realistic "today," so the forward-looking slice never overlaps it; no LP-specific code needed here. Together with Till Date Unsold Nights above, the two no longer overlap on "today" itself (till-date stops at yesterday, remaining starts at today). |
+| Remaining Room Nights | Available − Sold, narrowed to **[today, scope end]** — 0 if the whole scope is already in the past. **Sold here is plain `COUNT(*)`, deliberately NOT `roomNightUnitsSqlExpr()`-weighted** (2026-09-09), unlike every other Sold-Room-Nights figure on the dashboard — checked directly against Looker Studio for BH4: its own "Remaining" is `396 − 166` (plain count of forward nights, 144 standard + 22 "3 Bedroom Apartments" unweighted) = **230**, not `396 − 210` (the ×3-weighted total that every other figure here — including this same function's own `Unsold`/`Sold`, confirmed matching Looker's weighted numbers exactly) would give (186). Looker's own convention draws a real distinction: `Unsold`/`Sold` answer "how much capacity did we consume" (a 3BHK night counts 3×), `Remaining` answers "how many more physical unit-nights are left to sell" (one apartment is still one bookable unit per future night, regardless of its capacity weighting) — not an Looker inconsistency to normalize away, a deliberate difference in what the two numbers mean. **LP naturally contributes 0** — its entire data window (Apr 2024–Mar 2026) is already in the past relative to any realistic "today," so the forward-looking slice never overlaps it; no LP-specific code needed here. Together with Till Date Unsold Nights above, the two no longer overlap on "today" itself (till-date stops at yesterday, remaining starts at today). |
 | Expat Bookings / Revenue / Nights / ALOS | `Country IS NOT NULL AND Country != 'India'`, same booking/night/ALOS logic as above. **LP excluded** — neither LP table has a `Country` column at any grain. |
 | ADR by Room Format | Room Revenue ÷ nights, grouped by Room Type (§1.6). **LP merged in when selected** (2026-08-26) via `sales_booking_lp_monthly_roomtype` — see §11 for the nights-allocation caveat. |
 | Nights Share by Room Format | Each room type's nights ÷ total nights (no separate room-count-by-type reference exists, so this is a nights-share reading rather than a true occupancy %). LP included in both the per-type and total-nights figures when selected. |

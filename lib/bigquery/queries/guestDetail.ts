@@ -190,12 +190,27 @@ export async function getRoomNightsGap(filter: KpiFilter): Promise<RoomNightsGap
     unsoldRoomNights = Math.max(0, tillDateAvailable - tillDateSold);
   }
 
+  // 2026-09-09: deliberately NOT roomNightUnitsSqlExpr() here, unlike every
+  // other room-night figure in this function — checked live against Looker
+  // Studio for BH4 (today->30 Sep): Available 396 (18 rooms x 22 days,
+  // matches), and Looker's own "Remaining" is 230 = 396 - 166, where 166 is
+  // the plain COUNT(*) of forward nights (144 standard + 22 "3 Bedroom
+  // Apartments", unweighted) — not 396 - 210, which is what the x3-weighted
+  // total (matching this function's own Unsold/Sold figures) would give
+  // (186). Looker Studio's own "Unsold" (till-date) DOES use the weighted
+  // figure — confirmed it matches this function's `unsoldRoomNights` (22)
+  // exactly — so this is a deliberate distinction on Looker's part, not an
+  // inconsistency to "fix" into matching: Unsold/Sold answer "how much
+  // capacity did we consume" (a 3BHK night is worth 3x there), Remaining
+  // answers "how many more physical unit-nights are left to sell" (a 3BHK
+  // apartment is still only one bookable unit per future night, whatever
+  // its capacity weighting). Plain COUNT(*) is correct here specifically.
   let remainingRoomNights = 0;
   if (scopeEnd >= today) {
     const forwardRange = { start: today, end: scopeEnd };
     const forwardAvailable = await getAvailableRoomNights(resolved.properties, forwardRange);
     const forwardSoldRows = await runQuery<{ n: number }>(`
-      SELECT SUM(${roomNightUnitsSqlExpr()}) AS n FROM ${table("sales_booking")}
+      SELECT COUNT(*) AS n FROM ${table("sales_booking")}
       WHERE Property IN UNNEST(@properties) AND CAST(StayDate AS DATE) >= @today AND CAST(StayDate AS DATE) <= @scopeEnd AND ${SALES_BOOKING_STAY_FILTER}
     `, { properties: resolved.properties, today, scopeEnd });
     remainingRoomNights = Math.max(0, forwardAvailable - (forwardSoldRows[0]?.n ?? 0));
