@@ -48,11 +48,34 @@ export interface PropertyRef {
 // change") — only the live/achieved side changes, which is the correct side
 // to fix since the discrepancy is in physical inventory, not in the target
 // plan.
+//
+// 2026-09-09: BH4 corrected 18 -> 24, user-confirmed as real bookable rooms
+// (not a separate product) after finding a room-count/room-type mismatch —
+// sales_booking has 24 distinct RoomNo values under BH4 (100/101/102/103,
+// 200/201/202/203, ... 600/601/602/603 — six blocks of four), and
+// lib/reference/roomTypeMapping.ts's own BH4 list already enumerates all 24
+// (e.g. "100-3BHK Apartment"), but roomCount here only counted 18 — missing
+// the six "X00" units ("3BHK Apartment", ~₹16,000/night, mostly long-stay
+// "Relocation (B2B)" bookings, vs ~₹3,400-5,000/night and near-continuous
+// turnover for the other 18). Because Available Room Nights used 18 while
+// Sold Room Nights/Room Revenue already included all 24 rooms' activity,
+// BH4's Occupancy % was inflated (nights from 24 rooms measured against an
+// 18-room denominator) and its ADR was a distorted blend of two very
+// different rate tiers relative to what an 18-room reading implied — the
+// exact "ADR and Occupancy wrong only for BH4" symptom reported live. The
+// business's own PMS Annual Sales Report still shows 18 for BH4 (unlike
+// KDP's case, where the PMS report was the source of the correction) — this
+// fix trusts the live per-room booking data plus the codebase's own
+// already-24-room mapping over that summary report, per explicit user
+// confirmation these are real rooms, not a separate revenue stream. Same
+// "static target sheet stays untouched, only the live side changes"
+// treatment as KDP: PROPERTY_TARGETS_FY27.BH4 keeps its own workbook-based
+// 18-room `available` figures unchanged.
 export const PROPERTIES: PropertyRef[] = [
   { code: "KDP", name: "KDP", brand: "Skyla", roomCount: 64, status: "active" },
   { code: "HTC", name: "HTC", brand: "Skyla", roomCount: 34, status: "active" },
   { code: "JHS", name: "JHS", brand: "Skyla", roomCount: 33, status: "active" },
-  { code: "BH4", name: "BH4", brand: "Aptly", roomCount: 18, status: "active" },
+  { code: "BH4", name: "BH4", brand: "Aptly", roomCount: 24, status: "active" },
   { code: "LP", name: "LP", brand: "Aptly", roomCount: 16, status: "active" },
   { code: "GB", name: "GB", brand: "Hyber", roomCount: 21, status: "active" },
 ];
