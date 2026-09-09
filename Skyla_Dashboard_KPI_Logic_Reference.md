@@ -402,6 +402,36 @@ to, crashing the moment fewer than all 5 properties were selected (fixed by
 threading the report's own actual column list through instead of a static
 constant).
 
+**2026-09-09 — real bug: BH4's room count was 18, should be 24.** User
+reported ADR/Occupancy looked wrong specifically for BH4 (every other
+property was fine). Found: `sales_booking` has 24 distinct `RoomNo` values
+under BH4 (six blocks of four — 100/101/102/103, 200/201/202/203, ...
+600/601/602/603), not 18 — the six "X00" rooms are a **"3BHK Apartment"**
+unit type (~₹16,000/night, mostly long-stay `Relocation (B2B)` bookings) on
+top of the 18 standard rooms (~₹3,400-5,000/night, near-continuous
+turnover). `lib/reference/roomTypeMapping.ts`'s own BH4 list already
+enumerated all 24 rooms (e.g. `"100-3BHK Apartment"`) — the codebase already
+"knew" about them for room-type reporting — but `propertyReference.ts`'s
+`roomCount` was never updated to match, so Available Room Nights was
+computed off 18 rooms while Sold Room Nights/Room Revenue already included
+all 24 rooms' activity. That mismatch inflated Occupancy % (nights from 24
+rooms measured against an 18-room denominator: Sept 2026 read 52.2%, a
+figure out of step with every other property that month) and produced an
+ADR blended across two very different rate tiers relative to what an
+18-room reading implied. User confirmed live: these are real bookable
+rooms, not a separate product — so the fix is the room count, not an
+exclusion. Corrected to 24 in `propertyReference.ts` (see that file's own
+comment). Notably, the business's own PMS Annual Sales Report **still shows
+18** for BH4 (unlike KDP's 63→64 correction, where the PMS report was
+itself the source of the fix) — this correction trusts the live per-room
+booking data plus the codebase's own already-24-room mapping over that
+summary report, per explicit user confirmation. `PROPERTY_TARGETS_FY27.BH4`
+(the static FY27 planning workbook) is untouched, still 18-room-based, same
+"live side changes, static plan doesn't" treatment as KDP. Verified live:
+Sept 2026 BH4 Available Room Nights now reads 720 (24×30, was 540) and
+Occupancy % now reads 39.17% (was 52.2%) — in line with the portfolio's
+~39-40% that month instead of a standout outlier.
+
 ---
 
 ## 1. Shared reference logic
@@ -479,7 +509,7 @@ These building blocks are reused across multiple tabs.
 | KDP | Skyla | 64 (corrected 2026-09-08, was 63 — see revision history) | Active |
 | HTC | Skyla | 34 | Active |
 | JHS | Skyla | 33 | Active |
-| BH4 | Aptly | 18 | Active — has live `sales_booking` rows as of 2026-09-08 (the "zero rows currently" pipeline-gap note from this doc's original build no longer holds; not re-verified end-to-end beyond confirming non-zero volume) |
+| BH4 | Aptly | 24 (corrected 2026-09-09, was 18 — see revision history) | Active — has live `sales_booking` rows as of 2026-09-08 (the "zero rows currently" pipeline-gap note from this doc's original build no longer holds; not re-verified end-to-end beyond confirming non-zero volume) |
 | GB | Hyber | 21 | Active |
 | LP | Aptly | 16 | Active (re-activated 2026-08-26) — zero rows in `sales_booking` (retired, no PMS feed), real data sourced from `sales_booking_lp_monthly` instead — see §11 |
 

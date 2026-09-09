@@ -19,6 +19,12 @@
 // "targets are static, confirmed not to change"; only the live/achieved room
 // count differs from this plan now, which is a real (if small) discrepancy
 // between the planning workbook and PMS inventory, not a bug in either file.
+// 2026-09-09: same treatment for BH4, corrected 18 -> 24 (a larger gap this
+// time — six "3BHK Apartment" rooms the live booking data and the room-type
+// mapping already knew about, user-confirmed as real bookable rooms, not a
+// separate product — see propertyReference.ts's own comment). This
+// workbook's BH4 `available` figures below are likewise untouched, still
+// 18-room-based (e.g. `available: 540` = 18 x 30 for April).
 //
 // Actual/achieved figures for comparison against these targets still come
 // from `sales_booking` (real PMS data) — see
