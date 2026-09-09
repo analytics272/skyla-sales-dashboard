@@ -4,7 +4,7 @@
 // long or numerous to read flat under a vertical bar (company names, lead
 // sources, room formats) — the label reads left-to-right at full width
 // instead of being truncated or rotated.
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis, Cell } from "recharts";
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis, Cell, LabelList } from "recharts";
 import { CHART_GRIDLINE, CHART_TEXT } from "@/lib/design/tokens";
 import type { BarDatum } from "./SingleMetricBarChart";
 
@@ -54,6 +54,13 @@ export default function HorizontalBarChart({
           {data.map((d) => (
             <Cell key={d.name} fill={d.color} />
           ))}
+          {/* 2026-09-09: optional secondary figure (e.g. ADR next to a
+              revenue bar) — only rendered when at least one row sets it,
+              so every existing caller (which never sets rightLabel) is
+              unaffected. */}
+          {data.some((d) => d.rightLabel) && (
+            <LabelList dataKey="rightLabel" position="right" style={{ fontSize: 11, fill: CHART_TEXT.secondary }} />
+          )}
         </Bar>
       </BarChart>
     </ResponsiveContainer>
