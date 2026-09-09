@@ -535,6 +535,71 @@ Verified live: BH4 This Month now reads Remaining=230 exactly; GB/JHS/HTC/
 KDP's own Remaining figures are unaffected (no room type of theirs is
 weighted either way, so the two formulas were always identical for them).
 
+**2026-09-09 (later still, same day) — B2B Contracts redesign + period-filter
+fix, from a 3-screenshot comparison against Looker Studio's own B2B
+section.** Four changes, all scoped to `lib/bigquery/queries/b2bContracts.ts`,
+`app/(dashboard)/bookings/page.tsx`, and `components/bookings/BookingsContent.tsx`:
+- **Real bug fixed: Company Rankings/Revenue By Company ignored the active
+  period tab, always showing the whole governing FY.** Selecting "This FY"
+  then narrowing to a single month still showed data spanning every month
+  of the FY — this read like stale/prior-year data to the user, and was in
+  fact a real gap: `resolveB2bFy` only ever resolved a whole-FY label, with
+  no narrower filter applied on top. `b2b_bills` has no day-grain date
+  column, but it does carry its own `Month` STRING column (`"Apr 26"`,
+  `"Sep 26"`, ...); added `monthLabelsInRange()` to convert the active
+  period's date range into that exact label format, and added
+  `Month IN UNNEST(@months)` on top of the existing `Financial_Year` match
+  in both `getB2bContractRanking` and `getB2bTopAdrContracts`. `getOverallRevenue`
+  (the Contribution % denominator) switched from FY-label matching to a real
+  `CAST(StayDate AS DATE) BETWEEN @start AND @end` range query against
+  `sales_booking`, which does have day-grain dates — more precise than the
+  ranking queries themselves can be, given `b2b_bills`' coarser grain.
+  "This FY" still resolves to every month in the FY (a no-op narrowing,
+  unchanged), so only narrower tabs (This Month, Last 7/30 Days, Custom
+  Range) actually changed. `getCorporateAccountRetention` is untouched — an
+  FY-vs-FY comparison, "retention for just September" isn't a coherent
+  question the same way "Booking Pace for just September" wasn't earlier in
+  this project (§0, 2026-09-08). The UI now shows a "Scoped to `<range
+  label>`" line under the B2B Contracts heading (`b2bRangeLabel`, same
+  convention as Targets' `targetsRangeLabel`) so the active scope is always
+  visible. **Caveat surfaced by this fix, not a bug**: narrowing to "This
+  Month" (Sept 2026) currently shows 0 B2B companies, because `b2b_bills`
+  has no `Sep 26` rows yet — only `Apr 26`–`Aug 26` exist for FY 26-27. This
+  is real billing-sync lag (the finance sheet lags the live PMS by roughly a
+  month), not a dashboard defect; it will resolve itself once September's
+  bills are entered.
+- **Treemap replaced with a horizontal bar chart** ("Revenue By Company"):
+  per explicit request for "a different representation other than heatmap,
+  better for readability" — a treemap's rectangle-area encoding is hard to
+  compare precisely across ~70 companies of wildly different size; a sorted
+  horizontal bar chart (wrapped in the existing `Expandable`, default
+  collapsed to the top slice with a "Show all N" toggle) makes ranking and
+  relative magnitude immediately legible instead.
+  Underlying data/formula unchanged.
+- **New "Company Contribution By" 3-column compact table** (Nights |
+  Revenue+ADR | ADR), matching the exact table shown in Looker Studio: top-5
+  companies by Nights, by Room Revenue (with ADR alongside), and by ADR,
+  derived client-side from the same `b2bRanking`/`b2bTopAdr` data already
+  fetched — no new query.
+- **Standalone "Top ADR Contracts" chart tab retired.** Per explicit "why
+  top adr we don't want that" direction — its only distinct information (an
+  ADR-sorted company ranking) is now covered by the new compact table's ADR
+  column; the "Company Rankings" toggle card was simplified to a single
+  "Contribution %" chart (previously toggled between Contribution % and Top
+  ADR).
+- **"Maryakhee Hospitality" / "Blue Orange Hospitality" investigated, not
+  found anywhere in BigQuery** — the user asked to confirm these two
+  companies are "listed" with their nights/revenue/ADR contributions.
+  Searched `b2b_bills` (`Bills_due_from`, `Company`, `Bill_To`) and
+  `sales_booking` (`GuestName`, `Source`) under every spelling variant
+  tried ("Maryakhee"/"Mayrakhee", "Blue Orange"/"BlueOrange", "hospitality").
+  Zero matches under any variant, in any table. This is a data-completeness
+  gap, not a dashboard code bug — neither company's billing/booking records
+  have been synced into BigQuery yet under any name tried. Cannot be
+  resolved by a dashboard change; needs the source PMS/billing sheet to
+  carry these companies first, then this table will surface them
+  automatically (no code change needed once the data exists).
+
 ---
 
 ## 1. Shared reference logic
@@ -711,11 +776,12 @@ column each of those needs (guest identity, cancellation records, or
 | Nights Share by Room Format | Each room type's nights ÷ total nights (no separate room-count-by-type reference exists, so this is a nights-share reading rather than a true occupancy %). LP included in both the per-type and total-nights figures when selected. |
 | Revenue by Room Format & FY | Room Revenue by Room Type, grouped by FY. **Chart type changed 2026-08-24**: room type on the x-axis, one bar per FY per cluster (was: FY on x-axis, stacked by room type — stacking hid the per-segment baseline, making cross-FY comparison hard). **LP merged in when selected** (2026-08-26) — exact, not estimated (see §11). |
 | **Additional Occupancy Bookings/Revenue** | **Not available.** No supporting column found across the 7 in-scope tables (PRD §3.6). Shown as an explicit placeholder, not fabricated. |
-| Corporate Account Retention | For each consecutive FY pair: % of companies with `Contract_Status = 'Contract'` in the earlier FY that also appear (any status) in the later FY |
-| Contract Status & Ranking | Companies ranked by `SUM(Room_Revenue)` (tax-exclusive), with `Contract_Status`, `ADR`, and Contribution %. **Merged 2026-08-24** with what used to be a separate "Nights / Revenue / ADR by Company" table — same underlying data, now one table. |
-| — Contribution % | Each company's `SUM(Room_Revenue)` ÷ **total company-wide revenue across every channel** (B2B+B2C+OTA, from `sales_booking`, same Property+FY scope) — i.e. what share of Skyla's *entire* business this one B2B company represents, not its share of the B2B channel alone. Went through two earlier, narrower definitions (share of Contract-status revenue only, then share of all-B2B revenue only) before landing here 2026-08-24. |
+| Corporate Account Retention | For each consecutive FY pair: % of companies with `Contract_Status = 'Contract'` in the earlier FY that also appear (any status) in the later FY. **Not period-filter-scoped** (2026-09-09) — inherently an FY-vs-FY question, unaffected by the narrowing below. |
+| Contract Status & Ranking ("Revenue By Company") | Companies ranked by `SUM(Room_Revenue)` (tax-exclusive), with `Contract_Status`, `ADR`, and Contribution %. **Merged 2026-08-24** with what used to be a separate "Nights / Revenue / ADR by Company" table — same underlying data, now one table. **Now scoped to the active period tab, not always the whole FY** (2026-09-09 fix — see revision history; `b2b_bills`' own `Month` column narrows on top of `Financial_Year`). **Chart type changed 2026-09-09**: Treemap → sorted horizontal bar chart (in an `Expandable`, top slice shown by default) — a treemap's area-encoding was hard to compare precisely across ~70 companies; bars rank and scale better. |
+| — Contribution % | Each company's `SUM(Room_Revenue)` ÷ **total company-wide revenue across every channel** (B2B+B2C+OTA, from `sales_booking`, same Property+period scope) — i.e. what share of Skyla's *entire* business this one B2B company represents, not its share of the B2B channel alone. Went through two earlier, narrower definitions (share of Contract-status revenue only, then share of all-B2B revenue only) before landing here 2026-08-24. Denominator switched from FY-label matching to a real `sales_booking` date-range query 2026-09-09 (see revision history), same fix that scoped the ranking itself to the active period. |
 | — "Contract revenue achieved" (summary tiles above the table) | `SUM(Room_Revenue)` **restricted to `Contract_Status = 'Contract'` rows only** — deliberately narrower than the table's Contribution %, which uses total company revenue as its base. Not to be confused with each other. |
-| Top ADR Contracts | Companies ranked by `AVG(ADR)`, filtered to `SUM(Nights) > 0` |
+| Company Contribution By (Nights / Revenue+ADR / ADR) | **New compact 3-column table, 2026-09-09** — top-5 companies by Nights, by Room Revenue (with ADR alongside), and by ADR, matching the equivalent table shown in Looker Studio. Derived client-side from the same ranking/Top-ADR data already fetched below; no new query. Replaces the standalone Top ADR chart tab (its one distinct figure, ADR, is now this table's third column). |
+| ~~Top ADR Contracts (standalone chart tab)~~ | **Retired 2026-09-09** per explicit request — its only distinct information (an ADR-sorted ranking) is now the "Company Contribution By" table's ADR column above. The "Company Rankings" toggle card was simplified to a single "Contribution %" chart. |
 
 **Company identity, 2026-08-24**: all of the above now group by `Bills_due_from`
 (the operational company name, e.g. "Tata Consumer") instead of `Company`/

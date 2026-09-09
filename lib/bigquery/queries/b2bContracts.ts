@@ -19,8 +19,9 @@
 // to avoid two redundant company tables on the same dashboard tab.
 import { runQuery, table } from "../client";
 import { safeDivide } from "@/lib/format/currency";
-import { currentFYLabel, fyLabelSqlExpr } from "@/lib/reference/financialYear";
+import { currentFYLabel, DateRange } from "@/lib/reference/financialYear";
 import { PeriodFilter, resolvePeriodFromFilter } from "@/lib/reference/period";
+import { SALES_BOOKING_STAY_FILTER } from "./filters";
 
 /**
  * b2b_bills is keyed by its own Financial_Year STRING column, not a date
@@ -36,6 +37,37 @@ export function resolveB2bFy(filter: PeriodFilter): string {
   return currentFYLabel(new Date(`${p.current.start}T00:00:00`));
 }
 
+// 2026-09-09: b2b_bills ALSO carries its own `Month` STRING column
+// ("Apr 26", "Sep 26", ...) — the FY-only scoping above was a deliberate
+// simplification when this file was first written ("no date column to
+// range-filter on"), but per explicit "everything should follow filters"
+// direction, Company Rankings/Revenue By Company should narrow to the
+// active period the same way every other KPI does, not always show the
+// whole FY regardless of a "This Month" selection. `monthLabelsInRange`
+// converts the period's own date range into the "Mon YY" labels it touches,
+// matching this column's exact format, so `getB2bContractRanking`/
+// `getB2bTopAdrContracts` below can add `Month IN UNNEST(@months)` on top
+// of the existing (still-trusted) `Financial_Year` match. `this_fy` itself
+// still resolves to every month in the FY (a no-op narrowing, same as
+// today), so nothing changes for that tab specifically — only narrower
+// tabs (This Month, Last 7/30 Days, Custom Range) are affected.
+// getCorporateAccountRetention is untouched — it's inherently an FY-vs-FY
+// comparison, "retention for just September" isn't a coherent question the
+// same way "Booking Pace for just September" wasn't earlier this project.
+const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function monthLabelsInRange(range: DateRange): string[] {
+  const start = new Date(`${range.start}T00:00:00`);
+  const end = new Date(`${range.end}T00:00:00`);
+  const labels: string[] = [];
+  const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
+  while (cursor <= end) {
+    labels.push(`${MONTH_ABBR[cursor.getMonth()]} ${String(cursor.getFullYear()).slice(-2)}`);
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+  return labels;
+}
+
 export interface B2bContractRanking {
   company: string; // Bills_due_from
   contractStatus: string | null;
@@ -46,17 +78,20 @@ export interface B2bContractRanking {
   contributionPct: number | null;
 }
 
-/** Total revenue across every channel (B2B+B2C+OTA) for the same property+FY scope, from sales_booking — the "overall sales revenue" denominator for Contribution %. */
-async function getOverallRevenue(properties: string[], fy: string): Promise<number> {
+/** Total revenue across every channel (B2B+B2C+OTA) for the same property+period scope, from sales_booking — the "overall sales revenue" denominator for Contribution %. sales_booking has real dates, so this narrows to the exact selected range (not just the governing FY), same as every other revenue figure on the dashboard. */
+async function getOverallRevenue(properties: string[], range: DateRange): Promise<number> {
   const rows = await runQuery<{ revenue: number | null }>(`
     SELECT SUM(DailyRevenue) AS revenue
     FROM ${table("sales_booking")}
-    WHERE Property IN UNNEST(@properties) AND ${fyLabelSqlExpr("CAST(StayDate AS DATE)")} = @fy
-  `, { properties, fy });
+    WHERE Property IN UNNEST(@properties) AND CAST(StayDate AS DATE) BETWEEN @start AND @end AND ${SALES_BOOKING_STAY_FILTER}
+  `, { properties, start: range.start, end: range.end });
   return rows[0]?.revenue ?? 0;
 }
 
-export async function getB2bContractRanking(properties: string[], fy: string): Promise<B2bContractRanking[]> {
+export async function getB2bContractRanking(properties: string[], filter: PeriodFilter): Promise<B2bContractRanking[]> {
+  const fy = resolveB2bFy(filter);
+  const range = resolvePeriodFromFilter(filter).current;
+  const months = monthLabelsInRange(range);
   const [rows, overallRevenue] = await Promise.all([
     runQuery<{ company: string; contractStatus: string | null; roomRevenue: number | null; nights: number }>(`
       SELECT
@@ -66,11 +101,11 @@ export async function getB2bContractRanking(properties: string[], fy: string): P
         SUM(Nights) AS nights
       FROM ${table("b2b_bills")}
       WHERE Bills_due_from IS NOT NULL AND Financial_Year != 'FY 99-00'
-        AND Property IN UNNEST(@properties) AND Financial_Year = @fy
+        AND Property IN UNNEST(@properties) AND Financial_Year = @fy AND Month IN UNNEST(@months)
       GROUP BY company
       ORDER BY roomRevenue DESC
-    `, { properties, fy }),
-    getOverallRevenue(properties, fy),
+    `, { properties, fy, months }),
+    getOverallRevenue(properties, range),
   ]);
 
   // Each company's share of TOTAL company-wide sales revenue — B2B + B2C +
@@ -108,7 +143,9 @@ export interface B2bTopAdrContract {
 }
 
 /** Ranked by AVG(ADR), filtered to meaningful volume (Nights > 0) per PRD. */
-export async function getB2bTopAdrContracts(properties: string[], fy: string): Promise<B2bTopAdrContract[]> {
+export async function getB2bTopAdrContracts(properties: string[], filter: PeriodFilter): Promise<B2bTopAdrContract[]> {
+  const fy = resolveB2bFy(filter);
+  const months = monthLabelsInRange(resolvePeriodFromFilter(filter).current);
   // total_nights (not "nights"): BigQuery resolves HAVING identifiers
   // case-insensitively against SELECT aliases first, so an alias merely
   // differing in case from the source column (nights vs Nights) gets matched to
@@ -117,11 +154,11 @@ export async function getB2bTopAdrContracts(properties: string[], fy: string): P
     SELECT Bills_due_from AS company, AVG(ADR) AS avgAdr, SUM(Nights) AS total_nights
     FROM ${table("b2b_bills")}
     WHERE Bills_due_from IS NOT NULL AND Financial_Year != 'FY 99-00'
-      AND Property IN UNNEST(@properties) AND Financial_Year = @fy
+      AND Property IN UNNEST(@properties) AND Financial_Year = @fy AND Month IN UNNEST(@months)
     GROUP BY company
     HAVING total_nights > 0
     ORDER BY avgAdr DESC
-  `, { properties, fy });
+  `, { properties, fy, months });
   return rows.map((r) => ({ company: r.company, avgAdr: r.avgAdr, nights: r.total_nights }));
 }
 
