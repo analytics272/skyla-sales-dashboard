@@ -20,22 +20,26 @@ revision history and §1.5 for the full reasoning. Also note LP's status row
 below ("Permanently removed") is superseded by the 2026-08-26 LP
 re-integration — see that same doc's §11.
 
-**Correction (2026-09-09):** BH4's room count below is also superseded —
-corrected 18 → 24. `sales_booking` has 24 distinct rooms under BH4 (six
-"3BHK Apartment" units on top of the 18 standard rooms), already enumerated
-in `lib/reference/roomTypeMapping.ts`'s own BH4 room list but never
-reflected in the room count used for Available Room Nights — user-confirmed
-these are real bookable rooms. See the same KPI reference doc's revision
-history for the full reasoning (note: unlike KDP, the PMS Annual Sales
-Report still shows 18 for BH4 — this correction is based on the live
-per-room booking data instead).
+**Correction (2026-09-09), reverted same day:** BH4's room count was briefly
+changed 18 → 24 (`sales_booking` has 24 distinct rooms under BH4, six "3BHK
+Apartment" units already enumerated in `lib/reference/roomTypeMapping.ts`'s
+BH4 room list, on top of the 18 standard rooms) — but reverted back to 18
+after cross-checking against the business's live Looker Studio report,
+which reports BH4's "Rooms Available" as 540 = 18×30 for the same window,
+and matched the dashboard exactly on every other figure checked (Revenue,
+Available, Occ%, ADR, RevPAR for all 5 operating properties). The 3BHK
+units are real, revenue-generating rooms — their revenue is already
+correctly counted — but the business's own occupancy/capacity convention
+doesn't count them toward BH4's room inventory. **BH4's room count below
+(18) is correct as originally listed; no change needed.** See the KPI
+reference doc's revision history for the full evidence trail.
 
 | Property | Brand grouping | Room count | Status |
 |---|---|---|---|
 | KDP | Skyla | 63 (corrected to 64 — see note above) | Active |
 | HTC | Skyla | 34 | Active |
 | JHS | Skyla | 33 | Active |
-| BH4 | Aptly | 18 (corrected to 24 — see note above) | Active |
+| BH4 | Aptly | 18 (briefly changed to 24, reverted — see note above) | Active |
 | GB | Hyber | 21 | Active (added mid-2026 — only count Available Room Nights from its go-live date forward) |
 | LP | Aptly | 16 | **Permanently removed.** Do not include in current/future property filters or "active properties" lists. Historical `sales_booking`/`sales_booking_cancelled` rows for LP remain in BigQuery and should still count in KPIs for the periods it was active. |
 
