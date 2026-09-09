@@ -10,7 +10,7 @@ import {
   BookingStats, RoomNightsGap, RepeatBookingShare, RoomFormatStats,
   ExpatStats, CancellationStats, CancellationLeadTime, CategoryMix, GuestServedAccuracyCheck,
 } from "@/lib/bigquery/queries/guestDetail";
-import type { B2bContractRanking, B2bTopAdrContract, RetentionPoint, B2bContractSummary } from "@/lib/bigquery/queries/b2bContracts";
+import type { B2bContractRanking, RetentionPoint, B2bContractSummary } from "@/lib/bigquery/queries/b2bContracts";
 import type { OtaBreakdownRow } from "@/lib/bigquery/queries/otaBreakdown";
 import StatTile from "@/components/ui/StatTile";
 import Card from "@/components/ui/Card";
@@ -56,7 +56,6 @@ export default function BookingsContent({
   categoryMix,
   b2bRanking,
   b2bContractSummary,
-  b2bTopAdr,
   b2bRangeLabel,
   b2bRetention,
   guestServedAccuracy,
@@ -72,7 +71,6 @@ export default function BookingsContent({
   categoryMix: CategoryMix[];
   b2bRanking: B2bContractRanking[];
   b2bContractSummary: B2bContractSummary;
-  b2bTopAdr: B2bTopAdrContract[];
   /** What Company Rankings/Revenue By Company/OTA Breakdown are actually scoped to — these narrow to the active period tab now (2026-09-09), not always the whole FY. */
   b2bRangeLabel: string;
   b2bRetention: RetentionPoint[];
@@ -118,9 +116,14 @@ export default function BookingsContent({
   // internal-tab pattern already used for Revenue Mix and By Room Format
   // above. Each tab shows the FULL ranked company list (not just a top-5
   // taste), inside the same Expandable used before. b2bRanking is already
-  // revenue-sorted (backend ORDER BY roomRevenue DESC) and b2bTopAdr
-  // already avgAdr-sorted; Nights and Contribution % are re-sorted
-  // client-side — no new query for any of the four.
+  // revenue-sorted (backend ORDER BY roomRevenue DESC); Nights, ADR, and
+  // Contribution % are re-sorted client-side — no new query for any of the
+  // four. (2026-09-09, later still: the ADR tab used to be its own backend
+  // query, AVG(ADR) over individual b2b_bills rows; now that Nights/Revenue/
+  // ADR all come from the same PMS-sourced ranking — see b2bContracts.ts's
+  // rewrite — ADR is just that same array re-sorted by its own adr field,
+  // a weighted revenue÷nights average like every other ADR on this
+  // dashboard, not an unweighted mean of per-bill figures.)
   const b2bRevenueData: BarDatum[] = b2bRanking.map((r) => ({
     name: r.company,
     value: r.roomRevenue,
@@ -130,11 +133,25 @@ export default function BookingsContent({
   const b2bNightsData: BarDatum[] = [...b2bRanking]
     .sort((a, b) => b.nights - a.nights)
     .map((r) => ({ name: r.company, value: r.nights, color: "var(--series-1)" }));
-  const b2bAdrData: BarDatum[] = b2bTopAdr.map((r) => ({ name: r.company, value: r.avgAdr, color: "var(--series-3)" }));
+  const b2bAdrData: BarDatum[] = [...b2bRanking]
+    .filter((r) => r.adr !== null && r.nights > 0)
+    .sort((a, b) => (b.adr ?? 0) - (a.adr ?? 0))
+    .map((r) => ({ name: r.company, value: r.adr ?? 0, color: "var(--series-3)" }));
   const b2bContributionData: BarDatum[] = [...b2bRanking]
     .filter((r) => r.contributionPct !== null)
     .sort((a, b) => (b.contributionPct ?? 0) - (a.contributionPct ?? 0))
     .map((r) => ({ name: r.company, value: (r.contributionPct ?? 0) * 100, color: "var(--series-2)" }));
+
+  // 2026-09-09: Company Rankings is now sourced from sales_booking (PMS),
+  // joined to b2b_bills only for company identity — a booking whose bill
+  // hasn't been raised yet in b2b_bills has no company attached and drops
+  // out of the ranking (see b2bContracts.ts). Surfacing that gap explicitly
+  // instead of letting totals silently not reconcile with the Booking
+  // Category Mix card's own B2B figure above, which IS the true PMS total
+  // for this period/scope.
+  const totalB2bRevenuePms = categoryMix.find((m) => m.category === "B2B")?.revenue ?? 0;
+  const mappedB2bRevenue = b2bRanking.reduce((s, r) => s + r.roomRevenue, 0);
+  const b2bMappedCoveragePct = totalB2bRevenuePms > 0 ? (mappedB2bRevenue / totalB2bRevenuePms) * 100 : null;
 
   // Item #10: the two raw StatTiles here (a revenue figure and a company
   // count — different units, hard to compare at a glance) are replaced by
@@ -254,13 +271,21 @@ export default function BookingsContent({
       <div>
         <h3 className="text-base font-semibold text-zinc-800 dark:text-zinc-100">B2B Contracts</h3>
         {/* 2026-09-09: every card below now scopes to the active period tab
-            (e.g. "This Month" narrows to just that month's b2b_bills rows),
-            not always the whole governing FY — see b2bContracts.ts's own
-            comment for the full reasoning. Stated plainly since b2b_bills is
-            invoiced with a lag (a just-finished month can legitimately show
-            0 rows here for a day or two until billing catches up), which
-            would otherwise look like a bug rather than expected latency. */}
+            (e.g. "This Month" narrows to just that period's real PMS stay
+            dates), not always the whole governing FY. 2026-09-09, later
+            same day: Company Rankings itself is now sourced from
+            sales_booking (PMS), joined to b2b_bills only for company
+            identity — see b2bContracts.ts's header comment. A company only
+            appears once its bill has been raised in b2b_bills; the coverage
+            line below states what fraction of this period's real B2B
+            revenue that currently is, so an incomplete-but-growing number
+            reads as expected billing lag, not a wrong total. */}
         <p className="text-xs text-zinc-400 dark:text-zinc-500">Scoped to {b2bRangeLabel}</p>
+        {b2bMappedCoveragePct !== null && (
+          <p className="text-xs text-zinc-400 dark:text-zinc-500">
+            {b2bMappedCoveragePct.toFixed(0)}% of this period&apos;s B2B revenue is mapped to a company below — the rest hasn&apos;t been billed/entered into b2b_bills yet.
+          </p>
+        )}
 
         {/* Item #1 (2026-09-02, seventh pass): donut + caption stacked and
             centered instead of a flex row — at some widths the caption's
@@ -300,16 +325,20 @@ export default function BookingsContent({
                 </Expandable>
               </>
             ) : (
-              // 2026-09-09: b2b_bills lags live PMS bookings by roughly a
-              // month, so a narrow, very recent period tab (e.g. "This
-              // Month") can legitimately have zero billing rows yet even
-              // when sales_booking shows real B2B revenue for the same
-              // window (see the Booking Category Mix card above). Spelled
-              // out explicitly so this reads as sync latency, not a broken
-              // chart — one shared empty state for all four tabs, since
-              // they all derive from the same (currently empty) source.
+              // 2026-09-09: b2b_bills lags live PMS bookings by a variable,
+              // sometimes substantial amount — a narrow, very recent period
+              // tab (e.g. "This Month") can legitimately have zero billing
+              // rows yet even when sales_booking shows real B2B revenue for
+              // the same window (see the Booking Category Mix card above).
+              // Doesn't name a specific catch-up time (an earlier version
+              // said "about a month" — checked live and found August, over
+              // five weeks old, still only ~25% billed, so that claim was
+              // itself wrong). Spelled out explicitly so this reads as
+              // billing latency, not a broken chart — one shared empty
+              // state for all four tabs, since they all derive from the
+              // same (currently empty) source.
               <p className="py-8 text-center text-sm text-zinc-400 dark:text-zinc-500">
-                No B2B billing data synced yet for {b2bRangeLabel} — b2b_bills typically lags live bookings by about a month.
+                No B2B billing data synced yet for {b2bRangeLabel} — bills are entered into b2b_bills progressively after checkout, so this fills in as billing catches up.
               </p>
             )}
           </TabbedCard>

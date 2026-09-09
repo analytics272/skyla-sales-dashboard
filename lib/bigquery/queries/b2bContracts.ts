@@ -1,84 +1,77 @@
-// PRD §6.9 — B2B Contracts (b2b_bills). Grouped by Bills_due_from (per
-// user direction 2026-08-24), not Company/Bill_To — Bills_due_from is the
-// operational name used to identify which company a bill belongs to (e.g.
-// "Tata Consumer" vs the legal entity name "TATA CONSUMER PRODUCTS LIMITED"
-// in Company/Bill_To, which are identical to each other in every sampled
-// row). b2b_bills is itself PMS/finance-system billing data (invoice
-// numbers, GST numbers, payment dates) — its own Room_Revenue/Nights columns
-// are used as-is; only the company grouping key changed. Same
-// Financial_Year-column trust and 'FY 99-00' junk-row exclusion used
-// throughout this file: the sheet's own Financial_Year column is trusted
-// instead of a recomputed one (sample data showed a Check_In date that would
-// compute to a different FY than the sheet's own label — the sheet's own
-// convention for this table is authoritative).
+// PRD §6.9 — B2B Contracts. Company-level Nights/Revenue/ADR come from
+// `sales_booking` (the PMS — the live, always-current source), joined to
+// `b2b_bills` purely for company identity (Bills_due_from) and
+// Contract_Status. Grouped by Bills_due_from (per user direction
+// 2026-08-24), not Company/Bill_To — Bills_due_from is the operational name
+// used to identify which company a bill belongs to (e.g. "Tata Consumer" vs
+// the legal entity name "TATA CONSUMER PRODUCTS LIMITED" in Company/Bill_To,
+// which are identical to each other in every sampled row).
 //
-// This is the single B2B-by-company view (nights, revenue, ADR, contract
-// status, contribution %) — there used to be a second, separate "Nights /
-// Revenue / ADR by Company" table (guestDetail.ts's getB2bByCompany) showing
-// the same underlying numbers with different columns; merged into this one
-// to avoid two redundant company tables on the same dashboard tab.
+// 2026-09-09, later same day — REWRITTEN from reading Nights/Room_Revenue/
+// ADR directly off b2b_bills. That design was wrong per explicit
+// PRD-consistent correction: "data should come from PMS, not b2b_bills —
+// b2b_bills is only for mapping, because it only captures pending/entered
+// bills, but PMS has all the data for these B2B metrics." Concretely wrong
+// in two ways, both confirmed live:
+// 1. b2b_bills' own Nights/Room_Revenue for April 2026 summed to only
+//    ₹1.08 Cr — 75% of the true PMS B2B total for that same month/scope
+//    (₹1.44 Cr, matching Booking Category Mix's own B2B figure). The gap
+//    is real bookings whose bill either hadn't been fully entered yet or
+//    was entered at a different (adjusted/partial) amount than the PMS
+//    daily-revenue total.
+// 2. BH4's real September B2B revenue (~₹7.83L across 22 folios, confirmed
+//    directly in sales_booking) had ZERO matching rows in b2b_bills under
+//    ANY Bill_Month/Financial_Year — not mislabeled, genuinely absent,
+//    because those bills hadn't been raised yet (b2b_bills' own
+//    Overall_Delay/Bill_Submit_Date columns show this is a sheet that
+//    tracks bills through a multi-day/week submission-and-payment
+//    workflow, not a same-day mirror of PMS activity).
+//
+// Fix: join sales_booking to b2b_bills on (Property, FolioNo = Folio_No) —
+// verified live this key matches cleanly (BH4 FolioNo F2627BHMG9: 3 nights/
+// ₹9,000 in sales_booking, exactly Nights=3/Room_Revenue=₹9,000 in
+// b2b_bills for the same folio, for an already-billed example) — then sum
+// sales_booking's own DailyRevenue/nights, using b2b_bills ONLY for
+// Bills_due_from and Contract_Status. b2b_bills is deduplicated to one row
+// per (Property, Folio_No) first (ANY_VALUE) before joining: 28 (Property,
+// Folio_No) pairs table-wide have duplicate b2b_bills rows (mostly the
+// legacy "Hyber-GB" property code, not one of the 5 active properties, plus
+// a handful of historical FY24-25/25-26 folios on GB/KDP/HTC) — undeduped,
+// those would fan out against sales_booking's one-row-per-night grain and
+// silently inflate revenue for the affected folios.
+//
+// A booking whose bill hasn't been raised in b2b_bills at all simply has no
+// company attached yet and drops out of the ranking, same as before — just
+// for a narrower and more honest reason (no bill yet, vs. "no bill yet AND
+// wrongly bucketed by a billing-workflow month label"). Validated live:
+// this join recovers ~99% of April 2026's true PMS B2B revenue (₹1.424 Cr
+// of ₹1.44 Cr) as company-mapped, vs. 75% under the old design — the
+// unmapped remainder is surfaced explicitly in the UI (BookingsContent.tsx)
+// rather than silently vanishing.
+//
+// getCorporateAccountRetention is untouched and stays b2b_bills-native:
+// Contract_Status is a b2b_bills-only concept (sales_booking has no notion
+// of a contract), so "which companies had a Contract last FY and still
+// appear this FY" is inherently a question about b2b_bills' own records,
+// not something a PMS join changes. It also remains un-period-scoped
+// (inherently an FY-vs-FY question, same as Booking Pace).
 import { runQuery, table } from "../client";
 import { safeDivide } from "@/lib/format/currency";
-import { currentFYLabel, DateRange } from "@/lib/reference/financialYear";
+import { DateRange } from "@/lib/reference/financialYear";
 import { PeriodFilter, resolvePeriodFromFilter } from "@/lib/reference/period";
-import { SALES_BOOKING_STAY_FILTER } from "./filters";
-
-/**
- * b2b_bills is keyed by its own Financial_Year STRING column, not a date
- * column (and per HANDOVER, that column uses a slightly different FY-boundary
- * convention than the standard Apr-Mar rule — trusted as-is, not recomputed).
- * So instead of a date-range filter, the active period tab resolves to a
- * single governing FY label the same way Targets does: the FY containing
- * period.current.start ("Today"/"This FY" -> the current FY, "Last Year" ->
- * the prior completed FY).
- */
-export function resolveB2bFy(filter: PeriodFilter): string {
-  const p = resolvePeriodFromFilter(filter);
-  return currentFYLabel(new Date(`${p.current.start}T00:00:00`));
-}
-
-// 2026-09-09: b2b_bills ALSO carries its own `Month` STRING column
-// ("Apr 26", "Sep 26", ...) — the FY-only scoping above was a deliberate
-// simplification when this file was first written ("no date column to
-// range-filter on"), but per explicit "everything should follow filters"
-// direction, Company Rankings/Revenue By Company should narrow to the
-// active period the same way every other KPI does, not always show the
-// whole FY regardless of a "This Month" selection. `monthLabelsInRange`
-// converts the period's own date range into the "Mon YY" labels it touches,
-// matching this column's exact format, so `getB2bContractRanking`/
-// `getB2bTopAdrContracts` below can add `Month IN UNNEST(@months)` on top
-// of the existing (still-trusted) `Financial_Year` match. `this_fy` itself
-// still resolves to every month in the FY (a no-op narrowing, same as
-// today), so nothing changes for that tab specifically — only narrower
-// tabs (This Month, Last 7/30 Days, Custom Range) are affected.
-// getCorporateAccountRetention is untouched — it's inherently an FY-vs-FY
-// comparison, "retention for just September" isn't a coherent question the
-// same way "Booking Pace for just September" wasn't earlier this project.
-const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-function monthLabelsInRange(range: DateRange): string[] {
-  const start = new Date(`${range.start}T00:00:00`);
-  const end = new Date(`${range.end}T00:00:00`);
-  const labels: string[] = [];
-  const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
-  while (cursor <= end) {
-    labels.push(`${MONTH_ABBR[cursor.getMonth()]} ${String(cursor.getFullYear()).slice(-2)}`);
-    cursor.setMonth(cursor.getMonth() + 1);
-  }
-  return labels;
-}
+import { SALES_BOOKING_STAY_FILTER, roomNightUnitsSqlExpr } from "./filters";
 
 export interface B2bContractRanking {
   company: string; // Bills_due_from
   contractStatus: string | null;
-  roomRevenue: number; // Room_Revenue — tax-exclusive (col_21 was inclusive-of-tax; see PRD tax-exclusive requirement)
-  nights: number;
-  adr: number | null;
+  roomRevenue: number; // SUM(sales_booking.DailyRevenue) for this company's matched folios — PMS, tax-exclusive
+  nights: number; // SUM(roomNightUnitsSqlExpr()) — weighted the same way every other nights figure on the dashboard is (BH4's "3 Bedroom Apartments" rows count 3x)
+  adr: number | null; // roomRevenue / nights — a weighted average across the company's own folios, not an average of individual bill-level ADRs
   /** Share of TOTAL company-wide sales revenue (B2B+B2C+OTA combined, from sales_booking) this one company's B2B revenue represents — not just its share of the B2B channel. */
   contributionPct: number | null;
 }
 
-/** Total revenue across every channel (B2B+B2C+OTA) for the same property+period scope, from sales_booking — the "overall sales revenue" denominator for Contribution %. sales_booking has real dates, so this narrows to the exact selected range (not just the governing FY), same as every other revenue figure on the dashboard. */
+/** Total revenue across every channel (B2B+B2C+OTA) for the same property+period scope, from sales_booking — the "overall sales revenue" denominator for Contribution %. */
 async function getOverallRevenue(properties: string[], range: DateRange): Promise<number> {
   const rows = await runQuery<{ revenue: number | null }>(`
     SELECT SUM(DailyRevenue) AS revenue
@@ -89,22 +82,28 @@ async function getOverallRevenue(properties: string[], range: DateRange): Promis
 }
 
 export async function getB2bContractRanking(properties: string[], filter: PeriodFilter): Promise<B2bContractRanking[]> {
-  const fy = resolveB2bFy(filter);
   const range = resolvePeriodFromFilter(filter).current;
-  const months = monthLabelsInRange(range);
   const [rows, overallRevenue] = await Promise.all([
     runQuery<{ company: string; contractStatus: string | null; roomRevenue: number | null; nights: number }>(`
+      WITH dedup_bills AS (
+        -- One row per (Property, Folio_No) — see file header for why.
+        SELECT Property, Folio_No, ANY_VALUE(Bills_due_from) AS Bills_due_from, ANY_VALUE(Contract_Status) AS Contract_Status
+        FROM ${table("b2b_bills")}
+        WHERE Bills_due_from IS NOT NULL AND Financial_Year != 'FY 99-00'
+        GROUP BY Property, Folio_No
+      )
       SELECT
-        Bills_due_from AS company,
-        ANY_VALUE(Contract_Status) AS contractStatus,
-        SUM(Room_Revenue) AS roomRevenue,
-        SUM(Nights) AS nights
-      FROM ${table("b2b_bills")}
-      WHERE Bills_due_from IS NOT NULL AND Financial_Year != 'FY 99-00'
-        AND Property IN UNNEST(@properties) AND Financial_Year = @fy AND Month IN UNNEST(@months)
+        b.Bills_due_from AS company,
+        ANY_VALUE(b.Contract_Status) AS contractStatus,
+        SUM(sb.DailyRevenue) AS roomRevenue,
+        SUM(${roomNightUnitsSqlExpr("sb.")}) AS nights
+      FROM ${table("sales_booking")} sb
+      JOIN dedup_bills b ON sb.Property = b.Property AND sb.FolioNo = b.Folio_No
+      WHERE sb.Property IN UNNEST(@properties) AND CAST(sb.StayDate AS DATE) BETWEEN @start AND @end
+        AND sb.${SALES_BOOKING_STAY_FILTER}
       GROUP BY company
       ORDER BY roomRevenue DESC
-    `, { properties, fy, months }),
+    `, { properties, start: range.start, end: range.end }),
     getOverallRevenue(properties, range),
   ]);
 
@@ -134,32 +133,6 @@ export function summarizeB2bContracts(ranking: B2bContractRanking[]): B2bContrac
     totalContractRevenue: contractRows.reduce((s, r) => s + r.roomRevenue, 0),
     contractCompanyCount: contractRows.length,
   };
-}
-
-export interface B2bTopAdrContract {
-  company: string; // Bills_due_from
-  avgAdr: number;
-  nights: number;
-}
-
-/** Ranked by AVG(ADR), filtered to meaningful volume (Nights > 0) per PRD. */
-export async function getB2bTopAdrContracts(properties: string[], filter: PeriodFilter): Promise<B2bTopAdrContract[]> {
-  const fy = resolveB2bFy(filter);
-  const months = monthLabelsInRange(resolvePeriodFromFilter(filter).current);
-  // total_nights (not "nights"): BigQuery resolves HAVING identifiers
-  // case-insensitively against SELECT aliases first, so an alias merely
-  // differing in case from the source column (nights vs Nights) gets matched to
-  // its own SUM() aggregate, producing an "aggregation of aggregations" error.
-  const rows = await runQuery<{ company: string; avgAdr: number; total_nights: number }>(`
-    SELECT Bills_due_from AS company, AVG(ADR) AS avgAdr, SUM(Nights) AS total_nights
-    FROM ${table("b2b_bills")}
-    WHERE Bills_due_from IS NOT NULL AND Financial_Year != 'FY 99-00'
-      AND Property IN UNNEST(@properties) AND Financial_Year = @fy AND Month IN UNNEST(@months)
-    GROUP BY company
-    HAVING total_nights > 0
-    ORDER BY avgAdr DESC
-  `, { properties, fy, months });
-  return rows.map((r) => ({ company: r.company, avgAdr: r.avgAdr, nights: r.total_nights }));
 }
 
 export interface RetentionPoint {
