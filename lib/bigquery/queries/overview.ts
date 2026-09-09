@@ -5,7 +5,7 @@
 // getYoyComparison() call (comparison is no longer specifically "vs last
 // FY" — it's "vs whatever the active tab's previous range is").
 import { runQuery, table } from "../client";
-import { KpiFilter, resolveFilter, buildScopeClause, buildPreviousScopeClause, SALES_BOOKING_STAY_FILTER } from "./filters";
+import { KpiFilter, resolveFilter, buildScopeClause, buildPreviousScopeClause, SALES_BOOKING_STAY_FILTER, roomNightUnitsSqlExpr } from "./filters";
 import { getAvailableRoomNights } from "./propertyWindows";
 import { getLpOverviewTotals, getLpAdr, LP_PROPERTY } from "./lpMonthly";
 import { bookingCategorySqlExpr, bookingIsUnmappedSqlExpr, BookingCategory } from "@/lib/reference/bookingSourceMap";
@@ -78,7 +78,7 @@ export async function getOverviewKpis(filter: KpiFilter): Promise<OverviewKpis> 
 
   const [aggRows, prevAggRows, sourceRows, availableRoomNights, prevAvailableRoomNights, lpCurrent, lpPrevious] = await Promise.all([
     runQuery<AggRow>(`
-      SELECT SUM(DailyRevenue) AS room_revenue, SUM(DailyOtherRevenueExclusiveTax) AS extras_revenue, COUNT(*) AS sold_room_nights
+      SELECT SUM(DailyRevenue) AS room_revenue, SUM(DailyOtherRevenueExclusiveTax) AS extras_revenue, SUM(${roomNightUnitsSqlExpr()}) AS sold_room_nights
       FROM ${table("sales_booking")}
       WHERE ${where}
     `, params),
@@ -86,14 +86,14 @@ export async function getOverviewKpis(filter: KpiFilter): Promise<OverviewKpis> 
       ? (() => {
           const { clause: prevWhere, params: prevParams } = buildPreviousScopeClause("Property", "CAST(StayDate AS DATE)", resolved, "prev");
           return runQuery<AggRow>(`
-            SELECT SUM(DailyRevenue) AS room_revenue, SUM(DailyOtherRevenueExclusiveTax) AS extras_revenue, COUNT(*) AS sold_room_nights
+            SELECT SUM(DailyRevenue) AS room_revenue, SUM(DailyOtherRevenueExclusiveTax) AS extras_revenue, SUM(${roomNightUnitsSqlExpr()}) AS sold_room_nights
             FROM ${table("sales_booking")}
             WHERE ${prevWhere}
           `, prevParams);
         })()
       : Promise.resolve(null),
     runQuery<SourceRow>(`
-      SELECT ${bookingCategorySqlExpr("Source")} AS category, COUNT(*) AS nights, SUM(DailyRevenue) AS revenue
+      SELECT ${bookingCategorySqlExpr("Source")} AS category, SUM(${roomNightUnitsSqlExpr()}) AS nights, SUM(DailyRevenue) AS revenue
       FROM ${table("sales_booking")}
       WHERE ${where}
       GROUP BY category
@@ -213,7 +213,7 @@ export async function getAdrByProperty(filter: KpiFilter): Promise<PropertyAdr[]
   const resolved = resolveFilter(filter);
   const { clause: where, params } = buildScopeClause("Property", "CAST(StayDate AS DATE)", resolved, "");
   const rows = await runQuery<{ property: string; revenue: number | null; nights: number }>(`
-    SELECT Property AS property, SUM(DailyRevenue) AS revenue, COUNT(*) AS nights
+    SELECT Property AS property, SUM(DailyRevenue) AS revenue, SUM(${roomNightUnitsSqlExpr()}) AS nights
     FROM ${table("sales_booking")}
     WHERE ${where}
     GROUP BY property
@@ -288,7 +288,7 @@ export async function getOccupancyPace(properties: string[]): Promise<OccupancyP
 async function occupancyForRange(properties: string[], start: string, end: string): Promise<number | null> {
   const [soldRows, available] = await Promise.all([
     runQuery<{ n: number }>(`
-      SELECT COUNT(*) AS n FROM ${table("sales_booking")}
+      SELECT SUM(${roomNightUnitsSqlExpr()}) AS n FROM ${table("sales_booking")}
       WHERE Property IN UNNEST(@properties) AND CAST(StayDate AS DATE) BETWEEN @start AND @end AND ${SALES_BOOKING_STAY_FILTER}
     `, { properties, start, end }),
     getAvailableRoomNights(properties, { start, end }),

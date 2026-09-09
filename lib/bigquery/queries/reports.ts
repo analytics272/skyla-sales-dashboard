@@ -16,7 +16,7 @@
 // sheet doesn't move with the period filter either.
 import { runQuery, table } from "../client";
 import { bookingCategorySqlExpr } from "@/lib/reference/bookingSourceMap";
-import { SALES_BOOKING_STAY_FILTER } from "./filters";
+import { SALES_BOOKING_STAY_FILTER, roomNightUnitsSqlExpr } from "./filters";
 import { getAvailableRoomNightsByProperty } from "./propertyWindows";
 import { fyBounds, fyMonthBounds, calendarMonthFromFiscal, DateRange } from "@/lib/reference/financialYear";
 import { safeDivide } from "@/lib/format/currency";
@@ -230,7 +230,7 @@ async function fetchRevenueCategoryByMonth(properties: string[], fy: string): Pr
       Property AS property,
       CAST(DATE_TRUNC(CAST(StayDate AS DATE), MONTH) AS STRING) AS month_start,
       ${bookingCategorySqlExpr("Source")} AS category,
-      COUNT(*) AS nights,
+      SUM(${roomNightUnitsSqlExpr()}) AS nights,
       SUM(DailyRevenue) AS revenue,
       SUM(DailyOtherRevenueExclusiveTax) AS fnb_revenue
     FROM ${table("sales_booking")}
@@ -245,7 +245,7 @@ async function fetchRevenueCategoryTillDate(properties: string[], start: string,
     SELECT
       Property AS property,
       ${bookingCategorySqlExpr("Source")} AS category,
-      COUNT(*) AS nights,
+      SUM(${roomNightUnitsSqlExpr()}) AS nights,
       SUM(DailyRevenue) AS revenue,
       SUM(DailyOtherRevenueExclusiveTax) AS fnb_revenue
     FROM ${table("sales_booking")}
@@ -295,7 +295,7 @@ async function fetchBookingsForRange(properties: string[], start: string, end: s
   const monthGroupBy = byMonth ? "month_start," : "";
   const rows = await runQuery<BookingRow>(`
     WITH scoped AS (
-      SELECT Property, ReservationNo, NoOfGuest, Mobile, Email, GuestName, Country, DailyRevenue,
+      SELECT Property, ReservationNo, NoOfGuest, Mobile, Email, GuestName, Country, DailyRevenue, RoomShortCode,
         CAST(StayDate AS DATE) AS stay_date
       FROM ${table("sales_booking")}
       WHERE Property IN UNNEST(@properties) AND CAST(StayDate AS DATE) BETWEEN @start AND @end AND ${SALES_BOOKING_STAY_FILTER}
@@ -311,7 +311,7 @@ async function fetchBookingsForRange(properties: string[], start: string, end: s
         ANY_VALUE(GuestName) AS guest_name,
         ANY_VALUE(Country) AS country,
         SUM(DailyRevenue) AS booking_revenue,
-        COUNT(*) AS booking_nights
+        SUM(${roomNightUnitsSqlExpr()}) AS booking_nights
       FROM scoped
       WHERE ReservationNo IS NOT NULL
       GROUP BY property, ${monthGroupBy} ReservationNo

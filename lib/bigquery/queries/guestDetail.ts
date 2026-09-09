@@ -1,7 +1,7 @@
 // PRD §6.2 — Guest & Revenue Detail.
 // 2026-09-02: rewritten for the Today/This FY/Last Year period-tabs model.
 import { runQuery, table } from "../client";
-import { KpiFilter, resolveFilter, buildScopeClause, buildPreviousScopeClause, SALES_BOOKING_STAY_FILTER } from "./filters";
+import { KpiFilter, resolveFilter, buildScopeClause, buildPreviousScopeClause, SALES_BOOKING_STAY_FILTER, roomNightUnitsSqlExpr } from "./filters";
 import { getAvailableRoomNights } from "./propertyWindows";
 import { getLpOverviewTotals, getLpRoomTypeStats, LP_PROPERTY } from "./lpMonthly";
 import { bookingCategorySqlExpr, BookingCategory } from "@/lib/reference/bookingSourceMap";
@@ -39,7 +39,7 @@ interface BookingStatsRow {
 
 const BOOKING_STATS_SQL = (where: string) => `
   WITH scoped AS (
-    SELECT Property, ReservationNo, NoOfGuest, DailyRevenue
+    SELECT Property, ReservationNo, NoOfGuest, DailyRevenue, RoomShortCode
     FROM ${table("sales_booking")}
     WHERE ${where}
   ),
@@ -63,7 +63,7 @@ const BOOKING_STATS_SQL = (where: string) => `
   SELECT
     (SELECT COUNT(*) FROM per_booking) AS total_bookings,
     (SELECT SUM(guests) FROM per_booking) AS guests_served,
-    (SELECT COUNT(*) FROM scoped) AS sold_room_nights,
+    (SELECT SUM(${roomNightUnitsSqlExpr()}) FROM scoped) AS sold_room_nights,
     (SELECT SUM(DailyRevenue) FROM scoped) AS room_revenue
 `;
 
@@ -156,7 +156,7 @@ export async function getRoomNightsGap(filter: KpiFilter): Promise<RoomNightsGap
   // (just recorded in sales_booking_lp_monthly instead).
   const [soldRows, lpTotals] = await Promise.all([
     runQuery<{ n: number }>(`
-      SELECT COUNT(*) AS n FROM ${table("sales_booking")}
+      SELECT SUM(${roomNightUnitsSqlExpr()}) AS n FROM ${table("sales_booking")}
       WHERE ${where}
     `, params),
     includeLp ? getLpOverviewTotals(resolved.period.current) : Promise.resolve(null),
@@ -181,7 +181,7 @@ export async function getRoomNightsGap(filter: KpiFilter): Promise<RoomNightsGap
     const [tillDateAvailable, tillDateSoldRows, tillDateLpTotals] = await Promise.all([
       getAvailableRoomNights(resolved.properties, tillDateRange),
       runQuery<{ n: number }>(`
-        SELECT COUNT(*) AS n FROM ${table("sales_booking")}
+        SELECT SUM(${roomNightUnitsSqlExpr()}) AS n FROM ${table("sales_booking")}
         WHERE Property IN UNNEST(@properties) AND CAST(StayDate AS DATE) BETWEEN @start AND @end AND ${SALES_BOOKING_STAY_FILTER}
       `, { properties: resolved.properties, start: tillDateRange.start, end: tillDateRange.end }),
       includeLp ? getLpOverviewTotals(tillDateRange) : Promise.resolve(null),
@@ -195,7 +195,7 @@ export async function getRoomNightsGap(filter: KpiFilter): Promise<RoomNightsGap
     const forwardRange = { start: today, end: scopeEnd };
     const forwardAvailable = await getAvailableRoomNights(resolved.properties, forwardRange);
     const forwardSoldRows = await runQuery<{ n: number }>(`
-      SELECT COUNT(*) AS n FROM ${table("sales_booking")}
+      SELECT SUM(${roomNightUnitsSqlExpr()}) AS n FROM ${table("sales_booking")}
       WHERE Property IN UNNEST(@properties) AND CAST(StayDate AS DATE) >= @today AND CAST(StayDate AS DATE) <= @scopeEnd AND ${SALES_BOOKING_STAY_FILTER}
     `, { properties: resolved.properties, today, scopeEnd });
     remainingRoomNights = Math.max(0, forwardAvailable - (forwardSoldRows[0]?.n ?? 0));
@@ -218,7 +218,7 @@ export async function getCategoryMix(filter: KpiFilter): Promise<CategoryMix[]> 
   const { clause: where, params } = buildScopeClause("Property", "CAST(StayDate AS DATE)", resolved, "");
   const [rows, lpTotals] = await Promise.all([
     runQuery<CategoryMix>(`
-      SELECT ${bookingCategorySqlExpr("Source")} AS category, COUNT(*) AS nights, SUM(DailyRevenue) AS revenue
+      SELECT ${bookingCategorySqlExpr("Source")} AS category, SUM(${roomNightUnitsSqlExpr()}) AS nights, SUM(DailyRevenue) AS revenue
       FROM ${table("sales_booking")}
       WHERE ${where}
       GROUP BY category
@@ -336,7 +336,7 @@ export async function getRoomFormatStats(filter: KpiFilter): Promise<RoomFormatS
 
   const [rows, lpRows] = await Promise.all([
     runQuery<{ room_type: string | null; nights: number; revenue: number | null }>(`
-      SELECT rt.room_type, COUNT(*) AS nights, SUM(b.DailyRevenue) AS revenue
+      SELECT rt.room_type, SUM(${roomNightUnitsSqlExpr("b.")}) AS nights, SUM(b.DailyRevenue) AS revenue
       FROM ${table("sales_booking")} b
       LEFT JOIN ${roomTypeMappingSqlUnnest()} AS rt ON ${roomTypeJoinCondition("b")}
       WHERE ${where}
@@ -386,7 +386,7 @@ export async function getExpatStats(filter: KpiFilter): Promise<ExpatStats> {
 
   const rows = await runQuery<{ bookings: number; revenue: number | null; nights: number }>(`
     WITH scoped AS (
-      SELECT Property, ReservationNo, DailyRevenue
+      SELECT Property, ReservationNo, DailyRevenue, RoomShortCode
       FROM ${table("sales_booking")}
       WHERE ${where}
         AND Country IS NOT NULL AND Country != 'India'
@@ -394,7 +394,7 @@ export async function getExpatStats(filter: KpiFilter): Promise<ExpatStats> {
     SELECT
       COUNT(DISTINCT CONCAT(Property, '|', ReservationNo)) AS bookings,
       SUM(DailyRevenue) AS revenue,
-      COUNT(*) AS nights
+      SUM(${roomNightUnitsSqlExpr()}) AS nights
     FROM scoped
   `, params);
 
