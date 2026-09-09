@@ -11,6 +11,8 @@ export interface BarDatum {
   name: string;
   value: number;
   color: string;
+  /** Optional secondary figure printed as text to the right of the bar in HorizontalBarChart (e.g. a company's ADR shown alongside its revenue bar) — purely a label, doesn't affect bar length/position. Ignored by SingleMetricBarChart. */
+  rightLabel?: string;
 }
 
 export default function SingleMetricBarChart({
