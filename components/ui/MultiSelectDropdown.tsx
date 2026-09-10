@@ -13,12 +13,15 @@ export default function MultiSelectDropdown({
   options,
   selected,
   onChange,
+  optionAccent,
   allValue,
 }: {
   label: string;
   options: MultiSelectOption[];
   selected: string[]; // empty = "All" (unless allValue below changes what "All" writes)
   onChange: (values: string[]) => void;
+  /** Optional per-option leading accent (e.g. a brand dot for the Property filter). */
+  optionAccent?: (value: string) => React.ReactNode;
   /**
    * What "All" writes when clicked. Defaults to [] (no filter — the
    * conventional meaning of "All" for Property/Month, where an absent filter
@@ -114,6 +117,7 @@ export default function MultiSelectDropdown({
                   onChange={() => toggle(opt.value)}
                   className="h-3.5 w-3.5 accent-teal-700"
                 />
+                {optionAccent?.(opt.value)}
                 <span className="text-zinc-700 dark:text-zinc-200">{opt.label}</span>
               </label>
             ))}

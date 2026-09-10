@@ -9,6 +9,7 @@
 // there — see the crash this caused, noted at its usage below.
 import type { FolioReport, FolioReportBlock, FolioReportMetrics } from "@/lib/bigquery/queries/reports";
 import { formatIndianCurrency, formatPercent } from "@/lib/format/currency";
+import BrandDot from "@/components/ui/BrandDot";
 
 const money = (v: number) => formatIndianCurrency(v);
 const rupee = (v: number | null) => (v !== null ? `₹${Math.round(v).toLocaleString("en-IN")}` : "—");
@@ -138,7 +139,10 @@ export default function FolioReportTable({ report }: { report: FolioReport }) {
                     className="sticky top-[27px] z-10 border-b border-l border-zinc-200 bg-zinc-50 px-2 py-1 text-center font-medium text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400"
                     style={{ minWidth: COL_WIDTH }}
                   >
-                    {c}
+                    <span className="inline-flex items-center gap-1">
+                      <BrandDot property={c} />
+                      {c}
+                    </span>
                   </th>
                 ))
               )}

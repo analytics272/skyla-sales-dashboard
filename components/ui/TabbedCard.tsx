@@ -15,6 +15,7 @@ export default function TabbedCard<T extends string>({
   active,
   onChange,
   children,
+  tabAccent,
 }: {
   title: string;
   subtitle?: string;
@@ -22,6 +23,8 @@ export default function TabbedCard<T extends string>({
   active: T;
   onChange: (tab: T) => void;
   children: React.ReactNode;
+  /** Optional leading accent per tab (e.g. a brand dot when tabs are properties). */
+  tabAccent?: (tab: T) => React.ReactNode;
 }) {
   return (
     <Card title={title} subtitle={subtitle}>
@@ -34,12 +37,13 @@ export default function TabbedCard<T extends string>({
             aria-selected={active === tab}
             onClick={() => onChange(tab)}
             className={clsx(
-              "rounded-full px-3 py-1 text-xs font-semibold transition-colors",
+              "flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition-colors",
               active === tab
                 ? "bg-teal-700 text-white shadow-sm"
                 : "text-zinc-600 hover:bg-white hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white"
             )}
           >
+            {tabAccent?.(tab)}
             {tab}
           </button>
         ))}
