@@ -747,6 +747,33 @@ data for these B2B metrics."*
   state; reworded to not name a specific catch-up time, just that billing
   is entered progressively after checkout.
 
+**2026-09-10 — "Final Dashboard Changes" spec, batch 1 of N** (a large
+multi-item spec; this batch covers the unambiguous, unblocked items):
+- **`Premiere Supreme` room type split out of `Executive Room`** — Skyla
+  brand (KDP/HTC/JHS) Premier* rooms are their own tier; `Executive Room`
+  reserved for Aptly. See §1.6.
+- **`Banquet` removed as a room type** — filtered out of the room-format
+  breakdown; not a sellable room. See §1.6.
+- **Guests Served → guest-nights** (`SUM(NoOfGuest)` over stay-nights),
+  dashboard-wide (Bookings tab + Reports Folio report), per "match Pic 1".
+  See §7 Guests Served. This FY now reads 27,898 vs Pic 1's 28,861.
+- **Brand identity colours** (`--brand-skyla` #af3241 / `--brand-aptly`
+  #342c4c / `--brand-hyber` #f15e2c, from user Pic 3/4/5, with same-hue
+  dark-mode variants) in `globals.css`; `BRAND_COLOR` now points at them and
+  `BRAND_PALETTE` carries each brand's full swatch set. Overview's
+  ADR-by-property bars are now coloured by each property's brand.
+- **Still blocked / awaiting the user** (not in this batch): Mayrakhee /
+  Blue Orange / "PMS company name" (item 2/3 — `sales_booking` has NO
+  company field at all: 35 columns checked, `Source` is channel not
+  company, and the cited folio `F2627HTC895` isn't in BigQuery's
+  `b2b_bills` — it's `Relocation (B2C)` for an individual guest; the
+  "Consolidated Report" company data the user describes is not in
+  BigQuery); Pic 1 room-nights reconciliation (item 5 — needs Pic 1's
+  exact Property/Month filter state; our Available/Remaining run to each
+  property's furthest advance booking, Looker uses a shorter horizon);
+  "By Owner Detail" card (item 6 — Owner = b2b_bills POC, which is
+  stale/incomplete same as the rest of b2b_bills).
+
 ---
 
 ## 1. Shared reference logic
@@ -850,6 +877,24 @@ These building blocks are reused across multiple tabs.
   `102-Hyber Room` → Hyber Room Go), so GB reconstructs the sheet's own
   `<RoomNo>-<Room>` key from the separate `RoomNo` column instead of using
   the generic normalization.
+- **2026-09-10 — `Premiere Supreme` split out of `Executive Room`** (user
+  direction): the Skyla brand's premium rooms — KDP `Premier King Supreme` /
+  `Premier Twin Supreme`, HTC same, JHS `Premier Room` — were all mapped to
+  `Executive Room`; they're now their own type `Premiere Supreme`.
+  `Executive Room` stays defined (in `ROOM_TYPES` / `ROOM_TYPE_ORDER` /
+  `ROOM_TYPE_COLOR`) but is reserved for the Aptly brand (BH4/GB), which
+  currently maps nothing to it — so `Executive Room` won't appear in charts
+  until Aptly data uses it. ~7,100 FY26-27 nights / ₹3.4 Cr moved from
+  `Executive Room` to `Premiere Supreme`; verified live the room-format
+  breakdown now shows `Premiere Supreme` as its own bar with no
+  `Executive Room` / `Unmapped` residue.
+- **2026-09-10 — `Banquet` removed as a room type** (user direction): a
+  banquet hall isn't a sellable room. The 56 KDP `Room = 'Banquet Hall'`
+  rows are filtered out of `getRoomFormatStats` entirely (`AND b.Room !=
+  'Banquet Hall'`) — not shown as `Unmapped` — and `Banquet` is gone from
+  `ROOM_TYPES` / `ROOM_TYPE_ORDER` / `ROOM_TYPE_COLOR`. Headline Room
+  Revenue elsewhere still includes those rows (only the room-format
+  breakdown excludes them).
 - File: `lib/reference/roomTypeMapping.ts`.
 
 ---
@@ -907,7 +952,7 @@ column each of those needs (guest identity, cancellation records, or
 | KPI | Formula |
 |---|---|
 | Total Bookings | `COUNT(DISTINCT CONCAT(Property, ReservationNo))`, excluding rows with a null `ReservationNo`. **LP's `BookingsCount` added when selected** (2026-08-26) — a real count in the source data, not derived. |
-| Guests Served | `SUM` of `MAX(NoOfGuest)` per distinct booking. **LP's `GuestServed` column added when selected** — same "guests served" concept, a real monthly total in the source data. |
+| Guests Served | **`SUM(NoOfGuest)` across every scoped stay-night — guest-nights** (a 2-guest, 5-night booking = 10). **2026-09-10, user direction ("match Pic 1")**: switched from the previous `SUM(MAX(NoOfGuest) per booking)` distinct-people headcount. This is the figure the ops sheet reports (the old form undercounted that sheet by ~82% — see `guestServedSheetSnapshot.ts`) and now agrees with `getGuestServedAccuracyCheck`. Reverses the 2026-09-02 seventh-pass decision that kept the two apart. Verified live: This FY reads 27,898 vs Pic 1's 28,861. **LP's `GuestServed` column added when selected.** Same change applied to the Reports tab's Folio Based Report. |
 | Night/Revenue Mix By Category | Sold Room Nights and Room Revenue grouped by B2B/B2C/OTA (§1.3), plus derived ADR (revenue ÷ nights) per category. Backed by `getCategoryMix()`, which existed but wasn't rendered anywhere until **wired into the UI 2026-08-26** as three bar charts (Revenue/Nights/ADR By Category). Respects the same Property/FY/Month filters as the rest of this tab — LP's contribution merges in automatically when selected, same as every other KPI on this tab. |
 | ALOS | Sold Room Nights ÷ Total Bookings (both sides include LP's contribution when selected) |
 | Revenue per Guest | Room Revenue ÷ Guests Served (both sides include LP's contribution when selected) |
@@ -1441,7 +1486,7 @@ carries forward bookings) — not zeroed, not projected.
 | Available Room Nights | `getAvailableRoomNightsByProperty` (§1.5), scoped per block | Confirmed |
 | Sold Room Nights | `SUM(roomNightUnitsSqlExpr())` excl. Void/No-Show — BH4's "3 Bedroom Apartments" rows weigh 3× (2026-09-09 fix, §2/revision history), every other room type weighs 1 | Confirmed — exact match to Looker Studio for BH4 Sept 2026 |
 | Occupancy % | Sold ÷ Available | Confirmed |
-| Guests Served | `SUM(MAX(NoOfGuest) per booking)`, booking bucketed to whichever month(s) its own nights fall in — a booking spanning a month boundary contributes to each month it touches | Confirmed pattern |
+| Guests Served | **`SUM(NoOfGuest)` across the booking's stay-nights (guest-nights)** — 2026-09-10, matched to the Bookings tab's own switch (see §7 Guests Served). Booking still bucketed to whichever month(s) its own nights fall in | Confirmed pattern |
 | RevPAR / ADR / Rev per Guest | Revenue ÷ Available / Sold / Guests | Confirmed |
 | B2B/B2C/OTA Nights, Revenue, ADR | `bookingCategorySqlExpr` classification (§1.3), same as Booking Details' Category Mix | B2B confirmed; B2C/OTA **not yet independently confirmed against the sheet** (PRD §1.3) |
 | **B2B Revenue Share** | `SAFE_DIVIDE(b2b_bills' ALL-TIME SUM(Room_Revenue) for the property, RoomRevenue)` — **not the same B2B Revenue as the row above**, not ÷ Total Revenue, and **legitimately exceeds 100%** by design | Reconstructed from one confirmed data point (PRD's own KDP-Overall example, 265%) — verified live match: 260.2%. **Only the Overall column's magnitude was checked**; individual month columns produce much larger percentages (the same large all-time numerator against a much smaller one-month denominator) and are not independently confirmed |

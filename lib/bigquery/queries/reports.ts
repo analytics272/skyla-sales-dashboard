@@ -305,7 +305,11 @@ async function fetchBookingsForRange(properties: string[], start: string, end: s
         Property AS property,
         ${monthSelect} AS month_start,
         ReservationNo,
-        MAX(NoOfGuest) AS guests,
+        -- Guest-nights (2026-09-10, user direction — see BookingStats.guestsServed):
+        -- SUM(NoOfGuest) over the booking's stay-nights = NoOfGuest x nights.
+        -- Was MAX(NoOfGuest) (per-booking peak headcount). Only feeds
+        -- guests_served below; repeat/expat flags are unaffected.
+        SUM(NoOfGuest) AS guests,
         ANY_VALUE(Mobile) AS mobile,
         ANY_VALUE(Email) AS email,
         ANY_VALUE(GuestName) AS guest_name,

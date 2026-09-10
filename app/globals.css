@@ -22,6 +22,13 @@
   --series-6: #008300; /* green */
   --series-7: #4a3aa7; /* violet */
   --series-8: #e34948; /* red */
+
+  /* Brand identity colours (2026-09-10, user Pic 3/4/5). Primary hue per
+     brand; dark-mode variant below keeps the same hue, lightened for
+     legibility on a near-black ground. */
+  --brand-skyla: #af3241; /* Skyla crimson (#ef4f5e / #7c1826 are its lighter/darker steps) */
+  --brand-aptly: #342c4c; /* Aptly plum-navy (#e39b89 terracotta, #fcddd6 blush are its accents) */
+  --brand-hyber: #f15e2c; /* Hyber orange (#395daa blue is its secondary) */
 }
 
 @theme inline {
@@ -53,6 +60,10 @@
     --series-6: #008300;
     --series-7: #9085e9;
     --series-8: #e66767;
+
+    --brand-skyla: #ef4f5e; /* the brand's own lighter crimson step */
+    --brand-aptly: #a898c8; /* #342c4c lightened, same hue — navy is invisible on dark */
+    --brand-hyber: #f47a4b; /* orange lifted slightly for contrast */
   }
 }
 
