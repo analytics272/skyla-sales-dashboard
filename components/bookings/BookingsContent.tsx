@@ -18,6 +18,7 @@ import Expandable from "@/components/ui/Expandable";
 import TabbedCard, { useTabbedCard } from "@/components/ui/TabbedCard";
 import { BarDatum } from "@/components/charts/SingleMetricBarChart";
 import HorizontalBarChart from "@/components/charts/HorizontalBarChart";
+import DistributionBar from "@/components/charts/DistributionBar";
 import DonutChart from "@/components/charts/DonutChart";
 import GroupedBarChart from "@/components/charts/GroupedBarChart";
 import { formatIndianCurrency, formatPercent } from "@/lib/format/currency";
@@ -221,16 +222,28 @@ export default function BookingsContent({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-        <StatTile label="Available Room Nights" value={roomNightsGap.availableRoomNights.toLocaleString("en-IN")} />
-        <StatTile label="Sold Room Nights" value={roomNightsGap.soldRoomNights.toLocaleString("en-IN")} />
-        {/* 2026-09-08: renamed from "Unsold Room Nights" — the formula
-            changed at the same time to a genuine to-date reading (Available
-            minus Sold, both clamped to yesterday), not the whole selected
-            scope like the two tiles beside it, so the label says so
-            explicitly rather than looking like the same kind of number. */}
-        <StatTile label="Till Date Unsold Nights" value={roomNightsGap.unsoldRoomNights.toLocaleString("en-IN")} sub="through yesterday" />
-        <StatTile label="Remaining Room Nights" value={roomNightsGap.remainingRoomNights.toLocaleString("en-IN")} sub="from today forward" />
+      {/* 2026-09-10 ("Final Dashboard Changes" item 5): Available / Sold /
+          Till-Date Unsold / Remaining were four separate tiles that only make
+          sense read together — now one distribution bar showing how the
+          period's Available room nights split. Sold is the whole selected
+          scope (incl. advance bookings); Till-Date Unsold is the completed
+          portion's miss (through yesterday); Remaining is capacity still to
+          sell (today forward). They sum to ~Available (a ~0.1% today-boundary
+          overlap). BH4's "3 Bedroom Apartments" ×3 weighting applies to Sold
+          the same way it does everywhere else — verified against Looker. */}
+      <div className="grid gap-3 lg:grid-cols-[1fr_220px]">
+        <Card
+          title="Room Nights"
+          subtitle={`Available ${roomNightsGap.availableRoomNights.toLocaleString("en-IN")} — how the selected period splits`}
+        >
+          <DistributionBar
+            segments={[
+              { label: "Sold", value: roomNightsGap.soldRoomNights, color: "var(--series-6)" },
+              { label: "Till-Date Unsold", value: roomNightsGap.unsoldRoomNights, color: "#d97706", note: "through yesterday" },
+              { label: "Remaining", value: roomNightsGap.remainingRoomNights, color: "var(--series-1)", note: "today forward" },
+            ]}
+          />
+        </Card>
         <StatTile
           label="Avg Cancellation Lead Time"
           value={cancellationLeadTime.avgLeadTimeDays !== null ? `${cancellationLeadTime.avgLeadTimeDays.toFixed(1)} days` : "—"}

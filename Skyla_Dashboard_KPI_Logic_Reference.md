@@ -861,8 +861,21 @@ These building blocks are reused across multiple tabs.
   multiple non-contiguous months are chosen. **LP's window is the one
   exception**: sourced from `MIN`/`LAST_DAY(MAX(MonthStartDate))` on
   `sales_booking_lp_monthly` instead, since `sales_booking` has nothing for it.
+- **2026-09-10 — Available / Sold / Till-Date Unsold / Remaining are now one
+  "Room Nights" distribution bar** on the Bookings tab (four separate tiles
+  before), per "Final Dashboard Changes" item 5 — Sold (whole selected
+  scope, incl. advance) + Till-Date Unsold (completed-portion miss, through
+  yesterday) + Remaining (capacity still to sell, today forward) render as
+  stacked segments summing to ~Available (a ~0.1% today-boundary overlap).
+  Formulas unchanged; BH4's ×3 "3 Bedroom Apartments" weighting still
+  applies to Sold only, as before. **NOT YET reconciled to Looker's Pic 1**
+  (Available 41,236 / Remaining 7,088 there vs 51,259 / 21,638 here — Sold
+  matches at ~20.5k): our per-property windows run to each property's
+  furthest advance booking (BH4→Aug 2027, KDP→Dec 2026, HTC→Oct 2026),
+  Looker appears to use a shorter forward horizon — blocked on knowing Pic
+  1's exact Property/Month filter state.
 - File: `lib/reference/propertyReference.ts`, window logic in
-  `lib/bigquery/queries/propertyWindows.ts`.
+  `lib/bigquery/queries/propertyWindows.ts`, UI `DistributionBar.tsx`.
 
 ### 1.6 Room → Room Type Mapping
 - 260 `(Room, Property)` → Room Type pairs from the reference sheet, joined
