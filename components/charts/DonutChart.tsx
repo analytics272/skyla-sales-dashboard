@@ -17,13 +17,20 @@ export default function DonutChart({
   valueFormatter,
   height = 240,
   innerRadiusRatio = 0.62,
+  onSliceClick,
+  activeName,
 }: {
   data: DonutDatum[];
   valueFormatter: (v: number) => string;
   height?: number;
   innerRadiusRatio?: number;
+  /** When set, slices and legend rows become clickable and call this with the slice name. */
+  onSliceClick?: (name: string) => void;
+  /** Name of the currently-selected slice (dims the others). */
+  activeName?: string;
 }) {
   const total = data.reduce((s, d) => s + d.value, 0);
+  const dim = (name: string) => (activeName && activeName !== name ? 0.35 : 1);
   return (
     <div className="flex flex-col items-center gap-3 sm:flex-row sm:items-center sm:justify-center">
       <ResponsiveContainer width="100%" height={height} className="max-w-[220px] shrink-0">
@@ -36,9 +43,11 @@ export default function DonutChart({
             outerRadius="90%"
             paddingAngle={data.length > 1 ? 2 : 0}
             strokeWidth={0}
+            onClick={onSliceClick ? (d: { name?: string }) => d.name && onSliceClick(d.name) : undefined}
+            style={onSliceClick ? { cursor: "pointer" } : undefined}
           >
             {data.map((d) => (
-              <Cell key={d.name} fill={d.color} />
+              <Cell key={d.name} fill={d.color} fillOpacity={dim(d.name)} />
             ))}
           </Pie>
           <Tooltip
@@ -67,15 +76,20 @@ export default function DonutChart({
             // display:contents so this wrapper doesn't itself occupy a grid
             // cell — its two <span> children become the grid's actual items,
             // keeping every row's label/value columns aligned.
-            <div key={d.name} className="contents">
-              <span className="flex min-w-0 items-center gap-1.5">
+            <div
+              key={d.name}
+              className={`contents ${onSliceClick ? "cursor-pointer" : ""}`}
+              onClick={onSliceClick ? () => onSliceClick(d.name) : undefined}
+              role={onSliceClick ? "button" : undefined}
+            >
+              <span className="flex min-w-0 items-center gap-1.5" style={{ opacity: dim(d.name) }}>
                 <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: d.color }} />
-                <span className="truncate" style={{ color: CHART_TEXT.secondary }}>{d.name}</span>
+                <span className={`truncate ${activeName === d.name ? "font-semibold underline" : ""}`} style={{ color: CHART_TEXT.secondary }}>{d.name}</span>
               </span>
               {/* whitespace-nowrap: item #3 (2026-09-02, eighth pass) — without
                   it, a narrow legend column wrapped "3.43 Cr · 65%" onto three
                   lines instead of reading as one number and one percentage. */}
-              <span className="justify-self-end whitespace-nowrap font-medium tabular-nums" style={{ color: CHART_TEXT.primary }}>
+              <span className="justify-self-end whitespace-nowrap font-medium tabular-nums" style={{ color: CHART_TEXT.primary, opacity: dim(d.name) }}>
                 {valueFormatter(d.value)} · {pct.toFixed(0)}%
               </span>
             </div>

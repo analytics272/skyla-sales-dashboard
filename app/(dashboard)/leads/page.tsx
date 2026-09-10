@@ -10,6 +10,7 @@ import {
   getLeadsByOwner,
   getLeadsByOwnerSource,
 } from "@/lib/bigquery/queries/leads";
+import { getOwnerCompanyAnalysis } from "@/lib/bigquery/queries/ownerCompanyAnalysis";
 import { parseKpiFilter, SearchParams } from "@/lib/filters/parseSearchParams";
 import LeadsContent from "@/components/leads/LeadsContent";
 
@@ -20,7 +21,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
 
   // Item #5 (2026-09-02, eighth pass): Leads MoM is day-wise only now — the
   // month/FY grains from a prior pass are gone.
-  const [summary, momByDay, byProperty, bySource, formatLeadsRevenue, adrByFormat, lostReasons, bookingPace, byOwner, byOwnerSource] =
+  const [summary, momByDay, byProperty, bySource, formatLeadsRevenue, adrByFormat, lostReasons, bookingPace, byOwner, byOwnerSource, ownerCompanyAnalysis] =
     await Promise.all([
       getLeadsSummary(leadsFilter),
       getLeadsTrend(leadsFilter, "day"),
@@ -32,6 +33,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
       getBookingPace(leadsFilter),
       getLeadsByOwner(leadsFilter),
       getLeadsByOwnerSource(leadsFilter),
+      getOwnerCompanyAnalysis(filter),
     ]);
 
   return (
@@ -46,6 +48,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
       bookingPace={bookingPace}
       byOwner={byOwner}
       byOwnerSource={byOwnerSource}
+      ownerCompanyAnalysis={ownerCompanyAnalysis}
       compareYoY={filter.compareYoY ?? false}
     />
   );

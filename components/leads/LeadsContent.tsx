@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { LeadsSummary, LeadsTrendSeries, LeadsTrendPoint, LeadsByGroup, FormatLeadsRevenue, AdrByFormat, LostLeadReason, OwnerLeadStatsResult, OwnerSourceCell } from "@/lib/bigquery/queries/leads";
+import { OwnerCompanyRow, canonicalOwner } from "@/lib/reference/owners";
 import StatTile from "@/components/ui/StatTile";
 import Card from "@/components/ui/Card";
 import TabbedCard, { useTabbedCard } from "@/components/ui/TabbedCard";
@@ -93,6 +94,7 @@ export default function LeadsContent({
   bookingPace,
   byOwner,
   byOwnerSource,
+  ownerCompanyAnalysis,
   compareYoY,
 }: {
   summary: LeadsSummary;
@@ -105,6 +107,7 @@ export default function LeadsContent({
   bookingPace: number | null;
   byOwner: OwnerLeadStatsResult;
   byOwnerSource: OwnerSourceCell[];
+  ownerCompanyAnalysis: OwnerCompanyRow[];
   compareYoY: boolean;
 }) {
   // Conversion rate = closed leads / total leads for that segment (Stage =
@@ -141,6 +144,33 @@ export default function LeadsContent({
   const ownerTabs = byOwner.rows.map((r) => r.owner);
   const [activeOwner, setActiveOwner] = useTabbedCard(ownerTabs);
   const activeOwnerRow = byOwner.rows.find((r) => r.owner === activeOwner) ?? byOwner.rows[0];
+
+  // 2026-09-10 — Company Analysis inside By Owner Detail ("Final Dashboard
+  // Changes" item 6). All PMS-sourced (sales_booking revenue/nights), joined
+  // to b2b_bills only for the POC / Business Source / company mapping. Scopes
+  // to the selected owner tab + the dashboard's Property/period filters.
+  const [selectedBizSource, setSelectedBizSource] = useState<string | null>(null);
+  const ownerRowsForActive = ownerCompanyAnalysis.filter(
+    (r) => canonicalOwner(r.owner) === canonicalOwner(activeOwner ?? "")
+  );
+  const bizSourceTotals = Array.from(
+    ownerRowsForActive.reduce((m, r) => m.set(r.businessSource, (m.get(r.businessSource) ?? 0) + r.revenue), new Map<string, number>())
+  )
+    .map(([source, revenue], i) => ({ name: source, value: revenue, color: LOST_REASON_PALETTE[i % LOST_REASON_PALETTE.length] }))
+    .sort((a, b) => b.value - a.value);
+  // company rows for the drill-down: all sources, or just the clicked one
+  const drillSource = selectedBizSource && bizSourceTotals.some((s) => s.name === selectedBizSource) ? selectedBizSource : null;
+  const drillRows = (drillSource ? ownerRowsForActive.filter((r) => r.businessSource === drillSource) : ownerRowsForActive)
+    .reduce((m, r) => {
+      const cur = m.get(r.company) ?? { company: r.company, nights: 0, revenue: 0 };
+      cur.nights += r.nights;
+      cur.revenue += r.revenue;
+      return m.set(r.company, cur);
+    }, new Map<string, { company: string; nights: number; revenue: number }>());
+  const drillTotal = [...drillRows.values()].reduce((s, r) => s + r.revenue, 0);
+  const drillTable = [...drillRows.values()]
+    .map((r) => ({ ...r, adr: r.nights > 0 ? r.revenue / r.nights : null, contributionPct: drillTotal > 0 ? r.revenue / drillTotal : null }))
+    .sort((a, b) => b.revenue - a.revenue);
 
   const heatmapOwners = byOwner.rows.map((r) => r.owner);
   const topSources = [...bySource].sort((a, b) => b.count - a.count).slice(0, HEATMAP_TOP_SOURCES).map((s) => s.key);
@@ -277,13 +307,71 @@ export default function LeadsContent({
                   </div>
                 )}
                 <div className="mt-3 grid grid-cols-2 gap-3 border-t border-zinc-100 pt-3 dark:border-zinc-800 sm:grid-cols-4">
-                  <StatTile label="Exotel" value={`${activeOwnerRow.exotelLeads.toLocaleString("en-IN")} / ${activeOwnerRow.exotelClosed.toLocaleString("en-IN")} closed`} />
-                  <StatTile label="Reference" value={activeOwnerRow.referenceLeads.toLocaleString("en-IN")} />
-                  <StatTile label="Existing" value={activeOwnerRow.existingLeads.toLocaleString("en-IN")} />
+                  {/* "263 leads · 36 closed" (2026-09-10 clarified from "263 / 36 closed"):
+                      Exotel-sourced leads this owner handled, and how many converted. */}
+                  <StatTile label="Exotel" value={`${activeOwnerRow.exotelLeads.toLocaleString("en-IN")} leads · ${activeOwnerRow.exotelClosed.toLocaleString("en-IN")} closed`} />
+                  <StatTile label="Reference" value={`${activeOwnerRow.referenceLeads.toLocaleString("en-IN")} leads`} />
+                  <StatTile label="Existing" value={`${activeOwnerRow.existingLeads.toLocaleString("en-IN")} leads`} />
                   <StatTile label="ADR" value={activeOwnerRow.adr !== null ? `₹${Math.round(activeOwnerRow.adr).toLocaleString("en-IN")}` : "—"} />
                 </div>
               </>
             )}
+
+            {/* Company Analysis — B2B companies this owner brought in, from
+                PMS bookings (sales_booking) joined to b2b_bills for the POC /
+                Business Source / company mapping. Scopes to the selected
+                owner + the dashboard Property/period filters. */}
+            <div className="mt-4 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+              <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Company Analysis</p>
+              <p className="mb-2 text-[11px] text-zinc-400 dark:text-zinc-500">
+                All figures from PMS · click a Business Source to filter the table
+              </p>
+              {bizSourceTotals.length === 0 ? (
+                <p className="py-4 text-center text-xs text-zinc-400 dark:text-zinc-500">
+                  No B2B billing data mapped to {activeOwner} for this scope yet.
+                </p>
+              ) : (
+                <>
+                  <DonutChart
+                    data={bizSourceTotals}
+                    valueFormatter={(v) => formatIndianCurrency(v)}
+                    height={180}
+                    onSliceClick={(name) => setSelectedBizSource((cur) => (cur === name ? null : name))}
+                    activeName={drillSource ?? undefined}
+                  />
+                  <div className="mt-3 overflow-x-auto">
+                    <p className="mb-1 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+                      {drillSource ? `${drillSource} — companies` : "All companies"}
+                      {drillSource && (
+                        <button type="button" onClick={() => setSelectedBizSource(null)} className="ml-2 text-teal-700 hover:underline dark:text-teal-300">clear</button>
+                      )}
+                    </p>
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-[10px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
+                          <th className="pb-1 text-left font-medium">Company</th>
+                          <th className="pb-1 pl-2 text-right font-medium">Nights</th>
+                          <th className="pb-1 pl-2 text-right font-medium">ADR</th>
+                          <th className="pb-1 pl-2 text-right font-medium">Revenue</th>
+                          <th className="pb-1 pl-2 text-right font-medium">Contribution %</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {drillTable.map((r) => (
+                          <tr key={r.company} className="border-b border-zinc-100 last:border-0 dark:border-zinc-800">
+                            <td className="py-1.5 pr-2 text-zinc-700 dark:text-zinc-200">{r.company}</td>
+                            <td className="py-1.5 pl-2 text-right tabular-nums text-zinc-600 dark:text-zinc-400">{r.nights.toLocaleString("en-IN")}</td>
+                            <td className="py-1.5 pl-2 text-right tabular-nums text-zinc-600 dark:text-zinc-400">{r.adr !== null ? `₹${Math.round(r.adr).toLocaleString("en-IN")}` : "—"}</td>
+                            <td className="py-1.5 pl-2 text-right tabular-nums font-medium text-zinc-800 dark:text-zinc-100">{formatIndianCurrency(r.revenue)}</td>
+                            <td className="py-1.5 pl-2 text-right tabular-nums text-zinc-600 dark:text-zinc-400">{r.contributionPct !== null ? formatPercent(r.contributionPct, 0) : "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </div>
           </TabbedCard>
         </div>
       </div>
