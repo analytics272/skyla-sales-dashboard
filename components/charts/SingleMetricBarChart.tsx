@@ -53,7 +53,10 @@ export default function SingleMetricBarChart({
           width={56}
         />
         <Tooltip
-          formatter={(value) => valueFormatter(Number(value))}
+          // separator="" + empty name: show just "<category>\n<value>", not
+          // the raw "value : X" dataKey label (2026-09-10 tooltip audit).
+          separator=""
+          formatter={(value) => [valueFormatter(Number(value)), ""]}
           contentStyle={{
             background: "var(--chart-surface)",
             border: "1px solid var(--chart-gridline)",
