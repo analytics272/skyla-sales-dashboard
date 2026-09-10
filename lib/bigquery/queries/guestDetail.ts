@@ -18,7 +18,17 @@ function comparisonMetric(current: number | null, previous: number | null): Comp
 
 export interface BookingStats {
   totalBookings: number;
-  /** MAX(NoOfGuest) per booking, summed — an approximation of distinct people hosted, not guest-nights (see getGuestServedAccuracyCheck for the sheet-reconciled guest-nights figure). */
+  /**
+   * Guest-nights: SUM(NoOfGuest) across every scoped stay-night (a 2-guest,
+   * 5-night booking = 10). 2026-09-10, user direction ("match Pic 1"): switched
+   * from the previous "SUM of MAX(NoOfGuest) per booking" distinct-people
+   * headcount. This is the figure the ops sheet itself reports (the old
+   * per-booking-max form undercounted that sheet by ~82% — see
+   * guestServedSheetSnapshot.ts), and it now agrees with
+   * getGuestServedAccuracyCheck. NOTE: this reverses the 2026-09-02 seventh-pass
+   * decision that deliberately kept the two apart — the seventh pass was
+   * itself a course-correction, and this is the current, explicit call.
+   */
   guestsServed: number;
   alos: number | null;
   revenuePerGuest: number | null;
@@ -49,20 +59,17 @@ const BOOKING_STATS_SQL = (where: string) => `
     -- rows since CONCAT(..., NULL) is NULL and excluded from COUNT DISTINCT.
     -- Grouping by a NULL ReservationNo would otherwise collapse many unrelated
     -- rows into one phantom booking per property (confirmed against real data).
-    -- guests = MAX(NoOfGuest) per booking (peak occupancy) -> "Unique Guests
-    -- Served", a distinct-people-hosted headcount. This is deliberately NOT
-    -- guest-nights (see getGuestServedAccuracyCheck, which sums NoOfGuest
-    -- across every night instead) — the two are different, both legitimate,
-    -- metrics (item #2, 2026-09-02 seventh pass: restored after briefly
-    -- conflating the two in the prior pass).
-    SELECT Property, ReservationNo, MAX(NoOfGuest) AS guests
+    SELECT Property, ReservationNo
     FROM scoped
     WHERE ReservationNo IS NOT NULL
     GROUP BY Property, ReservationNo
   )
   SELECT
     (SELECT COUNT(*) FROM per_booking) AS total_bookings,
-    (SELECT SUM(guests) FROM per_booking) AS guests_served,
+    -- Guest-nights (2026-09-10, user direction): SUM(NoOfGuest) over every
+    -- scoped stay-night, same grain as sold_room_nights / room_revenue below.
+    -- Was SUM(MAX(NoOfGuest) per booking) — see BookingStats.guestsServed doc.
+    (SELECT SUM(NoOfGuest) FROM scoped) AS guests_served,
     (SELECT SUM(${roomNightUnitsSqlExpr()}) FROM scoped) AS sold_room_nights,
     (SELECT SUM(DailyRevenue) FROM scoped) AS room_revenue
 `;
@@ -354,7 +361,10 @@ export async function getRoomFormatStats(filter: KpiFilter): Promise<RoomFormatS
       SELECT rt.room_type, SUM(${roomNightUnitsSqlExpr("b.")}) AS nights, SUM(b.DailyRevenue) AS revenue
       FROM ${table("sales_booking")} b
       LEFT JOIN ${roomTypeMappingSqlUnnest()} AS rt ON ${roomTypeJoinCondition("b")}
-      WHERE ${where}
+      -- 2026-09-10: "Banquet Hall" (56 KDP rows) is not a sellable room — kept
+      -- out of the room-format breakdown entirely, not shown as "Unmapped".
+      -- Headline Room Revenue elsewhere is untouched.
+      WHERE ${where} AND b.Room != 'Banquet Hall'
       GROUP BY rt.room_type
     `, params),
     includeLp ? getLpRoomTypeStats(resolved.period.current) : Promise.resolve([]),

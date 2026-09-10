@@ -30,6 +30,7 @@ import DonutChart from "@/components/charts/DonutChart";
 import ProgressBar from "@/components/ui/ProgressBar";
 import { formatIndianCurrency, formatPercent, safeDivide } from "@/lib/format/currency";
 import { CATEGORY_COLOR, CATEGORY_ORDER, BRAND_COLOR, BRAND_ORDER } from "@/lib/design/tokens";
+import { brandOf } from "@/lib/reference/propertyReference";
 
 // Three consecutive calendar months, side by side, each carrying its own exact
 // month name and a one-line explainer — so "what period is this?" and "is this
@@ -158,7 +159,13 @@ export default function OverviewContent({
     return { name: c, value: s.nights, color: CATEGORY_COLOR[c] };
   });
 
-  const adrByPropertyData: BarDatum[] = adrByProperty.map((r) => ({ name: r.property, value: r.adr ?? 0, color: "var(--series-4)" }));
+  // 2026-09-10: property bars coloured by their brand (Pic 3/4/5), so brand
+  // identity is consistent wherever properties or brands appear in a chart.
+  const adrByPropertyData: BarDatum[] = adrByProperty.map((r) => ({
+    name: r.property,
+    value: r.adr ?? 0,
+    color: BRAND_COLOR[brandOf(r.property) ?? ""] ?? "var(--series-4)",
+  }));
   const brandData: BarDatum[] = BRAND_ORDER.filter((b) => brandOccupancy.some((r) => r.brand === b)).map((b) => ({
     name: b,
     value: (brandOccupancy.find((r) => r.brand === b)?.occupancyPct ?? 0) * 100,
