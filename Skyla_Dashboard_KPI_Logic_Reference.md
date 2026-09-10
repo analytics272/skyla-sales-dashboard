@@ -747,6 +747,48 @@ data for these B2B metrics."*
   state; reworded to not name a specific catch-up time, just that billing
   is entered progressively after checkout.
 
+**2026-09-10 (later) — "Final Dashboard Changes" spec, batch 2:**
+- **Brand identity colours audited dashboard-wide** (not just Overview/Leads):
+  new `BrandDot` component for wherever a property/brand is text rather than
+  a chart series — property filter dropdown, Performance's
+  "Target Vs Achieved Revenue By Property" x-axis labels (`xTickColor` prop
+  on `GroupedBarChart`), Performance "Property Detail" tabs (`tabAccent` on
+  `TabbedCard`), Reports Folio report property column headers. Leads
+  "By Property" bars also brand-coloured.
+- **Premiere Supreme audit** — confirmed the only place room type is
+  *grouped* is `getRoomFormatStats` (Bookings) + the Leads "By Format"
+  charts, both already split. `b2b_bills.Room_Type` (raw free text) shows
+  verbatim in the Reports "B2B Details" invoice ledger — not grouped, so
+  the rule doesn't apply there. `ROOM_TYPES` in `roomTypeMapping.ts` is the
+  canonical list any future room-type filter should build from.
+- **LP (Lotus Pond) removed** — status → `"removed"` in
+  `propertyReference.ts` (drops out of `ACTIVE_PROPERTY_CODES`, so gone
+  from the filter, "All", and every LP-merge branch). LP's backfill
+  (`sales_booking_lp_monthly`) ends **Mar 2026** — zero FY 26-27 data,
+  ever. Also excluded from Leads "By Property" (`lead_tracker` has its own
+  361 LP rows). `lpMonthly.ts` and the `includeLp` branches are left in
+  place, dormant — a status flip restores historical LP.
+- **Leads "By Owner Detail" extended with Company Analysis** — a Business
+  Source donut (click to drill) + Company | Nights | ADR | Revenue |
+  Contribution-%-within-source table, for the selected owner. All figures
+  PMS-sourced (`getOwnerCompanyAnalysis`: `sales_booking` revenue/nights,
+  joined to `b2b_bills` for POC / Business_Source / company). Contribution
+  % is within the selected source, not the whole dashboard. Owner name
+  match is case-insensitive with a one-entry alias (`Dikhita` = `Dikitha`).
+- **Exotel/Reference/Existing tiles relabelled** "263 / 36 closed" →
+  "263 leads · 36 closed" for clarity (item 2 — it means 263 leads from
+  that source for the owner, 36 converted).
+- **Still open — item 1 (room-nights vs Pic 1), item on ALOS**: analysed
+  deeply, see the "Room Nights" note in §1.5. Sold matches Looker
+  (~20.5k). Available/Remaining diverge because our per-property windows
+  run to each property's furthest advance booking (BH4 → Dec 2026,
+  KDP → Dec 2026, HTC → Oct 2026, JHS/GB → Mar 2027) while Looker's
+  implied forward horizon is much shorter (~55 days). Total Bookings +10%
+  (likely arrival-date vs any-stay-night bucketing). ALOS: Looker shows
+  "6 days" but its own raw numbers give 5.4 — a rounding/definition quirk
+  on Looker's side. Needs Looker's actual Available/Remaining/ALOS
+  formulas (or a second filter's Looker numbers to triangulate) to lock.
+
 **2026-09-10 — "Final Dashboard Changes" spec, batch 1 of N** (a large
 multi-item spec; this batch covers the unambiguous, unblocked items):
 - **`Premiere Supreme` room type split out of `Executive Room`** — Skyla
