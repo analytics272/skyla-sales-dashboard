@@ -6,18 +6,35 @@
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { CHART_GRIDLINE, CHART_TEXT } from "@/lib/design/tokens";
 
+// Custom x-axis tick that colours each category label (e.g. a property's
+// brand colour). Recharts passes { x, y, payload } and renders whatever we
+// return as SVG; kept untyped-loose because Recharts' own TickProp type is
+// awkward to satisfy for a render function.
+function BrandTick(props: { x?: number; y?: number; payload?: { value?: string }; colorFor: (c: string) => string | undefined }) {
+  const v = props.payload?.value ?? "";
+  const c = props.colorFor(v);
+  return (
+    <text x={props.x} y={props.y} dy={12} textAnchor="middle" fontSize={12} fill={c ?? CHART_TEXT.secondary} fontWeight={c ? 600 : 400}>
+      {v}
+    </text>
+  );
+}
+
 export default function GroupedBarChart({
   data,
   xKey,
   series,
   valueFormatter,
   height = 280,
+  xTickColor,
 }: {
   data: Record<string, unknown>[];
   xKey: string;
   series: { key: string; color: string }[];
   valueFormatter: (v: number) => string;
   height?: number;
+  /** Optional per-category colour for the x-axis label (e.g. a property's brand colour). */
+  xTickColor?: (category: string) => string | undefined;
 }) {
   // A prior pass capped this chart's own width by category count to avoid a
   // large gap between a couple of bars — reverted per explicit feedback:
@@ -30,7 +47,7 @@ export default function GroupedBarChart({
         <CartesianGrid stroke={CHART_GRIDLINE} vertical={false} strokeWidth={1} />
         <XAxis
           dataKey={xKey}
-          tick={{ fill: CHART_TEXT.secondary, fontSize: 12 }}
+          tick={xTickColor ? <BrandTick colorFor={xTickColor} /> : { fill: CHART_TEXT.secondary, fontSize: 12 }}
           axisLine={{ stroke: CHART_GRIDLINE }}
           tickLine={false}
         />

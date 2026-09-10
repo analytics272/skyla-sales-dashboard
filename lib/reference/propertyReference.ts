@@ -72,12 +72,21 @@ export interface PropertyRef {
 // earlier is unaffected and still confirmed correct — Looker Studio's own
 // KDP "Rooms Available" for the same September window is 1,920 = 64×30,
 // matching that fix exactly.)
+// 2026-09-10 — LP set to "removed" (user direction): LP (Lotus Pond) is a
+// retired hotel whose backfill data (`sales_booking_lp_monthly`) ends
+// Mar 2026, so it has ZERO data from FY 26-27 onward and never will. It was
+// re-integrated 2026-08-26 (LP PRD Addendum) but a forward-looking sales
+// dashboard shouldn't surface a property with no current/future data — so
+// LP is dropped from the property filter, from "All", and from every
+// visual. The LP query/merge code (lpMonthly.ts, the `includeLp` branches)
+// is left in place, just never triggered, so historical LP analysis stays
+// one status-flip away if it's ever wanted.
 export const PROPERTIES: PropertyRef[] = [
   { code: "KDP", name: "KDP", brand: "Skyla", roomCount: 64, status: "active" },
   { code: "HTC", name: "HTC", brand: "Skyla", roomCount: 34, status: "active" },
   { code: "JHS", name: "JHS", brand: "Skyla", roomCount: 33, status: "active" },
   { code: "BH4", name: "BH4", brand: "Aptly", roomCount: 18, status: "active" },
-  { code: "LP", name: "LP", brand: "Aptly", roomCount: 16, status: "active" },
+  { code: "LP", name: "LP", brand: "Aptly", roomCount: 16, status: "removed" },
   { code: "GB", name: "GB", brand: "Hyber", roomCount: 21, status: "active" },
 ];
 

@@ -13,6 +13,7 @@ import { ACTIVE_PROPERTY_CODES } from "@/lib/reference/propertyReference";
 import { PERIOD_OPTIONS, PeriodKey } from "@/lib/reference/period";
 import { TABS } from "@/lib/navigation";
 import MultiSelectDropdown from "@/components/ui/MultiSelectDropdown";
+import BrandDot from "@/components/ui/BrandDot";
 import clsx from "clsx";
 
 const PROPERTY_OPTIONS = ACTIVE_PROPERTY_CODES.map((code) => ({ value: code, label: code }));
@@ -133,7 +134,13 @@ export default function FilterBar() {
           Compare to Last Year
         </button>
 
-        <MultiSelectDropdown label="Property" options={PROPERTY_OPTIONS} selected={properties} onChange={setProperties} />
+        <MultiSelectDropdown
+          label="Property"
+          options={PROPERTY_OPTIONS}
+          selected={properties}
+          onChange={setProperties}
+          optionAccent={(code) => <BrandDot property={code} />}
+        />
 
         <button
           type="button"

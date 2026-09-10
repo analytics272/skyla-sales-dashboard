@@ -271,10 +271,12 @@ export async function getLeadsByProperty(filter: LeadsFilter): Promise<LeadsByGr
   // Property IS NOT NULL: cross-checked 2026-09-02 — a blank/unassigned
   // Property isn't a real property to chart alongside the actual ones, so
   // it's excluded here rather than shown as a "null" bucket.
+  // Property != 'LP' (2026-09-10): LP is a retired hotel with no data from
+  // FY 26-27 on — dropped from every visual (see propertyReference.ts).
   const rows = await runQuery<{ key: string; count: number }>(`
     SELECT ${PROPERTY_DISPLAY_EXPR} AS key, COUNT(*) AS count
     FROM ${table("lead_tracker")}
-    WHERE ${clause} AND Property IS NOT NULL
+    WHERE ${clause} AND Property IS NOT NULL AND Property NOT IN ('LP', 'Lotus Pond')
     GROUP BY key
     ORDER BY count DESC
   `, params);

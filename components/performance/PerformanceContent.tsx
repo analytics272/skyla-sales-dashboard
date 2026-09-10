@@ -14,8 +14,12 @@ import ProgressBar from "@/components/ui/ProgressBar";
 import GroupedBarChart from "@/components/charts/GroupedBarChart";
 import MultiSeriesLineChart from "@/components/charts/MultiSeriesLineChart";
 import { formatIndianCurrency, formatPercent } from "@/lib/format/currency";
-import { TARGET_VS_ACHIEVED_COLOR, REVENUE_ROLLOVER_COLOR } from "@/lib/design/tokens";
+import { TARGET_VS_ACHIEVED_COLOR, REVENUE_ROLLOVER_COLOR, BRAND_COLOR } from "@/lib/design/tokens";
+import { brandOf } from "@/lib/reference/propertyReference";
+import BrandDot from "@/components/ui/BrandDot";
 import { calendarMonthFromFiscal, isFutureFiscalMonth } from "@/lib/reference/financialYear";
+
+const brandTickColor = (code: string) => BRAND_COLOR[brandOf(code) ?? ""];
 
 const TA_SERIES = [
   { key: "target", color: TARGET_VS_ACHIEVED_COLOR.target },
@@ -173,9 +177,16 @@ export default function PerformanceContent({
                 { key: "Achieved", color: TARGET_VS_ACHIEVED_COLOR.achieved },
               ]}
               valueFormatter={(v) => formatIndianCurrency(v)}
+              xTickColor={brandTickColor}
             />
           </Card>
-          <TabbedCard title="Property Detail" tabs={propertyTabs} active={activeProperty} onChange={setActiveProperty}>
+          <TabbedCard
+            title="Property Detail"
+            tabs={propertyTabs}
+            active={activeProperty}
+            onChange={setActiveProperty}
+            tabAccent={(code) => <BrandDot property={code} />}
+          >
             {activeRow && (
               <>
                 <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">Achieved Revenue</p>
