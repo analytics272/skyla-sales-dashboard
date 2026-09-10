@@ -13,12 +13,31 @@ import DonutChart from "@/components/charts/DonutChart";
 import Treemap from "@/components/charts/Treemap";
 import Heatmap from "@/components/charts/Heatmap";
 import { formatIndianCurrency, formatPercent } from "@/lib/format/currency";
-import { TARGET_VS_ACHIEVED_COLOR } from "@/lib/design/tokens";
+import { TARGET_VS_ACHIEVED_COLOR, BRAND_COLOR, ROOM_TYPE_COLOR } from "@/lib/design/tokens";
+import { brandOf } from "@/lib/reference/propertyReference";
 import { LOST_REASON_DESCRIPTIONS } from "@/lib/reference/lostLeadReasons";
 
 const RANKING_COLOR = "var(--series-1)";
 const LOST_REASON_PALETTE = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--series-4)", "var(--series-5)", "var(--chart-baseline)"];
 const HEATMAP_TOP_SOURCES = 6;
+
+// 2026-09-10: lead_tracker.Format is free text ("Premier", "Executive",
+// "Studio", "1BHK"...) — normalise to the dashboard's room-type vocabulary
+// so the Leads format charts read the same as Bookings' "By Room Format"
+// (incl. "Premiere Supreme", the Skyla premium tier — lead_tracker's
+// "Premier"). 3BHK/4BHK have no single room-type equivalent, kept as-is.
+const LEAD_FORMAT_LABEL: Record<string, string> = {
+  Premier: "Premiere Supreme",
+  Executive: "Executive Room",
+  Studio: "Studio Room",
+  "1BHK": "1 BHK",
+  "2BHK": "2 BHK",
+  "Hyber Go": "Hyber Room Go",
+  "Hyber Lite": "Hyber Room Lite",
+};
+const leadFmtLabel = (f: string) => LEAD_FORMAT_LABEL[f] ?? f;
+const leadFmtColor = (f: string) => ROOM_TYPE_COLOR[leadFmtLabel(f)] ?? "var(--chart-baseline)";
+const brandColorFor = (code: string) => BRAND_COLOR[brandOf(code) ?? ""] ?? RANKING_COLOR;
 
 // Item #5 (2026-09-02, eighth pass): day-wise only — the Month/FY drill-down
 // tabs from a prior pass are gone per explicit request. Expand/collapse is
@@ -101,18 +120,18 @@ export default function LeadsContent({
   const existingAchievedPct = pct(summary.existingClosedLeads, summary.existingLeads);
   const referenceAchievedPct = pct(summary.referenceClosedLeads, summary.referenceLeads);
 
-  const propertyData: BarDatum[] = byProperty.map((r) => ({ name: r.key, value: r.count, color: RANKING_COLOR }));
+  const propertyData: BarDatum[] = byProperty.map((r) => ({ name: r.key, value: r.count, color: brandColorFor(r.key) }));
   const sourceData: BarDatum[] = bySource.map((r, i) => ({ name: r.key, value: r.count, color: LOST_REASON_PALETTE[i % LOST_REASON_PALETTE.length] }));
-  const formatLeadsData: BarDatum[] = formatLeadsRevenue.map((r) => ({ name: r.format, value: r.leads, color: RANKING_COLOR }));
-  const formatRevenueData: BarDatum[] = formatLeadsRevenue.map((r) => ({ name: r.format, value: r.revenue, color: RANKING_COLOR }));
+  const formatLeadsData: BarDatum[] = formatLeadsRevenue.map((r) => ({ name: leadFmtLabel(r.format), value: r.leads, color: leadFmtColor(r.format) }));
+  const formatRevenueData: BarDatum[] = formatLeadsRevenue.map((r) => ({ name: leadFmtLabel(r.format), value: r.revenue, color: leadFmtColor(r.format) }));
   // Item #6 (2026-09-02, eighth pass): ADR By Format now follows the same
   // format order as Revenue/Leads By Format (by lead count, descending)
   // instead of its own query's unordered GROUP BY output — the two paired
   // charts were listing room formats in different, inconsistent orders.
   const adrByFormatData: BarDatum[] = formatLeadsRevenue.map((r) => ({
-    name: r.format,
+    name: leadFmtLabel(r.format),
     value: adrByFormat.find((a) => a.format === r.format)?.adr ?? 0,
-    color: RANKING_COLOR,
+    color: leadFmtColor(r.format),
   }));
 
   const lostDonut = lostReasons.map((r, i) => ({ name: r.stage, value: r.count, color: LOST_REASON_PALETTE[i % LOST_REASON_PALETTE.length] }));
