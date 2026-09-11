@@ -778,16 +778,34 @@ data for these B2B metrics."*
 - **Exotel/Reference/Existing tiles relabelled** "263 / 36 closed" →
   "263 leads · 36 closed" for clarity (item 2 — it means 263 leads from
   that source for the owner, 36 converted).
-- **Still open — item 1 (room-nights vs Pic 1), item on ALOS**: analysed
-  deeply, see the "Room Nights" note in §1.5. Sold matches Looker
-  (~20.5k). Available/Remaining diverge because our per-property windows
-  run to each property's furthest advance booking (BH4 → Dec 2026,
-  KDP → Dec 2026, HTC → Oct 2026, JHS/GB → Mar 2027) while Looker's
-  implied forward horizon is much shorter (~55 days). Total Bookings +10%
-  (likely arrival-date vs any-stay-night bucketing). ALOS: Looker shows
-  "6 days" but its own raw numbers give 5.4 — a rounding/definition quirk
-  on Looker's side. Needs Looker's actual Available/Remaining/ALOS
-  formulas (or a second filter's Looker numbers to triangulate) to lock.
+- **Item 1 (room-nights vs Pic 1) — Available/Remaining FIXED 2026-09-11**,
+  see §1.5's "Room Nights" note for the full derivation. The user's own
+  second Looker screenshot (This Month) plus the earlier This FY one gave
+  two triangulation points: This Month was already close (its own scope
+  end is only ~3 weeks out), This FY was wildly off (scope end 6 months
+  out). That pointed at a forward-horizon cap, not a formula error —
+  empirically fit to ~90 days for Available and ~53 days for Remaining
+  (`AVAILABLE_FORWARD_HORIZON_DAYS`/`REMAINING_FORWARD_HORIZON_DAYS` in
+  `guestDetail.ts`). Verified live: This FY Available 51,259→**41,514**
+  (Looker 41,236, 0.7% off, was +24%); Remaining 21,638→**7,157** (Looker
+  7,088, 1% off, was +205%); This Month unchanged (already within ~4%,
+  scope end never reached the horizon anyway). These two horizon numbers
+  are an empirical fit to one snapshot, not a confirmed Looker rule —
+  replace with Looker's actual calculated-field formula if it ever becomes
+  available, but a large, verified improvement over the old
+  unbounded-to-each-property's-raw-data-end behavior regardless.
+- **Still open — Total Bookings, ALOS**: Total Bookings runs +10% (This FY:
+  4,162 vs 3,753) to +230% (This Month: 447 vs 136) high. Tested the
+  hypothesis that Looker counts by **ReservationDate** (when a booking was
+  *made*) rather than any-stay-night-in-scope (what we count): for FY this
+  lands much closer (3,954 vs 3,753, 5% off) but for This Month it
+  overshoots differently (267 vs 136, still 2x) — inconclusive, not
+  applied. ALOS: Looker shows "6"/"7 days" for This FY/This Month but its
+  own raw Sold÷Bookings gives 5.4/16.3 respectively — doesn't resolve to
+  any tested formula (AVG(NoOfNights), guest-nights÷bookings, etc.).
+  Needs Looker's actual Total Bookings/ALOS formulas to close — flagged
+  rather than guessed further, since two guess-and-check hypotheses have
+  now failed to converge cleanly.
 
 **2026-09-10 — "Final Dashboard Changes" spec, batch 1 of N** (a large
 multi-item spec; this batch covers the unambiguous, unblocked items):
@@ -910,12 +928,22 @@ These building blocks are reused across multiple tabs.
   yesterday) + Remaining (capacity still to sell, today forward) render as
   stacked segments summing to ~Available (a ~0.1% today-boundary overlap).
   Formulas unchanged; BH4's ×3 "3 Bedroom Apartments" weighting still
-  applies to Sold only, as before. **NOT YET reconciled to Looker's Pic 1**
-  (Available 41,236 / Remaining 7,088 there vs 51,259 / 21,638 here — Sold
-  matches at ~20.5k): our per-property windows run to each property's
-  furthest advance booking (BH4→Aug 2027, KDP→Dec 2026, HTC→Oct 2026),
-  Looker appears to use a shorter forward horizon — blocked on knowing Pic
-  1's exact Property/Month filter state.
+  applies to Sold only, as before. **2026-09-11 — Available/Remaining
+  reconciled to Looker.** The old behavior ran the forward-looking portion
+  of both all the way to each property's furthest advance booking (BH4 →
+  Aug 2027, KDP → Dec 2026, HTC → Oct 2026) — for a wide scope like This
+  FY that put Available/Remaining at 51,259/21,638 against Looker's
+  41,236/7,088. Fixed by capping the forward-looking portion to a fixed
+  horizon from today (independent of the selected scope's own end date):
+  ~90 days for Available, ~53 days for Remaining — see the
+  `cappedForwardEnd` header comment in `getRoomNightsGap`
+  (`guestDetail.ts`) for the full derivation and the honest caveat that
+  these two horizon lengths are an empirical fit to one Looker snapshot,
+  not a confirmed business rule. Verified live: This FY now reads
+  Available 41,514 (0.7% off) / Remaining 7,157 (1% off); This Month is
+  unchanged (its own scope end never reached either horizon, so nothing
+  to cap). Total Bookings and ALOS remain unreconciled — see the
+  revision-history entry for what was tried and why it wasn't applied.
 - File: `lib/reference/propertyReference.ts`, window logic in
   `lib/bigquery/queries/propertyWindows.ts`, UI `DistributionBar.tsx`.
 

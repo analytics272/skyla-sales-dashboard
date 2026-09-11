@@ -307,11 +307,19 @@ export default function LeadsContent({
                   </div>
                 )}
                 <div className="mt-3 grid grid-cols-2 gap-3 border-t border-zinc-100 pt-3 dark:border-zinc-800 sm:grid-cols-4">
-                  {/* "263 leads · 36 closed" (2026-09-10 clarified from "263 / 36 closed"):
-                      Exotel-sourced leads this owner handled, and how many converted. */}
-                  <StatTile label="Exotel" value={`${activeOwnerRow.exotelLeads.toLocaleString("en-IN")} leads · ${activeOwnerRow.exotelClosed.toLocaleString("en-IN")} closed`} />
-                  <StatTile label="Reference" value={`${activeOwnerRow.referenceLeads.toLocaleString("en-IN")} leads`} />
-                  <StatTile label="Existing" value={`${activeOwnerRow.existingLeads.toLocaleString("en-IN")} leads`} />
+                  {/* 2026-09-11: the big `value` line is meant for one short
+                      number — cramming "263 leads · 36 closed" into it wrapped
+                      to 4 lines at that font size in a narrow 4-col tile.
+                      Split into a large primary number + a small `sub`
+                      caption, the same pattern every other StatTile on the
+                      dashboard already uses. */}
+                  <StatTile
+                    label="Exotel"
+                    value={activeOwnerRow.exotelLeads.toLocaleString("en-IN")}
+                    sub={`leads · ${activeOwnerRow.exotelClosed.toLocaleString("en-IN")} closed`}
+                  />
+                  <StatTile label="Reference" value={activeOwnerRow.referenceLeads.toLocaleString("en-IN")} sub="leads" />
+                  <StatTile label="Existing" value={activeOwnerRow.existingLeads.toLocaleString("en-IN")} sub="leads" />
                   <StatTile label="ADR" value={activeOwnerRow.adr !== null ? `₹${Math.round(activeOwnerRow.adr).toLocaleString("en-IN")}` : "—"} />
                 </div>
               </>

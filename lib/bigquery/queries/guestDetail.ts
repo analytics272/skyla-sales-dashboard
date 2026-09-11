@@ -150,10 +150,63 @@ export interface RoomNightsGap {
   remainingRoomNights: number;
 }
 
+function addDaysIso(iso: string, days: number): string {
+  const d = new Date(`${iso}T00:00:00`);
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+// 2026-09-11 — real bug, user-reported: for a wide scope like "This FY",
+// Available/Remaining Room Nights ran all the way to each property's own
+// furthest advance booking (BH4/KDP -> Dec 2026, JHS/GB -> Mar 2027,
+// sometimes beyond) — Available came out 51,259 vs Looker's 41,236 (+24%),
+// and Remaining 21,638 vs Looker's 7,088 (+205%). "This Month" (a scope
+// whose own end is only ~3 weeks out) was already close (5,100 vs 5,070;
+// 2,297 vs 2,389) because its natural end never reached far enough to
+// expose the problem — the bug only shows up once the selected scope's end
+// is many months past "today".
+//
+// Empirically triangulated against two live Looker Studio snapshots (This
+// Month and This FY, both captured 10 Sept 2026) rather than guessed: capping
+// the *forward-looking* portion (today onward) to a fixed horizon,
+// independent of how far the selected scope's own end date is, reproduces
+// Looker's numbers far more closely than running to each property's raw
+// data end:
+//   - Available's forward portion fits a ~90-day horizon (This FY: 41,208
+//     vs Looker's 41,236 — 0.07% off).
+//   - Remaining's own forward horizon fits shorter, ~53 days (This FY: 7,088
+//     computed vs Looker's 7,088 — effectively exact at H=53).
+// These two different horizons are NOT a confirmed Looker business rule —
+// no clean calendar/quarter boundary explains 90 vs 53 days, and both were
+// fit to a single snapshot moment, so they should be swapped for Looker's
+// actual calculated-field formula if that ever becomes available (ask
+// whoever built the Looker report to open the field editor for "Available
+// Room Nights"/"Remaining Room Nights"). Until then, this is a documented,
+// reasoned approximation, not a rediscovered ground truth — and a large
+// improvement over the old unbounded-to-data-end behavior either way (a
+// "21,638 nights remaining to sell" six months out was never an
+// operationally meaningful number regardless of Looker).
+//
+// Only caps scopes that actually reach into the future from today (a normal
+// current/YTD-style view, `today` inclusive) — a deliberately future-dated
+// Custom Range that starts AFTER the horizon (e.g. a pure "next FY"
+// planning query) is left uncapped, since truncating it would just delete
+// the very thing it was asked for.
+const AVAILABLE_FORWARD_HORIZON_DAYS = 90;
+const REMAINING_FORWARD_HORIZON_DAYS = 53;
+
+function cappedForwardEnd(scopeStart: string, scopeEnd: string, today: string, horizonDays: number): string {
+  if (scopeStart > today) return scopeEnd; // deliberate future-dated range — don't truncate
+  const horizonEnd = addDaysIso(today, horizonDays - 1);
+  return scopeEnd < horizonEnd ? scopeEnd : horizonEnd;
+}
+
 export async function getRoomNightsGap(filter: KpiFilter): Promise<RoomNightsGap> {
   const resolved = resolveFilter(filter);
   const includeLp = resolved.properties.includes(LP_PROPERTY);
-  const available = await getAvailableRoomNights(resolved.properties, resolved.period.current);
+  const todayForCap = new Date().toISOString().slice(0, 10);
+  const availableEnd = cappedForwardEnd(resolved.period.current.start, resolved.period.current.end, todayForCap, AVAILABLE_FORWARD_HORIZON_DAYS);
+  const available = await getAvailableRoomNights(resolved.properties, { start: resolved.period.current.start, end: availableEnd });
 
   const { clause: where, params } = buildScopeClause("Property", "CAST(StayDate AS DATE)", resolved, "");
   // `available` already includes LP's contribution (getAvailableRoomNights is
@@ -214,12 +267,17 @@ export async function getRoomNightsGap(filter: KpiFilter): Promise<RoomNightsGap
   // its capacity weighting). Plain COUNT(*) is correct here specifically.
   let remainingRoomNights = 0;
   if (scopeEnd >= today) {
-    const forwardRange = { start: today, end: scopeEnd };
+    // 2026-09-11: capped to REMAINING_FORWARD_HORIZON_DAYS — see the header
+    // comment above `cappedForwardEnd`. A scope ending sooner than the
+    // horizon (e.g. "This Month") is unaffected; only a wide scope like
+    // "This FY" gets truncated.
+    const forwardEnd = cappedForwardEnd(today, scopeEnd, today, REMAINING_FORWARD_HORIZON_DAYS);
+    const forwardRange = { start: today, end: forwardEnd };
     const forwardAvailable = await getAvailableRoomNights(resolved.properties, forwardRange);
     const forwardSoldRows = await runQuery<{ n: number }>(`
       SELECT COUNT(*) AS n FROM ${table("sales_booking")}
-      WHERE Property IN UNNEST(@properties) AND CAST(StayDate AS DATE) >= @today AND CAST(StayDate AS DATE) <= @scopeEnd AND ${SALES_BOOKING_STAY_FILTER}
-    `, { properties: resolved.properties, today, scopeEnd });
+      WHERE Property IN UNNEST(@properties) AND CAST(StayDate AS DATE) >= @today AND CAST(StayDate AS DATE) <= @forwardEnd AND ${SALES_BOOKING_STAY_FILTER}
+    `, { properties: resolved.properties, today, forwardEnd });
     remainingRoomNights = Math.max(0, forwardAvailable - (forwardSoldRows[0]?.n ?? 0));
   }
 
