@@ -770,11 +770,55 @@ data for these B2B metrics."*
   place, dormant — a status flip restores historical LP.
 - **Leads "By Owner Detail" extended with Company Analysis** — a Business
   Source donut (click to drill) + Company | Nights | ADR | Revenue |
-  Contribution-%-within-source table, for the selected owner. All figures
-  PMS-sourced (`getOwnerCompanyAnalysis`: `sales_booking` revenue/nights,
-  joined to `b2b_bills` for POC / Business_Source / company). Contribution
-  % is within the selected source, not the whole dashboard. Owner name
-  match is case-insensitive with a one-entry alias (`Dikhita` = `Dikitha`).
+  Contribution-%-within-source table, for the selected owner. Originally
+  built on `sales_booking` joined to `b2b_bills`; **rewritten 2026-09-11**
+  (see the next entry) onto the new `company_revenue_summary` view instead.
+  Contribution % is within the selected source, not the whole dashboard,
+  computed client-side (not a fixed SQL window) so it tracks whichever
+  source the user has clicked. Owner name match is case-insensitive with a
+  one-entry alias (`Dikhita` = `Dikitha`) — currently moot, see below.
+- **2026-09-11 — Company Analysis re-sourced onto `company_revenue_summary`
+  (view over new table `sales_company_bills`), replacing `b2b_bills`
+  entirely for this feature** — user-supplied spec + view DDL. Confirmed
+  live this table is materially better than `b2b_bills`: data reaches
+  through **today** (11 Sept 2026 — `b2b_bills` had zero Sep 26 rows at
+  all), and it carries a real `CompanyId`/`CompanyName` per bill (858
+  distinct companies, Apr 2024–present). Classification (B2B/B2C/OTA)
+  reuses the existing `bookingCategorySqlExpr` on `BusinessSource`, per
+  the spec's explicit instruction not to duplicate that logic — confirmed
+  it already handles every `BusinessSource` value seen in the new table
+  (including OTA ones: `Agoda`, `Go-MMT`, `Expedia`, `Cleartrip`, …) with
+  no changes needed.
+  - **Solves the Mayrakhee/Blue Orange question from earlier this
+    session**: both companies (spelled `MAYRAHKEE HOSPITALITY` here) exist
+    in `sales_company_bills` at HTC — confirmed **not** an unmapped-data
+    gap. Both are `BusinessSource = 'Relocation (B2C)'`, which classifies
+    **B2C**, not B2B — that's exactly why they never appeared in the old
+    B2B-only `b2b_bills` view: they're real customers, genuinely B2C, not
+    missing data. This query doesn't filter by category, so both now show
+    up in the donut/table like any other company (This FY: Mayrakhee
+    ₹5.44L/85 nights, Blue Orange ₹2.94L/56 nights).
+  - **`company_owner_map` (CompanyId → Owner) is currently EMPTY** (0 rows,
+    confirmed live) — every row's `owner` comes back `NULL`, mapped to
+    `"Unassigned"`. Rather than a real per-owner tab showing nothing (a
+    strict name match would never hit), the UI shows Unassigned rows under
+    *every* owner tab with an explicit banner ("Owner mapping isn't set up
+    yet…") — the same `LEFT JOIN … COALESCE` starts filtering correctly
+    with zero code changes once that table is populated.
+  - Contribution %'s SQL-window suggestion in the spec
+    (`PARTITION BY ClassifiedCategory, FinancialYear`) was **not** used as
+    literally written — it only supports one fixed grouping, while the
+    actual UI lets the user toggle between "all sources" and one clicked
+    source; kept the existing client-side recompute instead, which already
+    does that correctly on the same year fetched dataset.
+  - `MonthStart` is calendar-month grain (the view's own aggregation),
+    scoped via `MonthStart BETWEEN DATE_TRUNC(@start, MONTH) AND
+    DATE_TRUNC(@end, MONTH)` — same inherent whole-month-only limitation
+    `b2b_bills.Month` had for a mid-month custom range.
+  - **Not yet done**: migrating the Bookings tab's "Company Rankings" (still
+    `sales_booking` + `b2b_bills`, see §3) onto this same new table — only
+    explicitly asked for under Leads' By Owner Detail card so far. Worth
+    doing given how much fresher this source is, but a separate ask.
 - **Exotel/Reference/Existing tiles relabelled** "263 / 36 closed" →
   "263 leads · 36 closed" for clarity (item 2 — it means 263 leads from
   that source for the owner, 36 converted).

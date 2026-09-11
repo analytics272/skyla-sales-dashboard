@@ -2,8 +2,10 @@
 // client components can use them (2026-09-10).
 
 export interface OwnerCompanyRow {
-  owner: string; // b2b_bills.POC
-  businessSource: string;
+  owner: string; // company_owner_map.Owner, or "Unassigned" (that table is currently empty)
+  businessSource: string; // raw BusinessSource (e.g. "Corporate Sales", "Relocation (B2C)", "Agoda")
+  /** B2B/B2C/OTA classification of businessSource via the shared bookingCategorySqlExpr — not used to filter, just carried through for a future badge/filter if wanted. */
+  category: "B2B" | "B2C" | "OTA";
   company: string;
   revenue: number;
   nights: number;

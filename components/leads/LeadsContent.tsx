@@ -145,14 +145,20 @@ export default function LeadsContent({
   const [activeOwner, setActiveOwner] = useTabbedCard(ownerTabs);
   const activeOwnerRow = byOwner.rows.find((r) => r.owner === activeOwner) ?? byOwner.rows[0];
 
-  // 2026-09-10 — Company Analysis inside By Owner Detail ("Final Dashboard
-  // Changes" item 6). All PMS-sourced (sales_booking revenue/nights), joined
-  // to b2b_bills only for the POC / Business Source / company mapping. Scopes
-  // to the selected owner tab + the dashboard's Property/period filters.
+  // 2026-09-10/11 — Company Analysis inside By Owner Detail ("Final
+  // Dashboard Changes" item 6). Sourced from company_revenue_summary
+  // (sales_company_bills), joined to company_owner_map for the Owner. That
+  // map is currently EMPTY (confirmed live) — every row comes back
+  // owner="Unassigned" until someone populates it. Rather than showing
+  // nothing under every real owner tab (a strict name match would never
+  // hit), Unassigned rows are shown alongside whichever owner tab is
+  // active, with an explicit note — the same match narrows itself down
+  // automatically, with no code change here, once real Owner values exist.
   const [selectedBizSource, setSelectedBizSource] = useState<string | null>(null);
   const ownerRowsForActive = ownerCompanyAnalysis.filter(
-    (r) => canonicalOwner(r.owner) === canonicalOwner(activeOwner ?? "")
+    (r) => canonicalOwner(r.owner) === canonicalOwner(activeOwner ?? "") || r.owner === "Unassigned"
   );
+  const hasUnassignedRows = ownerRowsForActive.some((r) => r.owner === "Unassigned");
   const bizSourceTotals = Array.from(
     ownerRowsForActive.reduce((m, r) => m.set(r.businessSource, (m.get(r.businessSource) ?? 0) + r.revenue), new Map<string, number>())
   )
@@ -325,18 +331,25 @@ export default function LeadsContent({
               </>
             )}
 
-            {/* Company Analysis — B2B companies this owner brought in, from
-                PMS bookings (sales_booking) joined to b2b_bills for the POC /
-                Business Source / company mapping. Scopes to the selected
-                owner + the dashboard Property/period filters. */}
+            {/* Company Analysis — every company billed this scope (any
+                Business Source: B2B, B2C, or OTA — companies like Mayrakhee
+                Hospitality/Blue Orange Hospitality are genuinely
+                B2C-sourced, so this deliberately isn't B2B-only), from
+                company_revenue_summary (sales_company_bills) joined to
+                company_owner_map for the Owner. */}
             <div className="mt-4 border-t border-zinc-100 pt-3 dark:border-zinc-800">
               <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Company Analysis</p>
               <p className="mb-2 text-[11px] text-zinc-400 dark:text-zinc-500">
-                All figures from PMS · click a Business Source to filter the table
+                Click a Business Source to filter the table
               </p>
+              {hasUnassignedRows && (
+                <p className="mb-2 rounded bg-amber-50 px-2 py-1 text-[11px] text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">
+                  Owner mapping isn&apos;t set up yet (company_owner_map is empty) — showing every unassigned company under each owner tab until it is.
+                </p>
+              )}
               {bizSourceTotals.length === 0 ? (
                 <p className="py-4 text-center text-xs text-zinc-400 dark:text-zinc-500">
-                  No B2B billing data mapped to {activeOwner} for this scope yet.
+                  No billing data for this scope yet.
                 </p>
               ) : (
                 <>
