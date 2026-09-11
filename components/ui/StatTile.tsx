@@ -22,7 +22,11 @@ export default function StatTile({ label, value, delta, sub, subBold, progress }
   return (
     <div className="rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
       <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">{label}</p>
-      <p className="mt-1.5 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">{value}</p>
+      {/* 2026-09-11: a long compound value ("263 leads · 36 closed") wrapped
+          to 3-4 lines at text-2xl in a narrow tile — step the size down for
+          anything longer than a typical number/currency string, instead of
+          every caller having to know to keep `value` short. */}
+      <p className={`mt-1.5 font-semibold text-zinc-900 dark:text-zinc-50 ${value.length > 12 ? "text-lg" : "text-2xl"}`}>{value}</p>
       {delta && (
         <p className="mt-1 text-xs font-medium" style={{ color: deltaColor }}>
           {delta.pct >= 0 ? "▲" : "▼"} {Math.abs(delta.pct).toFixed(1)}% {delta.label}
