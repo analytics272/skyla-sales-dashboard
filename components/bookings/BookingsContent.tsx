@@ -39,6 +39,8 @@ const CONTRACT_STATUS_FALLBACK = "var(--chart-baseline)";
 const COMPANY_RANKING_COLOR = "var(--series-1)";
 /** Top N shown per Company Rankings tab (user direction 2026-09-11) — was "show all N" behind an Expandable. */
 const COMPANY_RANKING_TOP_N = 8;
+/** Legal company names here run long (SEZ/subsidiary suffixes); truncate the bar label instead of letting it wrap across rows — full name still shows on hover. */
+const COMPANY_RANKING_LABEL_CHARS = 26;
 
 type MixTab = "Category" | "Room Format";
 const MIX_TABS: MixTab[] = ["Category", "Room Format"];
@@ -345,10 +347,10 @@ export default function BookingsContent({
                     </p>
                   </div>
                 )}
-                {companyTab === "Revenue" && <HorizontalBarChart data={b2bRevenueData} valueFormatter={(v) => formatIndianCurrency(v)} labelWidth={170} />}
-                {companyTab === "Nights" && <HorizontalBarChart data={b2bNightsData} valueFormatter={(v) => v.toLocaleString("en-IN")} labelWidth={170} />}
-                {companyTab === "ADR" && <HorizontalBarChart data={b2bAdrData} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} labelWidth={170} />}
-                {companyTab === "Contribution %" && <HorizontalBarChart data={b2bContributionData} valueFormatter={(v) => `${v.toFixed(0)}%`} labelWidth={170} />}
+                {companyTab === "Revenue" && <HorizontalBarChart data={b2bRevenueData} valueFormatter={(v) => formatIndianCurrency(v)} labelWidth={170} maxLabelChars={COMPANY_RANKING_LABEL_CHARS} />}
+                {companyTab === "Nights" && <HorizontalBarChart data={b2bNightsData} valueFormatter={(v) => v.toLocaleString("en-IN")} labelWidth={170} maxLabelChars={COMPANY_RANKING_LABEL_CHARS} />}
+                {companyTab === "ADR" && <HorizontalBarChart data={b2bAdrData} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} labelWidth={170} maxLabelChars={COMPANY_RANKING_LABEL_CHARS} />}
+                {companyTab === "Contribution %" && <HorizontalBarChart data={b2bContributionData} valueFormatter={(v) => `${v.toFixed(0)}%`} labelWidth={170} maxLabelChars={COMPANY_RANKING_LABEL_CHARS} />}
                 {/* 2026-09-11: pagination — first page is top 8, Next/Prev
                     step through the rest of this tab's ranked list 8 at a
                     time, numbering staying global (page 2 starts at "9."). */}

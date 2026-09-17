@@ -870,6 +870,28 @@ data for these B2B metrics."*
   continues 9–16, and clicking the "Corporate Sales" donut slice
   re-filters to that source, re-sorts by revenue, and resets to page 1
   (narrowing to 21 pages for that source alone).
+- **2026-09-17 — Company Rankings bar labels: fixed row-overlap readability
+  bug**. Legal company names here run long (`"SYNERGY APARTMENT SERVICES
+  PRIVATE LIMITED(Subsidiary of SilverDoor Americas LLC)"`-style, often
+  with an "(SEZ)" or "(Subsidiary of ...)" suffix); Recharts' default
+  Y-axis category tick wraps long text across as many lines as it takes
+  to fit `labelWidth`, and since each bar row only has a fixed height
+  slice, a 3-4 line wrapped label overflowed into the rows above/below it
+  — the exact overlap the user screenshotted. Fixed by adding an optional
+  `maxLabelChars` prop to `HorizontalBarChart` (a custom Y-axis tick that
+  truncates to N characters + "…" instead of wrapping — see
+  `TruncatedTick` in `components/charts/HorizontalBarChart.tsx`); wired
+  to 26 chars on all four Company Rankings tabs only (every other
+  `HorizontalBarChart` caller has short labels — room types, lead
+  sources — that already fit on one line, so they're unaffected). The
+  full company name is unchanged in the Tooltip on hover — only the
+  axis label is shortened.
+  - Re-verified while investigating this: Mayrakhee Hospitality and Blue
+    Orange Hospitality are still classified B2C (`BusinessSource =
+    'Relocation (B2C)'`, confirmed live in `sales_company_bills`), so
+    they correctly do NOT appear in this card — it's B2B-only by design.
+    They do appear in the Leads "By Owner Detail" → Company Analysis
+    table above, which shows all categories.
 - **Exotel/Reference/Existing tiles relabelled** "263 / 36 closed" →
   "263 leads · 36 closed" for clarity (item 2 — it means 263 leads from
   that source for the owner, 36 converted).

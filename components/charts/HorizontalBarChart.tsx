@@ -8,16 +8,36 @@ import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxi
 import { CHART_GRIDLINE, CHART_TEXT } from "@/lib/design/tokens";
 import type { BarDatum } from "./SingleMetricBarChart";
 
+// 2026-09-17: without this, Recharts wraps a Y-axis category label onto as
+// many lines as it takes to fit `labelWidth` — for something short like a
+// room type that's one line and fine, but a long legal company name (often
+// with a "(Subsidiary of ...)" or "(SEZ)" suffix) wraps to 3-4 lines and
+// overflows into the row above/below it, since each row only has a fixed
+// slice of the chart's height. Truncating with an ellipsis keeps every row
+// to one line; the full name is still available in the Tooltip on hover.
+function TruncatedTick({ x, y, payload, maxChars }: { x?: number; y?: number; payload?: { value?: string }; maxChars: number }) {
+  const v = payload?.value ?? "";
+  const truncated = v.length > maxChars ? `${v.slice(0, maxChars - 1)}…` : v;
+  return (
+    <text x={x} y={y} dy={4} textAnchor="end" fontSize={11} fill={CHART_TEXT.secondary}>
+      {truncated}
+    </text>
+  );
+}
+
 export default function HorizontalBarChart({
   data,
   valueFormatter,
   height,
   labelWidth = 110,
+  maxLabelChars,
 }: {
   data: BarDatum[];
   valueFormatter: (v: number) => string;
   height?: number;
   labelWidth?: number;
+  /** Truncates long Y-axis labels to this many characters (+ "…") instead of letting Recharts wrap them across lines that overflow into neighboring rows. Full name still shows in the Tooltip. */
+  maxLabelChars?: number;
 }) {
   const resolvedHeight = height ?? Math.max(140, data.length * 32);
   return (
@@ -34,7 +54,7 @@ export default function HorizontalBarChart({
         <YAxis
           type="category"
           dataKey="name"
-          tick={{ fill: CHART_TEXT.secondary, fontSize: 11 }}
+          tick={maxLabelChars ? <TruncatedTick maxChars={maxLabelChars} /> : { fill: CHART_TEXT.secondary, fontSize: 11 }}
           axisLine={{ stroke: CHART_GRIDLINE }}
           tickLine={false}
           width={labelWidth}
