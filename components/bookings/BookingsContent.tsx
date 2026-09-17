@@ -39,8 +39,8 @@ const CONTRACT_STATUS_FALLBACK = "var(--chart-baseline)";
 const COMPANY_RANKING_COLOR = "var(--series-1)";
 /** Top N shown per Company Rankings tab (user direction 2026-09-11) — was "show all N" behind an Expandable. */
 const COMPANY_RANKING_TOP_N = 8;
-/** Legal company names here run long (SEZ/subsidiary suffixes); truncate the bar label instead of letting it wrap across rows — full name still shows on hover. */
-const COMPANY_RANKING_LABEL_CHARS = 26;
+/** Legal company names here run long (SEZ/subsidiary suffixes); truncate the bar label instead of letting it wrap across rows — full name still shows on hover. Rank number is rendered on its own line (see HorizontalBarChart's TruncatedTick) so it's never affected by this; kept conservative (well under labelWidth's ~170px at 11px all-caps text) so the name line itself doesn't overflow either. */
+const COMPANY_RANKING_LABEL_CHARS = 24;
 
 type MixTab = "Category" | "Room Format";
 const MIX_TABS: MixTab[] = ["Category", "Room Format"];
@@ -155,11 +155,13 @@ export default function BookingsContent({
   };
   const companyPageCount = Math.max(1, Math.ceil(companyRankedByTab[companyTab].length / COMPANY_RANKING_TOP_N));
 
+  // 2026-09-17: ADR rightLabel dropped from the Revenue tab's bars per
+  // explicit user direction — ADR already has its own dedicated tab, no
+  // need to duplicate it alongside the Revenue bars.
   const b2bRevenueData: BarDatum[] = page(b2bRevenueRanked).map((r, i) => ({
     name: numbered(r.company, i),
     value: r.roomRevenue,
     color: CONTRACT_STATUS_COLOR[r.contractStatus ?? ""] ?? CONTRACT_STATUS_FALLBACK,
-    rightLabel: r.adr !== null ? `ADR ₹${Math.round(r.adr).toLocaleString("en-IN")}` : undefined,
   }));
   const b2bNightsData: BarDatum[] = page(b2bNightsRanked).map((r, i) => ({
     name: numbered(r.company, i), value: r.nights, color: COMPANY_RANKING_COLOR,
@@ -175,11 +177,16 @@ export default function BookingsContent({
   // (PMS-derived, see b2bContracts.ts) — a bill not yet tagged with a
   // CompanyId there has no company attached and drops out of the ranking.
   // Surfacing that gap explicitly instead of letting totals silently not
-  // reconcile with the Booking Category Mix card's own B2B figure above,
-  // which IS the true PMS total for this period/scope.
-  const totalB2bRevenuePms = categoryMix.find((m) => m.category === "B2B")?.revenue ?? 0;
-  const mappedB2bRevenue = b2bRanking.reduce((s, r) => s + r.roomRevenue, 0);
-  const b2bMappedCoveragePct = totalB2bRevenuePms > 0 ? (mappedB2bRevenue / totalB2bRevenuePms) * 100 : null;
+  // reconcile with the Booking Category Mix card's own figures above,
+  // which ARE the true PMS totals for this period/scope.
+  // 2026-09-17: broadened to B2B + B2C (OTA still excluded) — see
+  // b2bContracts.ts's revision-history comment — so the coverage
+  // denominator is now both categories' combined revenue, not B2B alone.
+  const totalCompanyRevenuePms =
+    (categoryMix.find((m) => m.category === "B2B")?.revenue ?? 0) +
+    (categoryMix.find((m) => m.category === "B2C")?.revenue ?? 0);
+  const mappedCompanyRevenue = b2bRanking.reduce((s, r) => s + r.roomRevenue, 0);
+  const companyMappedCoveragePct = totalCompanyRevenuePms > 0 ? (mappedCompanyRevenue / totalCompanyRevenuePms) * 100 : null;
 
   // Item #10: the two raw StatTiles here (a revenue figure and a company
   // count) are replaced by one donut reading "what share of B2B revenue is
@@ -309,20 +316,23 @@ export default function BookingsContent({
       </div>
 
       <div>
-        <h3 className="text-base font-semibold text-zinc-800 dark:text-zinc-100">B2B Contracts</h3>
+        <h3 className="text-base font-semibold text-zinc-800 dark:text-zinc-100">Company Contracts</h3>
         {/* 2026-09-11: Company Rankings now sourced from
             sales_company_bills (PMS-derived — see b2bContracts.ts) for
             every number; b2b_bills is used only for Contract_Status
             (Revenue tab colouring) via the same FolioNo join. A bill not
             yet tagged with a CompanyId has no company attached and drops
             out of the ranking; the coverage line below states what
-            fraction of this period's real B2B revenue that currently is.
-            Top 8 companies shown per tab (was "show all N" behind an
-            Expandable), each bar numbered by rank. */}
+            fraction of this period's real company revenue that currently
+            is. Top 8 companies shown per tab (was "show all N" behind an
+            Expandable), each bar numbered by rank.
+            2026-09-17: broadened from B2B-only to B2B + B2C (same
+            company population as Leads' By Owner Detail card, OTA still
+            excluded) — heading and captions reworded accordingly. */}
         <p className="text-xs text-zinc-400 dark:text-zinc-500">Scoped to {b2bRangeLabel}</p>
-        {b2bMappedCoveragePct !== null && (
+        {companyMappedCoveragePct !== null && (
           <p className="text-xs text-zinc-400 dark:text-zinc-500">
-            {b2bMappedCoveragePct.toFixed(0)}% of this period&apos;s B2B revenue is mapped to a company below — the rest hasn&apos;t been tagged with a company in the PMS billing extract yet.
+            {companyMappedCoveragePct.toFixed(0)}% of this period&apos;s B2B + B2C revenue is mapped to a company below — the rest hasn&apos;t been tagged with a company in the PMS billing extract yet.
           </p>
         )}
 
@@ -384,7 +394,7 @@ export default function BookingsContent({
               // specific catch-up time (an earlier "about a month" claim
               // for b2b_bills turned out to be wrong when checked live).
               <p className="py-8 text-center text-sm text-zinc-400 dark:text-zinc-500">
-                No B2B billing data synced yet for {b2bRangeLabel}.
+                No billing data synced yet for {b2bRangeLabel}.
               </p>
             )}
           </TabbedCard>
