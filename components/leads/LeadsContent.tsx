@@ -7,6 +7,7 @@ import StatTile from "@/components/ui/StatTile";
 import Card from "@/components/ui/Card";
 import TabbedCard, { useTabbedCard } from "@/components/ui/TabbedCard";
 import ProgressBar from "@/components/ui/ProgressBar";
+import SearchInput from "@/components/ui/SearchInput";
 import HorizontalBarChart from "@/components/charts/HorizontalBarChart";
 import { BarDatum } from "@/components/charts/SingleMetricBarChart";
 import MultiSeriesLineChart from "@/components/charts/MultiSeriesLineChart";
@@ -149,9 +150,14 @@ export default function LeadsContent({
   const [activeOwner, setActiveOwnerRaw] = useTabbedCard(ownerTabs);
   const activeOwnerRow = byOwner.rows.find((r) => r.owner === activeOwner) ?? byOwner.rows[0];
   const [companyDrillPage, setCompanyDrillPage] = useState(0);
+  const [companyDrillSearch, setCompanyDrillSearchRaw] = useState("");
   const setActiveOwner = (owner: string) => {
     setActiveOwnerRaw(owner);
     setCompanyDrillPage(0); // new owner's company list — start back at page 1
+  };
+  const setCompanyDrillSearch = (v: string) => {
+    setCompanyDrillSearchRaw(v);
+    setCompanyDrillPage(0); // 2026-09-17: a new search narrows the list — start back at page 1
   };
 
   // 2026-09-10/11 — Company Analysis inside By Owner Detail ("Final
@@ -186,8 +192,15 @@ export default function LeadsContent({
   const drillTable = [...drillRows.values()]
     .map((r) => ({ ...r, adr: r.nights > 0 ? r.revenue / r.nights : null, contributionPct: drillTotal > 0 ? r.revenue / drillTotal : null }))
     .sort((a, b) => b.revenue - a.revenue);
-  const companyDrillPageCount = Math.max(1, Math.ceil(drillTable.length / COMPANY_DRILL_TOP_N));
-  const pagedDrillTable = drillTable.slice(
+  // 2026-09-17: search narrows the paginated table only — Contribution %
+  // above is computed from drillTable (the full owner+source population)
+  // before this filter runs, so it doesn't shift as the search narrows.
+  const companyDrillSearchTrimmed = companyDrillSearch.trim().toLowerCase();
+  const filteredDrillTable = companyDrillSearchTrimmed
+    ? drillTable.filter((r) => r.company.toLowerCase().includes(companyDrillSearchTrimmed))
+    : drillTable;
+  const companyDrillPageCount = Math.max(1, Math.ceil(filteredDrillTable.length / COMPANY_DRILL_TOP_N));
+  const pagedDrillTable = filteredDrillTable.slice(
     companyDrillPage * COMPANY_DRILL_TOP_N,
     companyDrillPage * COMPANY_DRILL_TOP_N + COMPANY_DRILL_TOP_N
   );
@@ -378,21 +391,26 @@ export default function LeadsContent({
                     activeName={drillSource ?? undefined}
                   />
                   <div className="mt-3 overflow-x-auto">
-                    <p className="mb-1 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
-                      {drillSource ? `${drillSource} — companies` : "All companies"}
-                      {drillSource && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSelectedBizSource(null);
-                            setCompanyDrillPage(0);
-                          }}
-                          className="ml-2 text-teal-700 hover:underline dark:text-teal-300"
-                        >
-                          clear
-                        </button>
-                      )}
-                    </p>
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      <p className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+                        {drillSource ? `${drillSource} — companies` : "All companies"}
+                        {drillSource && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedBizSource(null);
+                              setCompanyDrillPage(0);
+                            }}
+                            className="ml-2 text-teal-700 hover:underline dark:text-teal-300"
+                          >
+                            clear
+                          </button>
+                        )}
+                      </p>
+                      <div className="w-40 shrink-0">
+                        <SearchInput value={companyDrillSearch} onChange={setCompanyDrillSearch} placeholder="Search company…" />
+                      </div>
+                    </div>
                     <table className="w-full text-xs">
                       <thead>
                         <tr className="text-[10px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
@@ -404,17 +422,25 @@ export default function LeadsContent({
                         </tr>
                       </thead>
                       <tbody>
-                        {pagedDrillTable.map((r, i) => (
-                          <tr key={r.company} className="border-b border-zinc-100 last:border-0 dark:border-zinc-800">
-                            <td className="py-1.5 pr-2 text-zinc-700 dark:text-zinc-200">
-                              {companyDrillPage * COMPANY_DRILL_TOP_N + i + 1}. {r.company}
+                        {pagedDrillTable.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="py-6 text-center text-zinc-400 dark:text-zinc-500">
+                              No companies match &quot;{companyDrillSearch}&quot;.
                             </td>
-                            <td className="py-1.5 pl-2 text-right tabular-nums text-zinc-600 dark:text-zinc-400">{r.nights.toLocaleString("en-IN")}</td>
-                            <td className="py-1.5 pl-2 text-right tabular-nums text-zinc-600 dark:text-zinc-400">{r.adr !== null ? `₹${Math.round(r.adr).toLocaleString("en-IN")}` : "—"}</td>
-                            <td className="py-1.5 pl-2 text-right tabular-nums font-medium text-zinc-800 dark:text-zinc-100">{formatIndianCurrency(r.revenue)}</td>
-                            <td className="py-1.5 pl-2 text-right tabular-nums text-zinc-600 dark:text-zinc-400">{r.contributionPct !== null ? formatPercent(r.contributionPct, 0) : "—"}</td>
                           </tr>
-                        ))}
+                        ) : (
+                          pagedDrillTable.map((r, i) => (
+                            <tr key={r.company} className="border-b border-zinc-100 last:border-0 dark:border-zinc-800">
+                              <td className="py-1.5 pr-2 text-zinc-700 dark:text-zinc-200">
+                                {companyDrillPage * COMPANY_DRILL_TOP_N + i + 1}. {r.company}
+                              </td>
+                              <td className="py-1.5 pl-2 text-right tabular-nums text-zinc-600 dark:text-zinc-400">{r.nights.toLocaleString("en-IN")}</td>
+                              <td className="py-1.5 pl-2 text-right tabular-nums text-zinc-600 dark:text-zinc-400">{r.adr !== null ? `₹${Math.round(r.adr).toLocaleString("en-IN")}` : "—"}</td>
+                              <td className="py-1.5 pl-2 text-right tabular-nums font-medium text-zinc-800 dark:text-zinc-100">{formatIndianCurrency(r.revenue)}</td>
+                              <td className="py-1.5 pl-2 text-right tabular-nums text-zinc-600 dark:text-zinc-400">{r.contributionPct !== null ? formatPercent(r.contributionPct, 0) : "—"}</td>
+                            </tr>
+                          ))
+                        )}
                       </tbody>
                     </table>
                     {companyDrillPageCount > 1 && (

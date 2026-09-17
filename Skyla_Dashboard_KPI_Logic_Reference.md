@@ -980,6 +980,43 @@ data for these B2B metrics."*
      this project), so this is verified at the data/logic level, not
      eyeballed live; flagging that gap rather than claiming a screenshot
      check that didn't happen.
+- **2026-09-17 (later still) — company search added to three views**:
+  Bookings' Company Rankings, Leads' By Owner Detail → Company Analysis
+  table, and Reports' B2B Details (both its Zone A company pivot and Zone
+  B invoice ledger, one shared search box filtering both by company name —
+  Zone B's `Bills due from` column, since it has no separate "Company"
+  field of its own). New shared `components/ui/SearchInput.tsx` (client-
+  side substring match, case-insensitive); each caller does its own
+  filtering since the three have different data shapes. Aggregate figures
+  that describe the whole period — the contract donut and coverage caption
+  on Bookings, Contribution % on Leads (computed from the full owner+source
+  population before the filter runs), and the "All companies" totals row
+  on Reports — deliberately stay based on the FULL unfiltered list, not the
+  live search result; only the ranked/paginated rows narrow. Page resets to
+  1 on every search-text change, same as a tab or owner switch. Verified
+  live: searching "synergy" narrows Bookings' 203 companies to the 2
+  Synergy entities, Leads' drill table to just its Synergy rows, and
+  Reports' Zone A/B to 1 company / 131 of 2,120 bills respectively.
+- **2026-09-17 (later still) — ADR ranking given a minimum-nights floor**.
+  User flagged Company Rankings' ADR tab showing implausibly high values
+  at the top (₹16,000, ₹14,500...). Checked live: every one of those bills
+  is genuine (e.g. Phoenix Infratech's ₹16,000/night "Two Bedroom Suite"
+  at JHS, 2 real nights) — not a data error. The actual problem is
+  methodological: a company with only 1-3 total nights in the period posts
+  an "average rate" that's really just that one bill's rate, with no
+  averaging-out effect, so it can crowd out genuine high-volume, high-rate
+  accounts (Synergy: 282 nights at ~₹9,375 ADR) purely on sample-size
+  noise. 63 of 203 This-FY B2B+B2C companies (31%) have under 5 nights
+  total. Fixed by adding a `nights >= 5` floor to the ADR tab's ranking
+  filter only (`ADR_RANKING_MIN_NIGHTS` in `BookingsContent.tsx`) — Revenue/
+  Nights/Contribution % are untouched, since a low-volume company
+  legitimately belongs near the bottom of those (not excluded, since
+  they're sums, not averages — a small company's true small revenue/
+  nights/contribution isn't misleading the way its average rate is). A
+  caption on the ADR tab explains the floor. Verified live: Phoenix
+  Infratech/R K Steel/TAVASYA (all <5 nights) drop out of the top 8,
+  replaced by companies with real double/triple-digit night counts
+  (Sushee Infra, IKAN Relocation, Formula Corporate, D E Shaw, Synergy).
 - **Exotel/Reference/Existing tiles relabelled** "263 / 36 closed" →
   "263 leads · 36 closed" for clarity (item 2 — it means 263 leads from
   that source for the owner, 36 converted).

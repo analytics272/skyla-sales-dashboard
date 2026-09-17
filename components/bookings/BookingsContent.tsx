@@ -21,6 +21,7 @@ import HorizontalBarChart from "@/components/charts/HorizontalBarChart";
 import DistributionBar from "@/components/charts/DistributionBar";
 import DonutChart from "@/components/charts/DonutChart";
 import GroupedBarChart from "@/components/charts/GroupedBarChart";
+import SearchInput from "@/components/ui/SearchInput";
 import { formatIndianCurrency, formatPercent } from "@/lib/format/currency";
 import { ROOM_TYPE_COLOR, ROOM_TYPE_ORDER, CATEGORY_COLOR, CATEGORY_ORDER } from "@/lib/design/tokens";
 
@@ -94,9 +95,14 @@ export default function BookingsContent({
   const [otaTab, setOtaTab] = useTabbedCard(OTA_TABS);
   const [companyTab, setCompanyTabRaw] = useTabbedCard(COMPANY_TABS);
   const [companyPage, setCompanyPage] = useState(0);
+  const [companySearch, setCompanySearchRaw] = useState("");
   const setCompanyTab = (tab: (typeof COMPANY_TABS)[number]) => {
     setCompanyTabRaw(tab);
     setCompanyPage(0); // 2026-09-11: reset to page 1 when switching metric — each tab's own ranking starts over
+  };
+  const setCompanySearch = (v: string) => {
+    setCompanySearchRaw(v);
+    setCompanyPage(0); // 2026-09-17: a new search narrows the list — start back at page 1
   };
 
   const roomTypeLabel = (rt: string | null) => rt ?? "Unmapped";
@@ -146,10 +152,30 @@ export default function BookingsContent({
   const page = <T,>(rows: T[]) => rows.slice(companyPage * COMPANY_RANKING_TOP_N, companyPage * COMPANY_RANKING_TOP_N + COMPANY_RANKING_TOP_N);
   const numbered = (name: string, i: number) => `${companyPage * COMPANY_RANKING_TOP_N + i + 1}. ${name}`;
 
-  const b2bRevenueRanked = ranked(b2bRanking, (r) => r.roomRevenue);
-  const b2bNightsRanked = ranked(b2bRanking, (r) => r.nights);
-  const b2bAdrRanked = ranked(b2bRanking.filter((r) => r.adr !== null && r.nights > 0), (r) => r.adr ?? 0);
-  const b2bContributionRanked = ranked(b2bRanking.filter((r) => r.contributionPct !== null), (r) => r.contributionPct ?? 0);
+  // 2026-09-17: company search narrows the ranked/paginated bars only —
+  // the coverage caption, contract donut, and "(N) companies" title below
+  // still describe the FULL period population, not the live search result.
+  const companySearchTrimmed = companySearch.trim().toLowerCase();
+  const b2bRankingSearched = companySearchTrimmed
+    ? b2bRanking.filter((r) => r.company.toLowerCase().includes(companySearchTrimmed))
+    : b2bRanking;
+
+  const b2bRevenueRanked = ranked(b2bRankingSearched, (r) => r.roomRevenue);
+  const b2bNightsRanked = ranked(b2bRankingSearched, (r) => r.nights);
+  // 2026-09-17: ADR ranking needs a minimum-volume floor, or it's not
+  // actually ranking "high rate" companies — a company with just 1-2
+  // nights on a single bill can post a huge average (one real ₹16,000/
+  // night 2-night stay tops the whole list ahead of companies with
+  // hundreds of nights at ₹8-9k) purely because a tiny sample doesn't
+  // average out. Not a data error — every one of these bills is real —
+  // just a misleading ranking without a floor. 5 nights excludes ~31%
+  // of This FY's B2B+B2C companies (63 of 203, checked live) from ONLY
+  // this tab; Revenue/Nights/Contribution % are unaffected since those
+  // aren't average-based and a low-volume company legitimately belongs
+  // near the bottom of those rankings rather than being excluded.
+  const ADR_RANKING_MIN_NIGHTS = 5;
+  const b2bAdrRanked = ranked(b2bRankingSearched.filter((r) => r.adr !== null && r.nights >= ADR_RANKING_MIN_NIGHTS), (r) => r.adr ?? 0);
+  const b2bContributionRanked = ranked(b2bRankingSearched.filter((r) => r.contributionPct !== null), (r) => r.contributionPct ?? 0);
   const companyRankedByTab: Record<(typeof COMPANY_TABS)[number], typeof b2bRanking> = {
     Revenue: b2bRevenueRanked, Nights: b2bNightsRanked, ADR: b2bAdrRanked, "Contribution %": b2bContributionRanked,
   };
@@ -346,6 +372,12 @@ export default function BookingsContent({
           >
             {b2bRanking.length > 0 ? (
               <>
+                {/* 2026-09-17: filters the ranked bars/pagination only — the
+                    contract donut and coverage caption above stay scoped to
+                    the whole period, not the live search. */}
+                <div className="mb-3">
+                  <SearchInput value={companySearch} onChange={setCompanySearch} placeholder="Search company…" />
+                </div>
                 {companyTab === "Revenue" && (
                   <div className="mb-3 border-b border-zinc-100 pb-3 dark:border-zinc-800">
                     <div className="flex justify-center">
@@ -357,10 +389,23 @@ export default function BookingsContent({
                     </p>
                   </div>
                 )}
-                {companyTab === "Revenue" && <HorizontalBarChart data={b2bRevenueData} valueFormatter={(v) => formatIndianCurrency(v)} labelWidth={170} maxLabelChars={COMPANY_RANKING_LABEL_CHARS} />}
-                {companyTab === "Nights" && <HorizontalBarChart data={b2bNightsData} valueFormatter={(v) => v.toLocaleString("en-IN")} labelWidth={170} maxLabelChars={COMPANY_RANKING_LABEL_CHARS} />}
-                {companyTab === "ADR" && <HorizontalBarChart data={b2bAdrData} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} labelWidth={170} maxLabelChars={COMPANY_RANKING_LABEL_CHARS} />}
-                {companyTab === "Contribution %" && <HorizontalBarChart data={b2bContributionData} valueFormatter={(v) => `${v.toFixed(0)}%`} labelWidth={170} maxLabelChars={COMPANY_RANKING_LABEL_CHARS} />}
+                {companyTab === "ADR" && (
+                  <p className="mb-3 text-xs text-zinc-400 dark:text-zinc-500">
+                    Only companies with {ADR_RANKING_MIN_NIGHTS}+ nights this period are ranked here — a company with just 1-2 nights can post a misleadingly high average rate that doesn&apos;t reflect an ongoing relationship.
+                  </p>
+                )}
+                {companyRankedByTab[companyTab].length === 0 ? (
+                  <p className="py-8 text-center text-sm text-zinc-400 dark:text-zinc-500">
+                    No companies match &quot;{companySearch}&quot;.
+                  </p>
+                ) : (
+                  <>
+                    {companyTab === "Revenue" && <HorizontalBarChart data={b2bRevenueData} valueFormatter={(v) => formatIndianCurrency(v)} labelWidth={170} maxLabelChars={COMPANY_RANKING_LABEL_CHARS} />}
+                    {companyTab === "Nights" && <HorizontalBarChart data={b2bNightsData} valueFormatter={(v) => v.toLocaleString("en-IN")} labelWidth={170} maxLabelChars={COMPANY_RANKING_LABEL_CHARS} />}
+                    {companyTab === "ADR" && <HorizontalBarChart data={b2bAdrData} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} labelWidth={170} maxLabelChars={COMPANY_RANKING_LABEL_CHARS} />}
+                    {companyTab === "Contribution %" && <HorizontalBarChart data={b2bContributionData} valueFormatter={(v) => `${v.toFixed(0)}%`} labelWidth={170} maxLabelChars={COMPANY_RANKING_LABEL_CHARS} />}
+                  </>
+                )}
                 {/* 2026-09-11: pagination — first page is top 8, Next/Prev
                     step through the rest of this tab's ranked list 8 at a
                     time, numbering staying global (page 2 starts at "9."). */}
