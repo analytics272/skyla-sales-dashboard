@@ -1,7 +1,10 @@
 // PRD §3.4 / Reference Data §4 — static (Room, Property) -> Room Type lookup.
 // 260 unique pairs, ported verbatim from the reference doc (2 exact-duplicate
-// source rows already removed there). LP included for historical joins only
-// (§3.3 — LP itself excluded from current/future property filters elsewhere).
+// source rows already removed there). LP included for its own separate
+// room-type view (LP Addendum §5 — LP is single-room-type, queried from
+// `sales_booking_lp_monthly_roomtype`, not joined against this table's
+// per-night grain) — LP's property-filter status (propertyReference.ts) is
+// unrelated to whether this static lookup carries LP rows.
 //
 // 2026-09-10 — user direction: KDP/HTC/JHS (the Skyla brand) "Premier King
 // Supreme" / "Premier Twin Supreme" / "Premier Room" rooms are their own

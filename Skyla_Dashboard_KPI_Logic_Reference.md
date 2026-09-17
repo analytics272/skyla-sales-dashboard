@@ -768,6 +768,38 @@ data for these B2B metrics."*
   ever. Also excluded from Leads "By Property" (`lead_tracker` has its own
   361 LP rows). `lpMonthly.ts` and the `includeLp` branches are left in
   place, dormant — a status flip restores historical LP.
+  - **2026-09-17 — REVERTED, per user clarification.** The original ask
+    behind this change was narrower than what got implemented: "in This
+    FY, remove LP wherever LP value isn't there" — i.e. don't show LP as
+    a broken/zeroed row for a period it genuinely has no data for, not
+    "remove LP from the dashboard entirely." Checked before reverting:
+    every LP merge point (`overview.ts`'s `if (lp.nights > 0 ||
+    lp.revenue > 0)`, `trends.ts`, `brandCategory.ts`'s `if (includeLp &&
+    lpSoldNights > 0)`) already only folds LP in when it has non-zero
+    data for the queried range — so "silently absent for This FY, present
+    for FYs it has real data" was already the built behavior, with no
+    global status flag needed at all. Flipped `propertyReference.ts`'s LP
+    entry back to `"active"`, which restores the full integration exactly
+    as `Skyla_Sales_Dashboard_PRD_LP_Addendum.md` §5 originally designed
+    it (Overview/Trends/Brand & Category/property filter; correctly
+    silent — by design, not a bug — in Leads/B2B Contracts/Reviews/
+    per-OTA-site breakdowns, since those are separate source tables that
+    never had LP rows in scope for this backfill; own dedicated view for
+    room-type detail). Also removed the hardcoded `Property NOT IN ('LP',
+    'Lotus Pond')` this change had added to `getLeadsByProperty`
+    (`leads.ts`) — that one wasn't "silently absent," it was actively
+    filtering out real data: `lead_tracker` genuinely has 361 LP rows
+    (noted above), which will now correctly appear. Verified live:
+    `getLpOverviewTotals` returns all-zero for FY 26-27 (confirming it'll
+    stay silent there) and real, non-zero figures for FY 25-26 (₹1.53 Cr
+    revenue, 3,845 nights) — plus the property filter dropdown now lists
+    6 checkboxes (KDP/HTC/JHS/BH4/LP/GB) instead of 5. Two related
+    comments (`otaCommission.ts`, `roomTypeMapping.ts`) that had gone
+    stale during the "removed" period, describing LP's per-OTA-site and
+    room-type exclusions as tied to its property status rather than to
+    genuine data-shape limits in those specific tables, were corrected —
+    the underlying exclusions themselves were already correct and
+    unrelated to LP's active/removed status, so no behavior changed there.
 - **Leads "By Owner Detail" extended with Company Analysis** — a Business
   Source donut (click to drill) + Company | Nights | ADR | Revenue |
   Contribution-%-within-source table, for the selected owner. Originally

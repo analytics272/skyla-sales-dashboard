@@ -5,7 +5,11 @@
 // User-confirmed updates (2026-08-19), superseding the PRD's original blanks:
 //   - Booking.com / BH4: 15% (was blank/0%)
 //   - Travex: 20%, flat across all properties (was blank/0%)
-//   - LP: not in this table — property permanently removed (§3.3), no commission logic needed
+//   - LP: not in this table — the LP Addendum (§5) explicitly excludes LP
+//     from any per-OTA-site breakdown (its backfill only has an aggregate
+//     B2B/B2C/OTA split, no individual OTA names), so there's no
+//     commission rate to look up for it regardless of LP's own active/
+//     removed property status (last flipped 2026-09-17 — see propertyReference.ts)
 // Still intentionally blank/0% (unresolved, per PRD §7 caveat 1): generic "OTA" label.
 
 export interface OtaCommissionRule {
