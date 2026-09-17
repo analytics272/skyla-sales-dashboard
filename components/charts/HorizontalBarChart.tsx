@@ -4,7 +4,7 @@
 // long or numerous to read flat under a vertical bar (company names, lead
 // sources, room formats) — the label reads left-to-right at full width
 // instead of being truncated or rotated.
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis, Cell, LabelList } from "recharts";
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis, Cell } from "recharts";
 import { CHART_GRIDLINE, CHART_TEXT } from "@/lib/design/tokens";
 import type { BarDatum } from "./SingleMetricBarChart";
 
@@ -13,14 +13,40 @@ import type { BarDatum } from "./SingleMetricBarChart";
 // room type that's one line and fine, but a long legal company name (often
 // with a "(Subsidiary of ...)" or "(SEZ)" suffix) wraps to 3-4 lines and
 // overflows into the row above/below it, since each row only has a fixed
-// slice of the chart's height. Truncating with an ellipsis keeps every row
-// to one line; the full name is still available in the Tooltip on hover.
+// slice of the chart's height.
+//
+// First attempt (same day) truncated the whole "N. Company Name" string
+// to a flat character count — but text-anchor="end" measures actual glyph
+// width, not character count, so a wide-lettered name (all-caps "SYNERGY
+// APARTMENT...") could still overflow the available width and get clipped
+// from its LEFT edge — which is exactly where the "N." rank prefix lives.
+// That's the bug the user screenshotted: the number silently disappearing
+// on some rows while others kept theirs.
+//
+// Fixed by never truncating the number at all: it's split onto its own
+// line via a separate <tspan>, so it can never be affected by how the
+// company name is shortened. The company name gets its own line below,
+// truncated by character count same as before — the full name is still
+// available in the Tooltip on hover regardless.
 function TruncatedTick({ x, y, payload, maxChars }: { x?: number; y?: number; payload?: { value?: string }; maxChars: number }) {
-  const v = payload?.value ?? "";
-  const truncated = v.length > maxChars ? `${v.slice(0, maxChars - 1)}…` : v;
+  const raw = payload?.value ?? "";
+  const match = raw.match(/^(\d+\.)\s*(.*)$/);
+  const rest = match ? match[2] : raw;
+  const truncatedRest = rest.length > maxChars ? `${rest.slice(0, maxChars - 1)}…` : rest;
+
+  if (!match) {
+    // No "N. " rank prefix present (a caller passed maxLabelChars without
+    // numbering) — fall back to a single truncated line.
+    return (
+      <text x={x} y={y} dy={4} textAnchor="end" fontSize={11} fill={CHART_TEXT.secondary}>
+        {truncatedRest}
+      </text>
+    );
+  }
   return (
-    <text x={x} y={y} dy={4} textAnchor="end" fontSize={11} fill={CHART_TEXT.secondary}>
-      {truncated}
+    <text x={x} y={y} textAnchor="end" fill={CHART_TEXT.secondary}>
+      <tspan x={x} dy={-3} fontSize={11} fontWeight={600}>{match[1]}</tspan>
+      <tspan x={x} dy={14} fontSize={11}>{truncatedRest}</tspan>
     </text>
   );
 }
@@ -39,7 +65,9 @@ export default function HorizontalBarChart({
   /** Truncates long Y-axis labels to this many characters (+ "…") instead of letting Recharts wrap them across lines that overflow into neighboring rows. Full name still shows in the Tooltip. */
   maxLabelChars?: number;
 }) {
-  const resolvedHeight = height ?? Math.max(140, data.length * 32);
+  // A numbered two-line tick (rank number + company name, see TruncatedTick
+  // above) needs more vertical room per row than a plain single-line tick.
+  const resolvedHeight = height ?? Math.max(140, data.length * (maxLabelChars ? 56 : 32));
   return (
     <ResponsiveContainer width="100%" height={resolvedHeight}>
       <BarChart data={data} layout="vertical" margin={{ top: 4, right: 24, left: 4, bottom: 4 }} barCategoryGap="24%">
@@ -77,13 +105,6 @@ export default function HorizontalBarChart({
           {data.map((d) => (
             <Cell key={d.name} fill={d.color} />
           ))}
-          {/* 2026-09-09: optional secondary figure (e.g. ADR next to a
-              revenue bar) — only rendered when at least one row sets it,
-              so every existing caller (which never sets rightLabel) is
-              unaffected. */}
-          {data.some((d) => d.rightLabel) && (
-            <LabelList dataKey="rightLabel" position="right" style={{ fontSize: 11, fill: CHART_TEXT.secondary }} />
-          )}
         </Bar>
       </BarChart>
     </ResponsiveContainer>

@@ -1,4 +1,4 @@
-// PRD §6.9 — B2B Contracts / Company Rankings (Bookings tab).
+// PRD §6.9 — Company Contracts / Company Rankings (Bookings tab).
 //
 // 2026-09-11 — REWRITTEN onto `sales_company_bills` (the new PMS
 // company-billing table — see ownerCompanyAnalysis.ts for the full
@@ -18,10 +18,15 @@
 // live: 370/412 (90%) of April 2026's sales_company_bills rows found a
 // Contract_Status via this join.
 //
-// Classification (this section is scoped to B2B specifically, unlike the
-// Owner Detail card which shows every category) reuses the existing
-// `bookingCategorySqlExpr` on `BusinessSource` — same classifier as
-// everywhere else on the dashboard, not duplicated.
+// 2026-09-17 — BROADENED from B2B-only to B2B + B2C, per explicit user
+// direction ("Company Rankings = all companies (B2B + B2C), same
+// underlying company population as By Owner Detail"). OTA stays excluded
+// deliberately — this dashboard already has a dedicated OTA Breakdown
+// card, and Contract_Status (the whole point of the donut/colouring on
+// this card's Revenue tab) is a B2B/B2C client-relationship concept, not
+// an OTA-channel one. Reuses the existing `bookingCategorySqlExpr` on
+// `BusinessSource` — same classifier as everywhere else on the
+// dashboard, not duplicated.
 //
 // getCorporateAccountRetention is UNTOUCHED and stays b2b_bills-native —
 // "which companies had a Contract last FY and still appear this FY" is
@@ -35,11 +40,11 @@ import { bookingCategorySqlExpr } from "@/lib/reference/bookingSourceMap";
 
 export interface B2bContractRanking {
   company: string; // sales_company_bills.CompanyName
-  contractStatus: string | null; // b2b_bills.Contract_Status, joined by (Property, FolioNo) — "Contract" | "No Contract" | null (no match found)
-  roomRevenue: number; // SUM(RoomRevenueExclTax) for this company, B2B-classified BusinessSource only — PMS, tax-exclusive
+  contractStatus: string | null; // b2b_bills.Contract_Status, joined by (Property, FolioNo) — "Contract" | "No Contract" | null (no match found — expected for every B2C row, and any B2B row not yet in b2b_bills)
+  roomRevenue: number; // SUM(RoomRevenueExclTax) for this company, B2B+B2C-classified BusinessSource only (OTA excluded) — PMS, tax-exclusive
   nights: number; // SUM(Nights)
   adr: number | null; // roomRevenue / nights — a weighted average across the company's own bills
-  /** Share of TOTAL company-wide sales revenue (B2B+B2C+OTA combined, from sales_booking) this one company's B2B revenue represents — not just its share of the B2B channel. */
+  /** Share of TOTAL company-wide sales revenue (B2B+B2C+OTA combined, from sales_booking) this one company's revenue represents — not just its share of the B2B+B2C channels. */
   contributionPct: number | null;
 }
 
@@ -76,7 +81,7 @@ export async function getB2bContractRanking(properties: string[], filter: Period
       LEFT JOIN dedup_bills b ON c.Property = b.Property AND c.FolioNo = b.Folio_No
       WHERE c.Property IN UNNEST(@properties)
         AND c.BillDate BETWEEN @start AND @end
-        AND ${bookingCategorySqlExpr("c.BusinessSource")} = 'B2B'
+        AND ${bookingCategorySqlExpr("c.BusinessSource")} IN ('B2B', 'B2C')
       GROUP BY company
       HAVING roomRevenue > 0
       ORDER BY roomRevenue DESC
@@ -86,7 +91,7 @@ export async function getB2bContractRanking(properties: string[], filter: Period
 
   // Each company's share of TOTAL company-wide sales revenue — B2B + B2C +
   // OTA combined (from sales_booking, the PMS source), not just this
-  // company's slice of the B2B channel — per user direction 2026-08-24.
+  // company's slice of the B2B+B2C channels — per user direction 2026-08-24.
   return rows.map((r) => ({
     company: r.company,
     contractStatus: r.contractStatus,

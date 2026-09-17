@@ -892,6 +892,62 @@ data for these B2B metrics."*
     they correctly do NOT appear in this card — it's B2B-only by design.
     They do appear in the Leads "By Owner Detail" → Company Analysis
     table above, which shows all categories.
+- **2026-09-17 (later, same day) — Company Rankings: broadened to B2B +
+  B2C, correction to the truncation fix above, ADR label dropped, and
+  card renamed**. Four separate pieces of follow-up user feedback on the
+  same card:
+  1. **Scope broadened from B2B-only to B2B + B2C** (OTA still excluded
+     — this dashboard already has a dedicated OTA Breakdown card, and
+     Contract_Status is a B2B/B2C client-relationship concept, not an
+     OTA-channel one). `getB2bContractRanking`'s WHERE clause changed
+     from `= 'B2B'` to `IN ('B2B', 'B2C')`. The coverage caption's
+     denominator changed to match (B2B + B2C combined from Category
+     Mix, was B2B alone). Verified live: This Month (September) went
+     from 49 companies (B2B-only) to **56** (+7 B2C companies), "Page 1
+     of 7" (56 ÷ 8).
+     - This also directly explains "Page 1 of 9" the user flagged as
+       confusing right after this shipped on a wider period filter —
+       **not a bug**: the page COUNT is `ceil(company count ÷ 8)`, and
+       adding B2C companies to the population increases that count.
+       Each individual page still shows at most 8 rows either way.
+  2. **Section heading renamed** "B2B Contracts" → "Company Contracts"
+     (the inner TabbedCard was already titled "Company Rankings"), and
+     the "hasn't been tagged..." caption reworded from "B2B revenue" to
+     "B2B + B2C revenue" to match the broadened scope. The empty-state
+     copy dropped its "No B2B billing data..." B2B-specific wording too.
+  3. **ADR right-label dropped from the Revenue tab's bars** — ADR
+     already has its own dedicated tab, no need to duplicate it next to
+     the Revenue bars. Since no other `HorizontalBarChart` caller
+     dashboard-wide ever used the `rightLabel` prop this fed, it was
+     dead weight afterward — removed entirely from `BarDatum`,
+     `HorizontalBarChart`, and its now-unused `LabelList` import/Recharts
+     dependency, rather than left as unused code.
+  4. **Correction to the same-day truncation fix above**: that fix
+     truncated the WHOLE `"N. Company Name"` string to a flat character
+     count, but `text-anchor="end"` measures actual rendered glyph
+     width, not character count — an all-caps, wide-lettered name could
+     still overflow the available width and get clipped from its LEFT
+     edge, which is exactly where the "N." rank prefix lives. That's the
+     bug the user screenshotted next: the number silently disappearing
+     on some rows (both were `"SYNERGY APARTMENT SERVICES..."`, an
+     unusually wide string) while others kept theirs. Fixed by never
+     truncating the number at all — it's rendered on its own `<tspan>`
+     line, structurally immune to how the company name is shortened; the
+     company name gets a second line below it (`COMPANY_RANKING_LABEL_CHARS`
+     dropped 26 → 24, since it no longer needs to share its budget with
+     the number, to keep the name line itself comfortably inside
+     `labelWidth`). Row height bumped accordingly (32px → 56px per row)
+     to fit two lines. Verified the number-extraction logic directly
+     against the real dataset's widest names (`"2. SYNERGY APARTMENT
+     SERVICES PRIVATE LIMITED (Subsidiary of SilverDoor Americas LLC)"`,
+     etc.) — the rank number comes out intact in every case, by
+     construction, since it's no longer part of the truncated string at
+     all. Live pixel-level visual confirmation wasn't possible this
+     round (Browser pane stayed backgrounded all session — the same
+     Recharts-doesn't-render-while-hidden limitation noted earlier in
+     this project), so this is verified at the data/logic level, not
+     eyeballed live; flagging that gap rather than claiming a screenshot
+     check that didn't happen.
 - **Exotel/Reference/Existing tiles relabelled** "263 / 36 closed" →
   "263 leads · 36 closed" for clarity (item 2 — it means 263 leads from
   that source for the owner, 36 converted).
