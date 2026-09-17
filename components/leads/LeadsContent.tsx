@@ -21,6 +21,10 @@ import { LOST_REASON_DESCRIPTIONS } from "@/lib/reference/lostLeadReasons";
 const RANKING_COLOR = "var(--series-1)";
 const LOST_REASON_PALETTE = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--series-4)", "var(--series-5)", "var(--chart-baseline)"];
 const HEATMAP_TOP_SOURCES = 6;
+// Same 8-per-page + global numbering pattern as Bookings' Company Rankings
+// (lib/bigquery/queries/b2bContracts.ts / BookingsContent.tsx) — applied
+// here per the same "keep numbering, keep pagination" direction.
+const COMPANY_DRILL_TOP_N = 8;
 
 // 2026-09-10: lead_tracker.Format is free text ("Premier", "Executive",
 // "Studio", "1BHK"...) — normalise to the dashboard's room-type vocabulary
@@ -142,8 +146,13 @@ export default function LeadsContent({
   const ownerRevenueData: BarDatum[] = byOwner.rows.map((r) => ({ name: r.owner, value: r.revenue, color: RANKING_COLOR }));
 
   const ownerTabs = byOwner.rows.map((r) => r.owner);
-  const [activeOwner, setActiveOwner] = useTabbedCard(ownerTabs);
+  const [activeOwner, setActiveOwnerRaw] = useTabbedCard(ownerTabs);
   const activeOwnerRow = byOwner.rows.find((r) => r.owner === activeOwner) ?? byOwner.rows[0];
+  const [companyDrillPage, setCompanyDrillPage] = useState(0);
+  const setActiveOwner = (owner: string) => {
+    setActiveOwnerRaw(owner);
+    setCompanyDrillPage(0); // new owner's company list — start back at page 1
+  };
 
   // 2026-09-10/11 — Company Analysis inside By Owner Detail ("Final
   // Dashboard Changes" item 6). Sourced from company_revenue_summary
@@ -177,6 +186,11 @@ export default function LeadsContent({
   const drillTable = [...drillRows.values()]
     .map((r) => ({ ...r, adr: r.nights > 0 ? r.revenue / r.nights : null, contributionPct: drillTotal > 0 ? r.revenue / drillTotal : null }))
     .sort((a, b) => b.revenue - a.revenue);
+  const companyDrillPageCount = Math.max(1, Math.ceil(drillTable.length / COMPANY_DRILL_TOP_N));
+  const pagedDrillTable = drillTable.slice(
+    companyDrillPage * COMPANY_DRILL_TOP_N,
+    companyDrillPage * COMPANY_DRILL_TOP_N + COMPANY_DRILL_TOP_N
+  );
 
   const heatmapOwners = byOwner.rows.map((r) => r.owner);
   const topSources = [...bySource].sort((a, b) => b.count - a.count).slice(0, HEATMAP_TOP_SOURCES).map((s) => s.key);
@@ -357,14 +371,26 @@ export default function LeadsContent({
                     data={bizSourceTotals}
                     valueFormatter={(v) => formatIndianCurrency(v)}
                     height={180}
-                    onSliceClick={(name) => setSelectedBizSource((cur) => (cur === name ? null : name))}
+                    onSliceClick={(name) => {
+                      setSelectedBizSource((cur) => (cur === name ? null : name));
+                      setCompanyDrillPage(0); // filtering to a source changes the list — start back at page 1
+                    }}
                     activeName={drillSource ?? undefined}
                   />
                   <div className="mt-3 overflow-x-auto">
                     <p className="mb-1 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
                       {drillSource ? `${drillSource} — companies` : "All companies"}
                       {drillSource && (
-                        <button type="button" onClick={() => setSelectedBizSource(null)} className="ml-2 text-teal-700 hover:underline dark:text-teal-300">clear</button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedBizSource(null);
+                            setCompanyDrillPage(0);
+                          }}
+                          className="ml-2 text-teal-700 hover:underline dark:text-teal-300"
+                        >
+                          clear
+                        </button>
                       )}
                     </p>
                     <table className="w-full text-xs">
@@ -378,9 +404,11 @@ export default function LeadsContent({
                         </tr>
                       </thead>
                       <tbody>
-                        {drillTable.map((r) => (
+                        {pagedDrillTable.map((r, i) => (
                           <tr key={r.company} className="border-b border-zinc-100 last:border-0 dark:border-zinc-800">
-                            <td className="py-1.5 pr-2 text-zinc-700 dark:text-zinc-200">{r.company}</td>
+                            <td className="py-1.5 pr-2 text-zinc-700 dark:text-zinc-200">
+                              {companyDrillPage * COMPANY_DRILL_TOP_N + i + 1}. {r.company}
+                            </td>
                             <td className="py-1.5 pl-2 text-right tabular-nums text-zinc-600 dark:text-zinc-400">{r.nights.toLocaleString("en-IN")}</td>
                             <td className="py-1.5 pl-2 text-right tabular-nums text-zinc-600 dark:text-zinc-400">{r.adr !== null ? `₹${Math.round(r.adr).toLocaleString("en-IN")}` : "—"}</td>
                             <td className="py-1.5 pl-2 text-right tabular-nums font-medium text-zinc-800 dark:text-zinc-100">{formatIndianCurrency(r.revenue)}</td>
@@ -389,6 +417,29 @@ export default function LeadsContent({
                         ))}
                       </tbody>
                     </table>
+                    {companyDrillPageCount > 1 && (
+                      <div className="mt-3 flex items-center justify-center gap-3 text-xs">
+                        <button
+                          type="button"
+                          onClick={() => setCompanyDrillPage((p) => Math.max(0, p - 1))}
+                          disabled={companyDrillPage === 0}
+                          className="rounded-full border border-zinc-200 px-2.5 py-1 font-medium text-zinc-600 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300"
+                        >
+                          ← Prev
+                        </button>
+                        <span className="text-zinc-400 dark:text-zinc-500">
+                          Page {companyDrillPage + 1} of {companyDrillPageCount}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setCompanyDrillPage((p) => Math.min(companyDrillPageCount - 1, p + 1))}
+                          disabled={companyDrillPage >= companyDrillPageCount - 1}
+                          className="rounded-full border border-zinc-200 px-2.5 py-1 font-medium text-zinc-600 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300"
+                        >
+                          Next →
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </>
               )}
