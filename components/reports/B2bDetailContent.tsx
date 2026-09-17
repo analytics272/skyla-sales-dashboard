@@ -3,6 +3,7 @@
 import { Fragment, useMemo, useState } from "react";
 import type { B2bDetailReport } from "@/lib/bigquery/queries/reports";
 import Card from "@/components/ui/Card";
+import SearchInput from "@/components/ui/SearchInput";
 import { formatIndianCurrency } from "@/lib/format/currency";
 
 const rupee = (v: number | null) => (v !== null ? `₹${Math.round(v).toLocaleString("en-IN")}` : "—");
@@ -12,6 +13,13 @@ type SortKey = "totalRevenue" | "totalNights" | "totalAdr";
 export default function B2bDetailContent({ report }: { report: B2bDetailReport }) {
   const [sortKey, setSortKey] = useState<SortKey>("totalRevenue");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  // 2026-09-17: one search box filters both zones by company name — Zone A's
+  // own "Company" column, and Zone B's "Bills due from" (the closest thing
+  // it has to a company field, an invoice ledger keyed by bill, not company).
+  // "All companies" summary row totals below stay computed from the full,
+  // unfiltered report.zoneA, same reasoning as the Bookings/Leads searches.
+  const [companySearch, setCompanySearch] = useState("");
+  const companySearchTrimmed = companySearch.trim().toLowerCase();
 
   const monthLabels = useMemo(() => {
     const seen = new Map<string, string>();
@@ -29,6 +37,13 @@ export default function B2bDetailContent({ report }: { report: B2bDetailReport }
     return rows;
   }, [report.zoneA, sortKey, sortDir]);
 
+  const filteredZoneA = companySearchTrimmed
+    ? sortedZoneA.filter((r) => r.company.toLowerCase().includes(companySearchTrimmed))
+    : sortedZoneA;
+  const filteredZoneB = companySearchTrimmed
+    ? report.zoneB.filter((r) => (r.billsDueFrom ?? "").toLowerCase().includes(companySearchTrimmed))
+    : report.zoneB;
+
   function onSort(key: SortKey) {
     if (key === sortKey) setSortDir((d) => (d === "desc" ? "asc" : "desc"));
     else {
@@ -44,6 +59,10 @@ export default function B2bDetailContent({ report }: { report: B2bDetailReport }
 
   return (
     <div className="space-y-4">
+      <div className="max-w-xs">
+        <SearchInput value={companySearch} onChange={setCompanySearch} placeholder="Search company…" />
+      </div>
+
       <Card
         title={`FY 26-27 B2B Details — Company × Month (${report.zoneA.length} companies)`}
         subtitle="Click a total column to sort. Source: b2b_bills, live — never a cached sheet pivot cell."
@@ -132,7 +151,14 @@ export default function B2bDetailContent({ report }: { report: B2bDetailReport }
                     </Fragment>
                   ))}
                 </tr>
-                {sortedZoneA.map((row) => {
+                {filteredZoneA.length === 0 && (
+                  <tr>
+                    <td colSpan={3 + monthLabels.length * 3} className="py-6 text-center text-zinc-400 dark:text-zinc-500">
+                      No companies match &quot;{companySearch}&quot;.
+                    </td>
+                  </tr>
+                )}
+                {filteredZoneA.map((row) => {
                   const byMonthMap = new Map(row.byMonth.map((m) => [m.monthKey, m]));
                   return (
                     <tr key={row.company} className="odd:bg-white even:bg-zinc-50 dark:odd:bg-zinc-950 dark:even:bg-zinc-900">
@@ -172,7 +198,14 @@ export default function B2bDetailContent({ report }: { report: B2bDetailReport }
         </div>
       </Card>
 
-      <Card title={`Invoice Detail (${report.zoneB.length} bills)`} subtitle="Sorted by Property, then Check In. Source: b2b_bills, live.">
+      <Card
+        title={
+          companySearchTrimmed
+            ? `Invoice Detail (${filteredZoneB.length} of ${report.zoneB.length} bills)`
+            : `Invoice Detail (${report.zoneB.length} bills)`
+        }
+        subtitle="Sorted by Property, then Check In. Source: b2b_bills, live."
+      >
         <div className="max-h-[480px] overflow-auto">
             <table className="w-full border-separate border-spacing-0 text-xs">
               <thead>
@@ -185,7 +218,14 @@ export default function B2bDetailContent({ report }: { report: B2bDetailReport }
                 </tr>
               </thead>
               <tbody>
-                {report.zoneB.map((r, i) => (
+                {filteredZoneB.length === 0 && (
+                  <tr>
+                    <td colSpan={11} className="py-6 text-center text-zinc-400 dark:text-zinc-500">
+                      No bills match &quot;{companySearch}&quot;.
+                    </td>
+                  </tr>
+                )}
+                {filteredZoneB.map((r, i) => (
                   <tr key={i} className="odd:bg-white even:bg-zinc-50 dark:odd:bg-zinc-950 dark:even:bg-zinc-900">
                     <td className="whitespace-nowrap border-b border-zinc-100 px-2 py-1 text-zinc-700 dark:border-zinc-800 dark:text-zinc-200">{r.property}</td>
                     <td className="whitespace-nowrap border-b border-zinc-100 px-2 py-1 text-zinc-600 dark:border-zinc-800 dark:text-zinc-400">{r.guestName ?? "—"}</td>
