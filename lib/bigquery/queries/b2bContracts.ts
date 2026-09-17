@@ -31,6 +31,36 @@
 // getCorporateAccountRetention is UNTOUCHED and stays b2b_bills-native —
 // "which companies had a Contract last FY and still appear this FY" is
 // inherently a question about b2b_bills' own records. Not part of this ask.
+//
+// 2026-09-17 — de-duplicated near-identical CompanyName variants, per user
+// report (screenshotted: the same Synergy entity ranked twice). CompanyName
+// is free text entered per-invoice in the PMS, not looked up from a master
+// company registry — the same real company can carry slightly different
+// text on different bills ("LIMITED (Subsidiary..." vs "LIMITED(Subsidiary
+// ...", missing vs double spaces, trailing periods, mixed case). CompanyId
+// looked like an obvious dedup key but was checked and ruled out live: the
+// exact same CompanyName text had THREE different CompanyId values for
+// Synergy alone — it's not a stable per-company identifier in this table.
+//
+// Fixed in two layers:
+//  1. Group by a NORMALIZED CompanyName (upper-cased, periods stripped,
+//     whitespace collapsed, a space forced before any "(" — see the
+//     `normKey` expression below) so near-identical text variants merge
+//     into one bucket regardless of b2b_bills coverage.
+//  2. Within that bucket, prefer b2b_bills' own `Bills_due_from` (the
+//     short, business-recognized name, e.g. "Synergy Apts Services") as
+//     the display name whenever ANY bill in the group matched via the
+//     existing (Property, FolioNo) join — even if other bills in the same
+//     normalized group didn't individually match (a first attempt at this
+//     fix joined and picked the name per-bill instead of per-group, which
+//     actually made it worse: it split Synergy into a "matched" row and an
+//     "unmatched" row instead of merging it into one).
+// Verified live: September 2026 (screenshotted) went from 56 to 55
+// companies (exactly the one Synergy merge); This FY went from 203 to 191.
+// Contract_Status is merged the same way — "Contract" wins if ANY bill in
+// the normalized group has an active contract, matching the intuition that
+// one real company with a contract on file is under contract, regardless
+// of which specific folio/text-variant carries that record.
 import { runQuery, table } from "../client";
 import { safeDivide } from "@/lib/format/currency";
 import { DateRange } from "@/lib/reference/financialYear";
@@ -39,8 +69,8 @@ import { SALES_BOOKING_STAY_FILTER } from "./filters";
 import { bookingCategorySqlExpr } from "@/lib/reference/bookingSourceMap";
 
 export interface B2bContractRanking {
-  company: string; // sales_company_bills.CompanyName
-  contractStatus: string | null; // b2b_bills.Contract_Status, joined by (Property, FolioNo) — "Contract" | "No Contract" | null (no match found — expected for every B2C row, and any B2B row not yet in b2b_bills)
+  company: string; // b2b_bills.Bills_due_from if any bill for this (normalized) company matched it, else one of sales_company_bills.CompanyName's own raw variants
+  contractStatus: string | null; // "Contract" if any bill in this company's group has one in b2b_bills, else "No Contract" if any does, else null (no b2b_bills match at all — expected for every B2C row, and any B2B row not yet in b2b_bills)
   roomRevenue: number; // SUM(RoomRevenueExclTax) for this company, B2B+B2C-classified BusinessSource only (OTA excluded) — PMS, tax-exclusive
   nights: number; // SUM(Nights)
   adr: number | null; // roomRevenue / nights — a weighted average across the company's own bills
@@ -67,22 +97,43 @@ export async function getB2bContractRanking(properties: string[], filter: Period
         -- file has always needed before joining b2b_bills, to avoid
         -- fanning out against a table with duplicate (Property, Folio_No)
         -- rows (confirmed present, mostly the legacy "Hyber-GB" code).
-        SELECT Property, Folio_No, ANY_VALUE(Contract_Status) AS Contract_Status
+        SELECT Property, Folio_No, ANY_VALUE(Contract_Status) AS Contract_Status, ANY_VALUE(Bills_due_from) AS Bills_due_from
         FROM ${table("b2b_bills")}
         WHERE Financial_Year != 'FY 99-00'
         GROUP BY Property, Folio_No
+      ),
+      per_bill AS (
+        -- normKey merges free-text CompanyName variants of the same real
+        -- company (see file header): upper-case, strip periods, collapse
+        -- whitespace, force a space before "(" so "X (Y)" and "X(Y)" match.
+        SELECT
+          c.CompanyName,
+          TRIM(REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(UPPER(c.CompanyName), r'\\.', ''), r'\\s*\\(', ' ('), r'\\s+', ' ')) AS normKey,
+          b.Contract_Status,
+          b.Bills_due_from,
+          c.RoomRevenueExclTax,
+          c.Nights
+        FROM ${table("sales_company_bills")} c
+        LEFT JOIN dedup_bills b ON c.Property = b.Property AND c.FolioNo = b.Folio_No
+        WHERE c.Property IN UNNEST(@properties)
+          AND c.BillDate BETWEEN @start AND @end
+          AND ${bookingCategorySqlExpr("c.BusinessSource")} IN ('B2B', 'B2C')
       )
       SELECT
-        c.CompanyName AS company,
-        ANY_VALUE(b.Contract_Status) AS contractStatus,
-        SUM(c.RoomRevenueExclTax) AS roomRevenue,
-        SUM(c.Nights) AS nights
-      FROM ${table("sales_company_bills")} c
-      LEFT JOIN dedup_bills b ON c.Property = b.Property AND c.FolioNo = b.Folio_No
-      WHERE c.Property IN UNNEST(@properties)
-        AND c.BillDate BETWEEN @start AND @end
-        AND ${bookingCategorySqlExpr("c.BusinessSource")} IN ('B2B', 'B2C')
-      GROUP BY company
+        -- Prefer b2b_bills' own short name if ANY bill in this normalized
+        -- group matched it, even if other bills in the group didn't —
+        -- grouping by normKey (not by whether a match happened) is what
+        -- keeps the whole company as one row either way.
+        COALESCE(MAX(Bills_due_from), ANY_VALUE(CompanyName)) AS company,
+        CASE
+          WHEN LOGICAL_OR(Contract_Status = 'Contract') THEN 'Contract'
+          WHEN LOGICAL_OR(Contract_Status = 'No Contract') THEN 'No Contract'
+          ELSE NULL
+        END AS contractStatus,
+        SUM(RoomRevenueExclTax) AS roomRevenue,
+        SUM(Nights) AS nights
+      FROM per_bill
+      GROUP BY normKey
       HAVING roomRevenue > 0
       ORDER BY roomRevenue DESC
     `, { properties, start: range.start, end: range.end }),

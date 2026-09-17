@@ -1017,6 +1017,53 @@ data for these B2B metrics."*
   Infratech/R K Steel/TAVASYA (all <5 nights) drop out of the top 8,
   replaced by companies with real double/triple-digit night counts
   (Sushee Infra, IKAN Relocation, Formula Corporate, D E Shaw, Synergy).
+- **2026-09-17 (later still) — de-duplicated near-identical CompanyName
+  variants in Company Rankings**. User screenshotted the same Synergy
+  entity ranked twice (rows 2 and 8). Root cause: `sales_company_bills`'s
+  `CompanyName` is free text entered per-invoice, not looked up from a
+  master registry, so the same real company can carry slightly different
+  text across bills — confirmed three concrete patterns live: a missing
+  space before "(" (`"...LIMITED(Subsidiary..."` vs `"...LIMITED
+  (Subsidiary..."`), a doubled space (`IKAN RELOCATION SERVICES INDIA
+  PRIVATE  LIMITED`), and mixed case/trailing periods (`FORMULA CORPORATE
+  SOLUTIONS INDIA PVT. LTD` vs `Formula Corporate Solutions India Pvt.
+  Ltd`/`Ltd.`). `CompanyId` looked like the obvious dedup key but was
+  ruled out live: the exact same CompanyName text had **three different**
+  CompanyId values for Synergy alone — it's not a stable per-company
+  identifier in this table.
+  - Fixed in `getB2bContractRanking` (`b2bContracts.ts`) in two layers:
+    (1) group by a normalized CompanyName (upper-cased, periods stripped,
+    whitespace collapsed, a space forced before "(") so near-identical
+    text variants merge into one bucket regardless of b2b_bills coverage;
+    (2) within that bucket, prefer b2b_bills' own `Bills_due_from` (the
+    short, business-recognized name, e.g. "Synergy Apts Services") as the
+    display name whenever ANY bill in the group matched via the existing
+    (Property, FolioNo) join, even if other bills in the same group didn't
+    individually match. A first attempt joined and picked the display
+    name per-bill instead of per-group, which actually made it WORSE — it
+    split Synergy into a "matched" row and an "unmatched" row instead of
+    merging it into one; caught by checking the raw/mapped company counts
+    live before shipping, not just eyeballing one example. Contract_Status
+    is merged the same way: "Contract" wins if any bill in the normalized
+    group has one on file, else "No Contract" if any does, else null.
+  - Verified live on the real `getB2bContractRanking` export (not just a
+    standalone test query): September 2026 (the screenshotted period)
+    dropped from 56 to 55 companies — exactly the one Synergy merge — and
+    Synergy now returns as a single row. This FY dropped from 203 to 191;
+    IKAN Relocation's two whitespace variants merged into one row (870,500
+    revenue, 80 nights combined); "Formula Corporate", "Talent Formula",
+    and "Uniformula" correctly stayed as three separate real companies
+    (over-merging risk checked, not just under-merging).
+  - **Not yet applied to Leads' "By Owner Detail" → Company Analysis**
+    (`ownerCompanyAnalysis.ts`), which groups by the same free-text
+    `CompanyName` from the same underlying table and almost certainly has
+    the identical duplicate problem — flagged, not fixed, since the user's
+    report was specifically about the Bookings card and that file has its
+    own added wrinkle (no b2b_bills join by design; the client-side
+    per-company merge in `LeadsContent.tsx`'s `drillTable` keys off the
+    raw display name, so a naive per-bucket `ANY_VALUE` pick could still
+    leave it split across owners/sources unless the display name is
+    chosen deterministically) — needs its own pass if wanted.
 - **Exotel/Reference/Existing tiles relabelled** "263 / 36 closed" →
   "263 leads · 36 closed" for clarity (item 2 — it means 263 leads from
   that source for the owner, 36 converted).
