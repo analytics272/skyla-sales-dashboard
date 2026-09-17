@@ -271,12 +271,18 @@ export async function getLeadsByProperty(filter: LeadsFilter): Promise<LeadsByGr
   // Property IS NOT NULL: cross-checked 2026-09-02 — a blank/unassigned
   // Property isn't a real property to chart alongside the actual ones, so
   // it's excluded here rather than shown as a "null" bucket.
-  // Property != 'LP' (2026-09-10): LP is a retired hotel with no data from
-  // FY 26-27 on — dropped from every visual (see propertyReference.ts).
+  // 2026-09-10: LP was explicitly excluded here to match its "removed"
+  // status in propertyReference.ts at the time. 2026-09-17: REVERTED —
+  // LP's status is back to "active" (see that file's revision history);
+  // leaving this hardcoded exclusion in would have silently kept blocking
+  // LP even after that revert, contradicting the "include LP everywhere"
+  // direction. lead_tracker is its own source table (untouched by the LP
+  // backfill work), so LP will only show up here if it genuinely has
+  // rows — no special-casing needed either way.
   const rows = await runQuery<{ key: string; count: number }>(`
     SELECT ${PROPERTY_DISPLAY_EXPR} AS key, COUNT(*) AS count
     FROM ${table("lead_tracker")}
-    WHERE ${clause} AND Property IS NOT NULL AND Property NOT IN ('LP', 'Lotus Pond')
+    WHERE ${clause} AND Property IS NOT NULL
     GROUP BY key
     ORDER BY count DESC
   `, params);

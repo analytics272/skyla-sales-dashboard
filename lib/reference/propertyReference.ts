@@ -72,21 +72,36 @@ export interface PropertyRef {
 // earlier is unaffected and still confirmed correct — Looker Studio's own
 // KDP "Rooms Available" for the same September window is 1,920 = 64×30,
 // matching that fix exactly.)
-// 2026-09-10 — LP set to "removed" (user direction): LP (Lotus Pond) is a
-// retired hotel whose backfill data (`sales_booking_lp_monthly`) ends
-// Mar 2026, so it has ZERO data from FY 26-27 onward and never will. It was
-// re-integrated 2026-08-26 (LP PRD Addendum) but a forward-looking sales
-// dashboard shouldn't surface a property with no current/future data — so
-// LP is dropped from the property filter, from "All", and from every
-// visual. The LP query/merge code (lpMonthly.ts, the `includeLp` branches)
-// is left in place, just never triggered, so historical LP analysis stays
-// one status-flip away if it's ever wanted.
+// 2026-09-10 — LP briefly set to "removed" (user direction at the time):
+// LP (Lotus Pond)'s backfill data (`sales_booking_lp_monthly`) ends Mar
+// 2026, so it has ZERO data from FY 26-27 onward. That change dropped LP
+// from the property filter, from "All", and from every visual entirely.
+//
+// 2026-09-17 — REVERTED (user clarification): the original request was
+// narrower than what got implemented — "in This FY, remove LP wherever LP
+// value isn't there," i.e. don't show LP as a broken/zeroed row for a
+// period it has no data for, NOT "remove LP from the dashboard." That
+// narrower behavior was, in fact, already exactly what every LP merge
+// point does — overview.ts (`if (lp.nights > 0 || lp.revenue > 0)`),
+// trends.ts, and brandCategory.ts (`if (includeLp && lpSoldNights > 0)`)
+// all only fold LP in when it actually has non-zero data for the queried
+// range, so for FY 26-27 (zero LP data) LP silently doesn't appear —
+// without needing a global status flag at all. Restoring "active" here
+// brings back the full LP integration exactly as designed in
+// `Skyla_Sales_Dashboard_PRD_LP_Addendum.md` §5: visible in Overview,
+// Trends, Brand & Category, and the property filter wherever it has data;
+// correctly silent (by design, not a bug — separate source tables that
+// never had LP rows) in Leads, B2B Contracts, Reviews, and per-OTA-site
+// breakdowns; and absent from Reports (`REPORT_PROPERTIES` — see that
+// file), since LP's data is monthly-grain only and the Reports tab is a
+// daily folio matrix LP structurally cannot populate.
+// Per explicit user direction this status should not be flipped again.
 export const PROPERTIES: PropertyRef[] = [
   { code: "KDP", name: "KDP", brand: "Skyla", roomCount: 64, status: "active" },
   { code: "HTC", name: "HTC", brand: "Skyla", roomCount: 34, status: "active" },
   { code: "JHS", name: "JHS", brand: "Skyla", roomCount: 33, status: "active" },
   { code: "BH4", name: "BH4", brand: "Aptly", roomCount: 18, status: "active" },
-  { code: "LP", name: "LP", brand: "Aptly", roomCount: 16, status: "removed" },
+  { code: "LP", name: "LP", brand: "Aptly", roomCount: 16, status: "active" },
   { code: "GB", name: "GB", brand: "Hyber", roomCount: 21, status: "active" },
 ];
 
