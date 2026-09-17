@@ -150,32 +150,50 @@ export default function BookingsContent({
   // use b2b_bills, every DATA point is from PMS" direction.
   const ranked = <T,>(rows: T[], sortKey: (r: T) => number) => [...rows].sort((a, b) => sortKey(b) - sortKey(a));
   const page = <T,>(rows: T[]) => rows.slice(companyPage * COMPANY_RANKING_TOP_N, companyPage * COMPANY_RANKING_TOP_N + COMPANY_RANKING_TOP_N);
-  const numbered = (name: string, i: number) => `${companyPage * COMPANY_RANKING_TOP_N + i + 1}. ${name}`;
 
-  // 2026-09-17: company search narrows the ranked/paginated bars only —
-  // the coverage caption, contract donut, and "(N) companies" title below
-  // still describe the FULL period population, not the live search result.
-  const companySearchTrimmed = companySearch.trim().toLowerCase();
-  const b2bRankingSearched = companySearchTrimmed
-    ? b2bRanking.filter((r) => r.company.toLowerCase().includes(companySearchTrimmed))
-    : b2bRanking;
-
-  const b2bRevenueRanked = ranked(b2bRankingSearched, (r) => r.roomRevenue);
-  const b2bNightsRanked = ranked(b2bRankingSearched, (r) => r.nights);
-  // 2026-09-17: ADR ranking needs a minimum-volume floor, or it's not
-  // actually ranking "high rate" companies — a company with just 1-2
-  // nights on a single bill can post a huge average (one real ₹16,000/
-  // night 2-night stay tops the whole list ahead of companies with
-  // hundreds of nights at ₹8-9k) purely because a tiny sample doesn't
-  // average out. Not a data error — every one of these bills is real —
-  // just a misleading ranking without a floor. 5 nights excludes ~31%
-  // of This FY's B2B+B2C companies (63 of 203, checked live) from ONLY
-  // this tab; Revenue/Nights/Contribution % are unaffected since those
-  // aren't average-based and a low-volume company legitimately belongs
-  // near the bottom of those rankings rather than being excluded.
+  // 2026-09-17: rank numbers must reflect each company's position in the
+  // FULL, unfiltered ranking for that tab — not its position within the
+  // live search result. Searching "blue" down to one row must still show
+  // that company's real rank (e.g. "142."), not "1." just because it's the
+  // only row left on screen. So: rank the FULL b2bRanking per tab first,
+  // build a company -> true-rank lookup from that, THEN filter by search —
+  // the filter only changes which rows are shown/paginated, never the
+  // number printed next to them.
   const ADR_RANKING_MIN_NIGHTS = 5;
-  const b2bAdrRanked = ranked(b2bRankingSearched.filter((r) => r.adr !== null && r.nights >= ADR_RANKING_MIN_NIGHTS), (r) => r.adr ?? 0);
-  const b2bContributionRanked = ranked(b2bRankingSearched.filter((r) => r.contributionPct !== null), (r) => r.contributionPct ?? 0);
+  const b2bRevenueRankedFull = ranked(b2bRanking, (r) => r.roomRevenue);
+  const b2bNightsRankedFull = ranked(b2bRanking, (r) => r.nights);
+  // ADR ranking needs a minimum-volume floor, or it's not actually ranking
+  // "high rate" companies — a company with just 1-2 nights on a single
+  // bill can post a huge average (one real ₹16,000/night 2-night stay
+  // tops the whole list ahead of companies with hundreds of nights at
+  // ₹8-9k) purely because a tiny sample doesn't average out. Not a data
+  // error — every one of these bills is real — just a misleading ranking
+  // without a floor. 5 nights excludes ~31% of This FY's B2B+B2C companies
+  // (63 of 203, checked live) from ONLY this tab; Revenue/Nights/
+  // Contribution % are unaffected since those aren't average-based and a
+  // low-volume company legitimately belongs near the bottom of those
+  // rankings rather than being excluded.
+  const b2bAdrRankedFull = ranked(b2bRanking.filter((r) => r.adr !== null && r.nights >= ADR_RANKING_MIN_NIGHTS), (r) => r.adr ?? 0);
+  const b2bContributionRankedFull = ranked(b2bRanking.filter((r) => r.contributionPct !== null), (r) => r.contributionPct ?? 0);
+  const rankMapByTab: Record<(typeof COMPANY_TABS)[number], Map<string, number>> = {
+    Revenue: new Map(b2bRevenueRankedFull.map((r, i) => [r.company, i + 1])),
+    Nights: new Map(b2bNightsRankedFull.map((r, i) => [r.company, i + 1])),
+    ADR: new Map(b2bAdrRankedFull.map((r, i) => [r.company, i + 1])),
+    "Contribution %": new Map(b2bContributionRankedFull.map((r, i) => [r.company, i + 1])),
+  };
+  const numbered = (r: { company: string }) => `${rankMapByTab[companyTab].get(r.company)}. ${r.company}`;
+
+  // Search narrows which rows are shown/paginated only — the coverage
+  // caption, contract donut, and "(N) companies" title below still
+  // describe the FULL period population, not the live search result.
+  const companySearchTrimmed = companySearch.trim().toLowerCase();
+  const applySearch = <T extends { company: string }>(rows: T[]) =>
+    companySearchTrimmed ? rows.filter((r) => r.company.toLowerCase().includes(companySearchTrimmed)) : rows;
+
+  const b2bRevenueRanked = applySearch(b2bRevenueRankedFull);
+  const b2bNightsRanked = applySearch(b2bNightsRankedFull);
+  const b2bAdrRanked = applySearch(b2bAdrRankedFull);
+  const b2bContributionRanked = applySearch(b2bContributionRankedFull);
   const companyRankedByTab: Record<(typeof COMPANY_TABS)[number], typeof b2bRanking> = {
     Revenue: b2bRevenueRanked, Nights: b2bNightsRanked, ADR: b2bAdrRanked, "Contribution %": b2bContributionRanked,
   };
@@ -184,19 +202,19 @@ export default function BookingsContent({
   // 2026-09-17: ADR rightLabel dropped from the Revenue tab's bars per
   // explicit user direction — ADR already has its own dedicated tab, no
   // need to duplicate it alongside the Revenue bars.
-  const b2bRevenueData: BarDatum[] = page(b2bRevenueRanked).map((r, i) => ({
-    name: numbered(r.company, i),
+  const b2bRevenueData: BarDatum[] = page(b2bRevenueRanked).map((r) => ({
+    name: numbered(r),
     value: r.roomRevenue,
     color: CONTRACT_STATUS_COLOR[r.contractStatus ?? ""] ?? CONTRACT_STATUS_FALLBACK,
   }));
-  const b2bNightsData: BarDatum[] = page(b2bNightsRanked).map((r, i) => ({
-    name: numbered(r.company, i), value: r.nights, color: COMPANY_RANKING_COLOR,
+  const b2bNightsData: BarDatum[] = page(b2bNightsRanked).map((r) => ({
+    name: numbered(r), value: r.nights, color: COMPANY_RANKING_COLOR,
   }));
-  const b2bAdrData: BarDatum[] = page(b2bAdrRanked).map((r, i) => ({
-    name: numbered(r.company, i), value: r.adr ?? 0, color: COMPANY_RANKING_COLOR,
+  const b2bAdrData: BarDatum[] = page(b2bAdrRanked).map((r) => ({
+    name: numbered(r), value: r.adr ?? 0, color: COMPANY_RANKING_COLOR,
   }));
-  const b2bContributionData: BarDatum[] = page(b2bContributionRanked).map((r, i) => ({
-    name: numbered(r.company, i), value: (r.contributionPct ?? 0) * 100, color: COMPANY_RANKING_COLOR,
+  const b2bContributionData: BarDatum[] = page(b2bContributionRanked).map((r) => ({
+    name: numbered(r), value: (r.contributionPct ?? 0) * 100, color: COMPANY_RANKING_COLOR,
   }));
 
   // 2026-09-11: Company Rankings is now sourced from sales_company_bills

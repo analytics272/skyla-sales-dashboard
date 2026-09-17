@@ -1064,6 +1064,55 @@ data for these B2B metrics."*
     raw display name, so a naive per-bucket `ANY_VALUE` pick could still
     leave it split across owners/sources unless the display name is
     chosen deterministically) — needs its own pass if wanted.
+  - **2026-09-17 (later still) — that follow-up pass happened the same
+    day**, plus a second real bug found while doing it. See the next two
+    entries below.
+- **2026-09-17 (later still) — rank numbers were wrong while searching**.
+  User screenshotted searching "blue" and getting "1. BLUE ORANGE
+  HOSPITALITY" — misleading, since it's nowhere near rank 1 by revenue.
+  Root cause: `numbered()` computed `companyPage * 8 + i + 1` against the
+  SEARCH-FILTERED array's own position, not the company's real position
+  in the full ranking — filtering to one result made that one result
+  "position 0 of the filtered list" → "1.". Fixed by ranking the FULL,
+  unfiltered `b2bRanking` per tab FIRST, building a company → true-rank
+  lookup from that full order, and only THEN filtering by search — the
+  filter now narrows which rows are shown/paginated without ever changing
+  the number printed next to them. Verified live: searching "blue" now
+  shows "28. BLUE ORANGE HOSPITALITY" (its real Revenue-tab rank among
+  191 companies), not "1.".
+- **2026-09-17 (later still) — company-name dedup extended to Leads' By
+  Owner Detail Company Analysis and Reports' B2B Details Zone A**, per
+  user direction to audit every visual for the same problem after the
+  Bookings fix above. Confirmed live duplicates in both before fixing:
+  Synergy split 3 ways in Owner Company Analysis (two different raw-text
+  variants under the same owner+source, plus a third legitimately-separate
+  business-source bucket), IKAN Relocation split into its double-space/
+  single-space variants, and Reports' `Bills_due_from` (a curated field,
+  not per-invoice free text like `sales_company_bills.CompanyName`, but
+  still typed inconsistently by different staff) had "ADP"/"adp" and
+  "Vyjayanthi Movies"/"VYJAYANTHI MOVIES" as separate rows.
+  - **`ownerCompanyAnalysis.ts`**: same text-normalization key as
+    `b2bContracts.ts` (no b2b_bills join here, so no name-preference
+    layer — this card stays fully PMS-sourced by design). The canonical
+    display name is picked in its own CTE, keyed by the normalized name
+    across the WHOLE result set, rather than per (owner, source, category)
+    bucket — picking it per-bucket would let the same real company get a
+    DIFFERENT display string in different buckets (e.g. one variant for
+    "Relocation (B2B)", another for "Corporate Sales"), which would
+    silently break `LeadsContent.tsx`'s client-side merge-by-company-name
+    across sources (`drillTable`'s `reduce` keys off that exact string).
+    Verified live: both of Synergy's remaining buckets (Relocation (B2B),
+    Corporate Sales — now correctly 2 rows, not 3, since the two raw-text
+    variants under the same source merged) return the byte-identical
+    display string; IKAN's two variants merged into one row (870,500
+    revenue, 80 nights, matching the manual sum).
+  - **`reports.ts`'s Zone A**: the (company, month) grouping already
+    happened in JS, not SQL, so this needed a JS-side fix instead — merge
+    by normalized key, RE-SUMMING revenue/nights per month (not just
+    concatenating each variant's own month rows, which would have kept
+    two rows for the same month instead of one combined figure if two
+    variants both billed that month). Verified live: "ADP" is now one row
+    (₹15.95L across 5 months, no separate "adp" row).
 - **Exotel/Reference/Existing tiles relabelled** "263 / 36 closed" →
   "263 leads · 36 closed" for clarity (item 2 — it means 263 leads from
   that source for the owner, 36 converted).

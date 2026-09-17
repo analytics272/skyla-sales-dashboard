@@ -546,27 +546,45 @@ export async function getB2bDetailReport(selectedProperties: string[] | undefine
     `, { properties, fy }),
   ]);
 
-  const byCompany = new Map<string, ZoneARawRow[]>();
+  // 2026-09-17: Bills_due_from is a curated field (one entry per contract,
+  // not per-invoice free text like sales_company_bills.CompanyName), but
+  // still gets typed inconsistently across bills by different staff —
+  // confirmed live: "ADP" vs "adp", "Vyjayanthi Movies" vs "VYJAYANTHI
+  // MOVIES". Same normalization as b2bContracts.ts's company-name dedup
+  // (see that file's header comment for the full story), applied here in
+  // JS since the (company, month) grouping already happens client-side —
+  // merge by the normalized key, re-summing per month (not just
+  // concatenating byMonth rows) in case two variants both billed the same
+  // month, which a naive merge would otherwise double-list instead of sum.
+  const normalizeCompanyKey = (name: string) =>
+    name.trim().toUpperCase().replace(/\./g, "").replace(/\s*\(/g, " (").replace(/\s+/g, " ");
+
+  const byCompany = new Map<string, { display: string; months: Map<string, { monthLabel: string; revenue: number; nights: number }> }>();
   for (const r of zoneARows) {
-    const list = byCompany.get(r.company) ?? [];
-    list.push(r);
-    byCompany.set(r.company, list);
+    const key = normalizeCompanyKey(r.company);
+    let entry = byCompany.get(key);
+    if (!entry) {
+      entry = { display: r.company, months: new Map() };
+      byCompany.set(key, entry);
+    }
+    const monthKey = monthSortKey(fy, r.month);
+    const existingMonth = entry.months.get(monthKey);
+    if (existingMonth) {
+      existingMonth.revenue += r.revenue ?? 0;
+      existingMonth.nights += r.nights ?? 0;
+    } else {
+      entry.months.set(monthKey, { monthLabel: r.month, revenue: r.revenue ?? 0, nights: r.nights ?? 0 });
+    }
   }
 
-  const zoneA: B2bDetailZoneARow[] = [...byCompany.entries()]
-    .map(([company, rows]) => {
-      const byMonth = rows
-        .map((r) => ({
-          monthKey: monthSortKey(fy, r.month),
-          monthLabel: r.month,
-          revenue: r.revenue ?? 0,
-          nights: r.nights ?? 0,
-          adr: safeDivide(r.revenue ?? 0, r.nights ?? 0),
-        }))
+  const zoneA: B2bDetailZoneARow[] = [...byCompany.values()]
+    .map(({ display, months }) => {
+      const byMonth = [...months.entries()]
+        .map(([monthKey, m]) => ({ monthKey, monthLabel: m.monthLabel, revenue: m.revenue, nights: m.nights, adr: safeDivide(m.revenue, m.nights) }))
         .sort((a, b) => a.monthKey.localeCompare(b.monthKey));
-      const totalRevenue = rows.reduce((s, r) => s + (r.revenue ?? 0), 0);
-      const totalNights = rows.reduce((s, r) => s + (r.nights ?? 0), 0);
-      return { company, totalRevenue, totalNights, totalAdr: safeDivide(totalRevenue, totalNights), byMonth };
+      const totalRevenue = byMonth.reduce((s, m) => s + m.revenue, 0);
+      const totalNights = byMonth.reduce((s, m) => s + m.nights, 0);
+      return { company: display, totalRevenue, totalNights, totalAdr: safeDivide(totalRevenue, totalNights), byMonth };
     })
     .sort((a, b) => b.totalRevenue - a.totalRevenue);
 

@@ -56,18 +56,54 @@ export type { OwnerCompanyRow } from "@/lib/reference/owners";
 
 export async function getOwnerCompanyAnalysis(filter: KpiFilter): Promise<OwnerCompanyRow[]> {
   const { properties, period } = resolveFilter(filter);
+  // 2026-09-17: same free-text CompanyName dedup as b2bContracts.ts's
+  // Company Rankings fix (see that file's header comment for the full
+  // story — confirmed live duplicates here too, e.g. Synergy split across
+  // "LIMITED (Subsidiary..." / "LIMITED(Subsidiary..." under the same
+  // owner+source+category). No b2b_bills join here by design (this card
+  // stays fully PMS-sourced), so only the text-normalization layer
+  // applies, not the Bills_due_from name preference.
+  //
+  // The canonical display name is picked in its OWN CTE (`canonical`,
+  // keyed by normKey across the WHOLE result set) rather than per
+  // (owner, source, category) bucket. Picking it per-bucket (ANY_VALUE
+  // grouped with the rest) would let the same real company get a
+  // different display string in different buckets — e.g. one raw variant
+  // showing up for "Relocation (B2B)" and a different one for "Corporate
+  // Sales" — which would silently defeat LeadsContent.tsx's client-side
+  // merge-by-company-name across sources (drillTable's `reduce` keys off
+  // this exact string). Computing one canonical name globally first
+  // guarantees every bucket for the same normalized company gets the
+  // identical display string.
   const rows = await runQuery<{ owner: string | null; business_source: string; category: string; company: string; revenue: number | null; nights: number }>(`
+    WITH per_row AS (
+      SELECT
+        m.Owner AS owner,
+        c.BusinessSource AS business_source,
+        ${bookingCategorySqlExpr("c.BusinessSource")} AS category,
+        c.CompanyName AS raw_company,
+        TRIM(REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(UPPER(c.CompanyName), r'\\.', ''), r'\\s*\\(', ' ('), r'\\s+', ' ')) AS normKey,
+        c.TotalRevenue AS revenue,
+        c.TotalNights AS nights
+      FROM ${table("company_revenue_summary")} c
+      LEFT JOIN ${table("company_owner_map")} m ON c.CompanyId = m.CompanyId
+      WHERE c.Property IN UNNEST(@properties)
+        AND c.MonthStart BETWEEN DATE_TRUNC(@start, MONTH) AND DATE_TRUNC(@end, MONTH)
+    ),
+    canonical AS (
+      SELECT normKey, MIN(raw_company) AS company
+      FROM per_row
+      GROUP BY normKey
+    )
     SELECT
-      m.Owner AS owner,
-      c.BusinessSource AS business_source,
-      ${bookingCategorySqlExpr("c.BusinessSource")} AS category,
-      c.CompanyName AS company,
-      SUM(c.TotalRevenue) AS revenue,
-      SUM(c.TotalNights) AS nights
-    FROM ${table("company_revenue_summary")} c
-    LEFT JOIN ${table("company_owner_map")} m ON c.CompanyId = m.CompanyId
-    WHERE c.Property IN UNNEST(@properties)
-      AND c.MonthStart BETWEEN DATE_TRUNC(@start, MONTH) AND DATE_TRUNC(@end, MONTH)
+      p.owner AS owner,
+      p.business_source AS business_source,
+      p.category AS category,
+      can.company AS company,
+      SUM(p.revenue) AS revenue,
+      SUM(p.nights) AS nights
+    FROM per_row p
+    JOIN canonical can ON p.normKey = can.normKey
     GROUP BY owner, business_source, category, company
     HAVING revenue > 0
     ORDER BY revenue DESC
