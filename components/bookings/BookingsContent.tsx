@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 // 2026-09-02 redesign, fifth pass — Bookings merges the old Booking Details
 // and OTA Breakdown pages (B2B already lived inside Booking Details). Where
 // two cards showed the same shape of breakdown (a donut, or a pair of ranked
@@ -14,7 +15,6 @@ import type { B2bContractRanking, RetentionPoint, B2bContractSummary } from "@/l
 import type { OtaBreakdownRow } from "@/lib/bigquery/queries/otaBreakdown";
 import StatTile from "@/components/ui/StatTile";
 import Card from "@/components/ui/Card";
-import Expandable from "@/components/ui/Expandable";
 import TabbedCard, { useTabbedCard } from "@/components/ui/TabbedCard";
 import { BarDatum } from "@/components/charts/SingleMetricBarChart";
 import HorizontalBarChart from "@/components/charts/HorizontalBarChart";
@@ -24,12 +24,21 @@ import GroupedBarChart from "@/components/charts/GroupedBarChart";
 import { formatIndianCurrency, formatPercent } from "@/lib/format/currency";
 import { ROOM_TYPE_COLOR, ROOM_TYPE_ORDER, CATEGORY_COLOR, CATEGORY_ORDER } from "@/lib/design/tokens";
 
+const OTA_PALETTE = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--series-4)", "var(--series-5)", "var(--chart-baseline)", "#a855f7", "#0ea5e9"];
+// 2026-09-11: Contract_Status (from b2b_bills, joined by FolioNo — see
+// b2bContracts.ts) restored on the Revenue tab only, per explicit
+// "mapping and status can use b2b_bills, every DATA point is from PMS"
+// direction. The other three tabs (Nights/ADR/Contribution %) use one
+// flat colour — contract status is specifically a revenue/relationship
+// concept, not meaningful per-night or per-ADR.
 const CONTRACT_STATUS_COLOR: Record<string, string> = {
   Contract: "var(--chart-delta-good)",
   "No Contract": "#d97706",
 };
 const CONTRACT_STATUS_FALLBACK = "var(--chart-baseline)";
-const OTA_PALETTE = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--series-4)", "var(--series-5)", "var(--chart-baseline)", "#a855f7", "#0ea5e9"];
+const COMPANY_RANKING_COLOR = "var(--series-1)";
+/** Top N shown per Company Rankings tab (user direction 2026-09-11) — was "show all N" behind an Expandable. */
+const COMPANY_RANKING_TOP_N = 8;
 
 type MixTab = "Category" | "Room Format";
 const MIX_TABS: MixTab[] = ["Category", "Room Format"];
@@ -81,7 +90,12 @@ export default function BookingsContent({
   const [mixTab, setMixTab] = useTabbedCard(MIX_TABS);
   const [formatTab, setFormatTab] = useTabbedCard(FORMAT_TABS);
   const [otaTab, setOtaTab] = useTabbedCard(OTA_TABS);
-  const [companyTab, setCompanyTab] = useTabbedCard(COMPANY_TABS);
+  const [companyTab, setCompanyTabRaw] = useTabbedCard(COMPANY_TABS);
+  const [companyPage, setCompanyPage] = useState(0);
+  const setCompanyTab = (tab: (typeof COMPANY_TABS)[number]) => {
+    setCompanyTabRaw(tab);
+    setCompanyPage(0); // 2026-09-11: reset to page 1 when switching metric — each tab's own ranking starts over
+  };
 
   const roomTypeLabel = (rt: string | null) => rt ?? "Unmapped";
   const roomTypesPresent = [
@@ -112,52 +126,63 @@ export default function BookingsContent({
   // Contribution By" (Nights/Revenue/ADR mini-tables), and "Contribution %"
   // used to be three separate cards all ranking the same ~70 companies by a
   // different metric — genuinely duplicate information laid out three ways.
-  // Per explicit "keep tabs, shift internal for metric" direction, merged
-  // into one TabbedCard (Revenue / Nights / ADR / Contribution %), the same
-  // internal-tab pattern already used for Revenue Mix and By Room Format
-  // above. Each tab shows the FULL ranked company list (not just a top-5
-  // taste), inside the same Expandable used before. b2bRanking is already
-  // revenue-sorted (backend ORDER BY roomRevenue DESC); Nights, ADR, and
-  // Contribution % are re-sorted client-side — no new query for any of the
-  // four. (2026-09-09, later still: the ADR tab used to be its own backend
-  // query, AVG(ADR) over individual b2b_bills rows; now that Nights/Revenue/
-  // ADR all come from the same PMS-sourced ranking — see b2bContracts.ts's
-  // rewrite — ADR is just that same array re-sorted by its own adr field,
-  // a weighted revenue÷nights average like every other ADR on this
-  // dashboard, not an unweighted mean of per-bill figures.)
-  const b2bRevenueData: BarDatum[] = b2bRanking.map((r) => ({
-    name: r.company,
+  // Merged into one TabbedCard (Revenue / Nights / ADR / Contribution %),
+  // the same internal-tab pattern used for Revenue Mix and By Room Format
+  // above. b2bRanking is already revenue-sorted (backend ORDER BY
+  // roomRevenue DESC); Nights, ADR, and Contribution % are re-sorted
+  // client-side — no new query for any of the four.
+  //
+  // 2026-09-11: paginated 8-per-page (first page = top 8), with a rank
+  // number prefixed onto each bar's label that stays GLOBAL across pages
+  // (page 2 starts at "9.", not "1." again) — was "show all N" behind an
+  // Expandable. Also: Company Rankings moved onto `sales_company_bills`
+  // (see b2bContracts.ts) for every number; Contract_Status (green/amber)
+  // is restored on the Revenue tab only, still sourced from b2b_bills via
+  // the FolioNo join that file does — per explicit "mapping and status can
+  // use b2b_bills, every DATA point is from PMS" direction.
+  const ranked = <T,>(rows: T[], sortKey: (r: T) => number) => [...rows].sort((a, b) => sortKey(b) - sortKey(a));
+  const page = <T,>(rows: T[]) => rows.slice(companyPage * COMPANY_RANKING_TOP_N, companyPage * COMPANY_RANKING_TOP_N + COMPANY_RANKING_TOP_N);
+  const numbered = (name: string, i: number) => `${companyPage * COMPANY_RANKING_TOP_N + i + 1}. ${name}`;
+
+  const b2bRevenueRanked = ranked(b2bRanking, (r) => r.roomRevenue);
+  const b2bNightsRanked = ranked(b2bRanking, (r) => r.nights);
+  const b2bAdrRanked = ranked(b2bRanking.filter((r) => r.adr !== null && r.nights > 0), (r) => r.adr ?? 0);
+  const b2bContributionRanked = ranked(b2bRanking.filter((r) => r.contributionPct !== null), (r) => r.contributionPct ?? 0);
+  const companyRankedByTab: Record<(typeof COMPANY_TABS)[number], typeof b2bRanking> = {
+    Revenue: b2bRevenueRanked, Nights: b2bNightsRanked, ADR: b2bAdrRanked, "Contribution %": b2bContributionRanked,
+  };
+  const companyPageCount = Math.max(1, Math.ceil(companyRankedByTab[companyTab].length / COMPANY_RANKING_TOP_N));
+
+  const b2bRevenueData: BarDatum[] = page(b2bRevenueRanked).map((r, i) => ({
+    name: numbered(r.company, i),
     value: r.roomRevenue,
     color: CONTRACT_STATUS_COLOR[r.contractStatus ?? ""] ?? CONTRACT_STATUS_FALLBACK,
     rightLabel: r.adr !== null ? `ADR ₹${Math.round(r.adr).toLocaleString("en-IN")}` : undefined,
   }));
-  const b2bNightsData: BarDatum[] = [...b2bRanking]
-    .sort((a, b) => b.nights - a.nights)
-    .map((r) => ({ name: r.company, value: r.nights, color: "var(--series-1)" }));
-  const b2bAdrData: BarDatum[] = [...b2bRanking]
-    .filter((r) => r.adr !== null && r.nights > 0)
-    .sort((a, b) => (b.adr ?? 0) - (a.adr ?? 0))
-    .map((r) => ({ name: r.company, value: r.adr ?? 0, color: "var(--series-3)" }));
-  const b2bContributionData: BarDatum[] = [...b2bRanking]
-    .filter((r) => r.contributionPct !== null)
-    .sort((a, b) => (b.contributionPct ?? 0) - (a.contributionPct ?? 0))
-    .map((r) => ({ name: r.company, value: (r.contributionPct ?? 0) * 100, color: "var(--series-2)" }));
+  const b2bNightsData: BarDatum[] = page(b2bNightsRanked).map((r, i) => ({
+    name: numbered(r.company, i), value: r.nights, color: COMPANY_RANKING_COLOR,
+  }));
+  const b2bAdrData: BarDatum[] = page(b2bAdrRanked).map((r, i) => ({
+    name: numbered(r.company, i), value: r.adr ?? 0, color: COMPANY_RANKING_COLOR,
+  }));
+  const b2bContributionData: BarDatum[] = page(b2bContributionRanked).map((r, i) => ({
+    name: numbered(r.company, i), value: (r.contributionPct ?? 0) * 100, color: COMPANY_RANKING_COLOR,
+  }));
 
-  // 2026-09-09: Company Rankings is now sourced from sales_booking (PMS),
-  // joined to b2b_bills only for company identity — a booking whose bill
-  // hasn't been raised yet in b2b_bills has no company attached and drops
-  // out of the ranking (see b2bContracts.ts). Surfacing that gap explicitly
-  // instead of letting totals silently not reconcile with the Booking
-  // Category Mix card's own B2B figure above, which IS the true PMS total
-  // for this period/scope.
+  // 2026-09-11: Company Rankings is now sourced from sales_company_bills
+  // (PMS-derived, see b2bContracts.ts) — a bill not yet tagged with a
+  // CompanyId there has no company attached and drops out of the ranking.
+  // Surfacing that gap explicitly instead of letting totals silently not
+  // reconcile with the Booking Category Mix card's own B2B figure above,
+  // which IS the true PMS total for this period/scope.
   const totalB2bRevenuePms = categoryMix.find((m) => m.category === "B2B")?.revenue ?? 0;
   const mappedB2bRevenue = b2bRanking.reduce((s, r) => s + r.roomRevenue, 0);
   const b2bMappedCoveragePct = totalB2bRevenuePms > 0 ? (mappedB2bRevenue / totalB2bRevenuePms) * 100 : null;
 
   // Item #10: the two raw StatTiles here (a revenue figure and a company
-  // count — different units, hard to compare at a glance) are replaced by
-  // one donut reading "what share of B2B revenue is contractually secured",
-  // which is the actual question those two numbers were trying to answer.
+  // count) are replaced by one donut reading "what share of B2B revenue is
+  // contractually secured" — Revenue tab only, since Contract_Status is a
+  // per-company attribute of the whole relationship, not a per-night/ADR one.
   const totalB2bRevenue = b2bRanking.reduce((s, r) => s + r.roomRevenue, 0);
   const noContractRevenue = Math.max(0, totalB2bRevenue - b2bContractSummary.totalContractRevenue);
   const contractShareDonut = [
@@ -283,36 +308,26 @@ export default function BookingsContent({
 
       <div>
         <h3 className="text-base font-semibold text-zinc-800 dark:text-zinc-100">B2B Contracts</h3>
-        {/* 2026-09-09: every card below now scopes to the active period tab
-            (e.g. "This Month" narrows to just that period's real PMS stay
-            dates), not always the whole governing FY. 2026-09-09, later
-            same day: Company Rankings itself is now sourced from
-            sales_booking (PMS), joined to b2b_bills only for company
-            identity — see b2bContracts.ts's header comment. A company only
-            appears once its bill has been raised in b2b_bills; the coverage
-            line below states what fraction of this period's real B2B
-            revenue that currently is, so an incomplete-but-growing number
-            reads as expected billing lag, not a wrong total. */}
+        {/* 2026-09-11: Company Rankings now sourced from
+            sales_company_bills (PMS-derived — see b2bContracts.ts) for
+            every number; b2b_bills is used only for Contract_Status
+            (Revenue tab colouring) via the same FolioNo join. A bill not
+            yet tagged with a CompanyId has no company attached and drops
+            out of the ranking; the coverage line below states what
+            fraction of this period's real B2B revenue that currently is.
+            Top 8 companies shown per tab (was "show all N" behind an
+            Expandable), each bar numbered by rank. */}
         <p className="text-xs text-zinc-400 dark:text-zinc-500">Scoped to {b2bRangeLabel}</p>
         {b2bMappedCoveragePct !== null && (
           <p className="text-xs text-zinc-400 dark:text-zinc-500">
-            {b2bMappedCoveragePct.toFixed(0)}% of this period&apos;s B2B revenue is mapped to a company below — the rest hasn&apos;t been billed/entered into b2b_bills yet.
+            {b2bMappedCoveragePct.toFixed(0)}% of this period&apos;s B2B revenue is mapped to a company below — the rest hasn&apos;t been tagged with a company in the PMS billing extract yet.
           </p>
         )}
 
-        {/* Item #1 (2026-09-02, seventh pass): donut + caption stacked and
-            centered instead of a flex row — at some widths the caption's
-            long sentence was squeezing the donut's legend column, wrapping
-            "3.43 Cr · 65%" onto three lines. Stacking removes any squeeze.
-            2026-09-09: the Treemap below it was replaced with a horizontal
-            bar chart — per explicit feedback, a treemap's box-size-by-value
-            encoding makes every company past the top handful illegible
-            (label text shrinks/gets cut as boxes shrink), where a sorted bar
-            list stays readable at any company count. */}
         <div className="mt-2">
           <TabbedCard
             title={`Company Rankings (${b2bRanking.length})`}
-            subtitle="Revenue is color-coded green = under contract, amber = no contract"
+            subtitle={`${COMPANY_RANKING_TOP_N} per page · Revenue bars: green = under contract, amber = no contract`}
             tabs={COMPANY_TABS}
             active={companyTab}
             onChange={setCompanyTab}
@@ -330,28 +345,44 @@ export default function BookingsContent({
                     </p>
                   </div>
                 )}
-                <Expandable collapsedHeight={420} label={`Show all ${b2bRanking.length}`}>
-                  {companyTab === "Revenue" && <HorizontalBarChart data={b2bRevenueData} valueFormatter={(v) => formatIndianCurrency(v)} labelWidth={150} />}
-                  {companyTab === "Nights" && <HorizontalBarChart data={b2bNightsData} valueFormatter={(v) => v.toLocaleString("en-IN")} labelWidth={150} />}
-                  {companyTab === "ADR" && <HorizontalBarChart data={b2bAdrData} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} labelWidth={150} />}
-                  {companyTab === "Contribution %" && <HorizontalBarChart data={b2bContributionData} valueFormatter={(v) => `${v.toFixed(0)}%`} labelWidth={150} />}
-                </Expandable>
+                {companyTab === "Revenue" && <HorizontalBarChart data={b2bRevenueData} valueFormatter={(v) => formatIndianCurrency(v)} labelWidth={170} />}
+                {companyTab === "Nights" && <HorizontalBarChart data={b2bNightsData} valueFormatter={(v) => v.toLocaleString("en-IN")} labelWidth={170} />}
+                {companyTab === "ADR" && <HorizontalBarChart data={b2bAdrData} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} labelWidth={170} />}
+                {companyTab === "Contribution %" && <HorizontalBarChart data={b2bContributionData} valueFormatter={(v) => `${v.toFixed(0)}%`} labelWidth={170} />}
+                {/* 2026-09-11: pagination — first page is top 8, Next/Prev
+                    step through the rest of this tab's ranked list 8 at a
+                    time, numbering staying global (page 2 starts at "9."). */}
+                {companyPageCount > 1 && (
+                  <div className="mt-3 flex items-center justify-center gap-3 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setCompanyPage((p) => Math.max(0, p - 1))}
+                      disabled={companyPage === 0}
+                      className="rounded-full border border-zinc-200 px-2.5 py-1 font-medium text-zinc-600 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300"
+                    >
+                      ← Prev
+                    </button>
+                    <span className="text-zinc-400 dark:text-zinc-500">Page {companyPage + 1} of {companyPageCount}</span>
+                    <button
+                      type="button"
+                      onClick={() => setCompanyPage((p) => Math.min(companyPageCount - 1, p + 1))}
+                      disabled={companyPage >= companyPageCount - 1}
+                      className="rounded-full border border-zinc-200 px-2.5 py-1 font-medium text-zinc-600 disabled:opacity-40 dark:border-zinc-700 dark:text-zinc-300"
+                    >
+                      Next →
+                    </button>
+                  </div>
+                )}
               </>
             ) : (
-              // 2026-09-09: b2b_bills lags live PMS bookings by a variable,
-              // sometimes substantial amount — a narrow, very recent period
-              // tab (e.g. "This Month") can legitimately have zero billing
-              // rows yet even when sales_booking shows real B2B revenue for
-              // the same window (see the Booking Category Mix card above).
-              // Doesn't name a specific catch-up time (an earlier version
-              // said "about a month" — checked live and found August, over
-              // five weeks old, still only ~25% billed, so that claim was
-              // itself wrong). Spelled out explicitly so this reads as
-              // billing latency, not a broken chart — one shared empty
-              // state for all four tabs, since they all derive from the
-              // same (currently empty) source.
+              // 2026-09-11: company_revenue_summary can still lag live PMS
+              // bookings by a variable amount (a bill not yet tagged with a
+              // CompanyId), same reasoning as the old b2b_bills note, just
+              // a different source now — kept generic rather than naming a
+              // specific catch-up time (an earlier "about a month" claim
+              // for b2b_bills turned out to be wrong when checked live).
               <p className="py-8 text-center text-sm text-zinc-400 dark:text-zinc-500">
-                No B2B billing data synced yet for {b2bRangeLabel} — bills are entered into b2b_bills progressively after checkout, so this fills in as billing catches up.
+                No B2B billing data synced yet for {b2bRangeLabel}.
               </p>
             )}
           </TabbedCard>
