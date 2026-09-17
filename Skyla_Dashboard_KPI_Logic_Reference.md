@@ -856,6 +856,20 @@ data for these B2B metrics."*
     1–8, page 2 shows 9–16 with numbering continuing correctly, Prev is
     disabled on page 1, and switching to the Nights tab both resets to
     page 1 and re-sorts by nights.
+- **2026-09-17 — same 8-per-page + numbering pattern extended to the Leads
+  "By Owner Detail" → Company Analysis table** (`LeadsContent.tsx`'s
+  `drillTable`), which the pagination pass above had missed — it was still
+  a plain unpaginated table. User feedback (screenshots of the then-live
+  site, taken before the Bookings fix above had been pushed) also
+  flagged this table specifically for numbering + pagination. Page resets
+  to 1 both when switching the active Owner tab and when clicking a
+  Business Source donut slice to filter the table (each changes the
+  underlying company list, so a stale page number would go out of range
+  or just be confusing). Verified live for This FY, Dikhita/All sources
+  (216 companies → 27 pages): page 1 shows companies 1–8, page 2
+  continues 9–16, and clicking the "Corporate Sales" donut slice
+  re-filters to that source, re-sorts by revenue, and resets to page 1
+  (narrowing to 21 pages for that source alone).
 - **Exotel/Reference/Existing tiles relabelled** "263 / 36 closed" →
   "263 leads · 36 closed" for clarity (item 2 — it means 263 leads from
   that source for the owner, 36 converted).
