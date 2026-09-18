@@ -259,36 +259,59 @@ export default function OverviewContent({
           )}
         </TabbedCard>
 
-        <TabbedCard title="Revenue, ADR & Occupancy Ranking" tabs={RANK_TABS} active={rankTab} onChange={setRankTab}>
-          {/* 2026-09-18: inner metric row — Revenue/ADR/Occupancy — nested
-              under the outer By Property/By Brand grouping tabs. TabbedCard
-              itself only supports one tab level, so this repeats its pill
-              styling inline rather than introducing a second component for
-              what's still conceptually "more tabs, one level down". */}
-          <div role="tablist" className="mb-3 flex w-fit items-center gap-1 rounded-full bg-zinc-100 p-1 dark:bg-zinc-900">
-            {RANK_METRIC_TABS.map((metric) => (
-              <button
-                key={metric}
-                type="button"
-                role="tab"
-                aria-selected={rankMetricTab === metric}
-                onClick={() => setRankMetricTab(metric)}
-                className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
-                  rankMetricTab === metric
-                    ? "bg-teal-700 text-white shadow-sm"
-                    : "text-zinc-600 hover:bg-white hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white"
-                }`}
-              >
-                {metric}
-              </button>
-            ))}
+        <Card title="Performance Ranking">
+          {/* 2026-09-18: two tab groups side by side on one row (grouping,
+              then metric) instead of stacked — per explicit user direction
+              ("looks heavy"). TabbedCard only renders one tab row of its
+              own, so this card skips it and lays out both pill groups
+              (sharing the exact same styling) directly, separated by a
+              thin divider so the two stay visually distinct despite being
+              on one line. Wraps to two lines on narrow screens. */}
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <div role="tablist" className="flex w-fit items-center gap-1 rounded-full bg-zinc-100 p-1 dark:bg-zinc-900">
+              {RANK_TABS.map((tab) => (
+                <button
+                  key={tab}
+                  type="button"
+                  role="tab"
+                  aria-selected={rankTab === tab}
+                  onClick={() => setRankTab(tab)}
+                  className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                    rankTab === tab
+                      ? "bg-teal-700 text-white shadow-sm"
+                      : "text-zinc-600 hover:bg-white hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white"
+                  }`}
+                >
+                  {tab}
+                </button>
+              ))}
+            </div>
+            <div className="h-5 w-px bg-zinc-200 dark:bg-zinc-800" />
+            <div role="tablist" className="flex w-fit items-center gap-1 rounded-full bg-zinc-100 p-1 dark:bg-zinc-900">
+              {RANK_METRIC_TABS.map((metric) => (
+                <button
+                  key={metric}
+                  type="button"
+                  role="tab"
+                  aria-selected={rankMetricTab === metric}
+                  onClick={() => setRankMetricTab(metric)}
+                  className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                    rankMetricTab === metric
+                      ? "bg-teal-700 text-white shadow-sm"
+                      : "text-zinc-600 hover:bg-white hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white"
+                  }`}
+                >
+                  {metric}
+                </button>
+              ))}
+            </div>
           </div>
           <SingleMetricBarChart
             data={rankTab === "By Property" ? propertyDataByMetric[rankMetricTab] : brandDataByMetric[rankMetricTab]}
             valueFormatter={rankMetricValueFormatter[rankMetricTab]}
             height={240}
           />
-        </TabbedCard>
+        </Card>
       </div>
 
       <Card title="Booking Pace" subtitle="Occupancy booked so far for each month — real-time, independent of the filters above">
