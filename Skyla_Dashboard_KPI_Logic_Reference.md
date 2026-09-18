@@ -1135,6 +1135,31 @@ data for these B2B metrics."*
   - Verified live: By Property → Occupancy renders a 0-100% axis with
     KDP/HTC/JHS/BH4/GB bars; By Brand → ADR renders a per-night ₹ axis
     (not the Cr-scale Revenue axis) with Skyla/Aptly/Hyber bars.
+  - **2026-09-18 (later, same day) — renamed again + relaid out**, per
+    user feedback that the stacked two-tab-rows version "looks heavy."
+    Card is now "Performance Ranking" (was "Revenue, ADR & Occupancy
+    Ranking"), and the two tab groups (By Property/By Brand, then
+    Revenue/ADR/Occupancy) sit side by side on one row with a thin
+    divider between them, instead of one full-width row each. Switched
+    this card from `TabbedCard` to plain `Card` with both pill groups
+    built inline (sharing `TabbedCard`'s own styling verbatim) — a
+    genuinely two-tab-row card doesn't fit `TabbedCard`'s one-row API
+    without either component; picking `Card` was less invasive than
+    changing `TabbedCard` itself for one caller. Verified live.
+- **2026-09-18 (later still) — Leads "New Leads" (840 vs 847) investigated,
+  confirmed NOT a bug**. User's own source-sheet filter for Q1 FY26-27
+  (Apr-Jun 2026), manually scoped to Business WA + Exotel, counted 840;
+  the dashboard's "New Leads" tile for the identical range shows 847.
+  Checked live, broken down by `Source` for the exact same range:
+  Exotel 608 + Business WA 231 = 839 (within 1 of the user's manual 840 —
+  plausibly just sheet-filter/boundary noise, not chased further) +
+  **Website 8** = 847, exactly matching the dashboard. `B2C_SOURCES_SQL`
+  in `leads.ts` has always deliberately included Website alongside
+  Exotel/Business WA as a third B2C acquisition channel (see that
+  constant's own header comment — a pre-existing, documented design
+  decision, not something changed today) — the dashboard figure is
+  correct; the user's manual sheet count simply didn't include Website
+  leads. No code change made.
 - **Exotel/Reference/Existing tiles relabelled** "263 / 36 closed" →
   "263 leads · 36 closed" for clarity (item 2 — it means 263 leads from
   that source for the owner, 36 converted).
