@@ -30,7 +30,7 @@ import DonutChart from "@/components/charts/DonutChart";
 import ProgressBar from "@/components/ui/ProgressBar";
 import { formatIndianCurrency, formatPercent, safeDivide } from "@/lib/format/currency";
 import { CATEGORY_COLOR, CATEGORY_ORDER, BRAND_COLOR, BRAND_ORDER } from "@/lib/design/tokens";
-import { brandOf } from "@/lib/reference/propertyReference";
+import { brandOf, Brand } from "@/lib/reference/propertyReference";
 
 // Three consecutive calendar months, side by side, each carrying its own exact
 // month name and a one-line explainer — so "what period is this?" and "is this
@@ -100,6 +100,15 @@ const MIX_TABS: MixTab[] = ["Revenue", "Nights", "ADR"];
 type RankTab = "By Property" | "By Brand";
 const RANK_TABS: RankTab[] = ["By Property", "By Brand"];
 
+// 2026-09-18: Revenue/ADR/Occupancy shown separately under BOTH By
+// Property and By Brand, per explicit user direction — was ADR-only under
+// By Property and Occupancy-only under By Brand (two different metrics on
+// the two outer tabs, with no way to see e.g. a property's occupancy or a
+// brand's ADR at all). A second, inner tab row picks the metric; the outer
+// RANK_TABS still pick the grouping.
+type RankMetricTab = "Revenue" | "ADR" | "Occupancy";
+const RANK_METRIC_TABS: RankMetricTab[] = ["Revenue", "ADR", "Occupancy"];
+
 export default function OverviewContent({
   overview,
   adrByProperty,
@@ -121,6 +130,7 @@ export default function OverviewContent({
   const [trendTab, setTrendTab] = useTabbedCard(TREND_TABS);
   const [mixTab, setMixTab] = useTabbedCard(MIX_TABS);
   const [rankTab, setRankTab] = useTabbedCard(RANK_TABS);
+  const [rankMetricTab, setRankMetricTab] = useTabbedCard(RANK_METRIC_TABS);
 
   // Comparisons are opt-in: with the toggle off, only the current-period
   // line is drawn (no empty "Preceding period" legend entry for a series
@@ -161,16 +171,27 @@ export default function OverviewContent({
 
   // 2026-09-10: property bars coloured by their brand (Pic 3/4/5), so brand
   // identity is consistent wherever properties or brands appear in a chart.
-  const adrByPropertyData: BarDatum[] = adrByProperty.map((r) => ({
-    name: r.property,
-    value: r.adr ?? 0,
-    color: BRAND_COLOR[brandOf(r.property) ?? ""] ?? "var(--series-4)",
-  }));
-  const brandData: BarDatum[] = BRAND_ORDER.filter((b) => brandOccupancy.some((r) => r.brand === b)).map((b) => ({
-    name: b,
-    value: (brandOccupancy.find((r) => r.brand === b)?.occupancyPct ?? 0) * 100,
-    color: BRAND_COLOR[b],
-  }));
+  // 2026-09-18: Revenue/ADR/Occupancy each get their own bar-data array
+  // (all from the same already-fetched adrByProperty/brandOccupancy rows —
+  // no new queries), picked by rankMetricTab in the JSX below.
+  const propertyColor = (property: string) => BRAND_COLOR[brandOf(property) ?? ""] ?? "var(--series-4)";
+  const revenueByPropertyData: BarDatum[] = adrByProperty.map((r) => ({ name: r.property, value: r.revenue, color: propertyColor(r.property) }));
+  const adrByPropertyData: BarDatum[] = adrByProperty.map((r) => ({ name: r.property, value: r.adr ?? 0, color: propertyColor(r.property) }));
+  const occByPropertyData: BarDatum[] = adrByProperty.map((r) => ({ name: r.property, value: (r.occupancyPct ?? 0) * 100, color: propertyColor(r.property) }));
+  const propertyDataByMetric: Record<RankMetricTab, BarDatum[]> = { Revenue: revenueByPropertyData, ADR: adrByPropertyData, Occupancy: occByPropertyData };
+
+  const brandsPresent = BRAND_ORDER.filter((b) => brandOccupancy.some((r) => r.brand === b));
+  const brandRow = (b: Brand) => brandOccupancy.find((r) => r.brand === b);
+  const revenueByBrandData: BarDatum[] = brandsPresent.map((b) => ({ name: b, value: brandRow(b)?.revenue ?? 0, color: BRAND_COLOR[b] }));
+  const adrByBrandData: BarDatum[] = brandsPresent.map((b) => ({ name: b, value: brandRow(b)?.adr ?? 0, color: BRAND_COLOR[b] }));
+  const occByBrandData: BarDatum[] = brandsPresent.map((b) => ({ name: b, value: (brandRow(b)?.occupancyPct ?? 0) * 100, color: BRAND_COLOR[b] }));
+  const brandDataByMetric: Record<RankMetricTab, BarDatum[]> = { Revenue: revenueByBrandData, ADR: adrByBrandData, Occupancy: occByBrandData };
+
+  const rankMetricValueFormatter: Record<RankMetricTab, (v: number) => string> = {
+    Revenue: (v) => formatIndianCurrency(v),
+    ADR: (v) => `₹${Math.round(v).toLocaleString("en-IN")}`,
+    Occupancy: (v) => `${v.toFixed(0)}%`,
+  };
 
   return (
     <div className="space-y-4">
@@ -238,12 +259,35 @@ export default function OverviewContent({
           )}
         </TabbedCard>
 
-        <TabbedCard title="ADR & Occupancy Ranking" tabs={RANK_TABS} active={rankTab} onChange={setRankTab}>
-          {rankTab === "By Property" ? (
-            <SingleMetricBarChart data={adrByPropertyData} valueFormatter={(v) => `₹${Math.round(v).toLocaleString("en-IN")}`} height={240} />
-          ) : (
-            <SingleMetricBarChart data={brandData} valueFormatter={(v) => `${v.toFixed(0)}%`} height={240} />
-          )}
+        <TabbedCard title="Revenue, ADR & Occupancy Ranking" tabs={RANK_TABS} active={rankTab} onChange={setRankTab}>
+          {/* 2026-09-18: inner metric row — Revenue/ADR/Occupancy — nested
+              under the outer By Property/By Brand grouping tabs. TabbedCard
+              itself only supports one tab level, so this repeats its pill
+              styling inline rather than introducing a second component for
+              what's still conceptually "more tabs, one level down". */}
+          <div role="tablist" className="mb-3 flex w-fit items-center gap-1 rounded-full bg-zinc-100 p-1 dark:bg-zinc-900">
+            {RANK_METRIC_TABS.map((metric) => (
+              <button
+                key={metric}
+                type="button"
+                role="tab"
+                aria-selected={rankMetricTab === metric}
+                onClick={() => setRankMetricTab(metric)}
+                className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
+                  rankMetricTab === metric
+                    ? "bg-teal-700 text-white shadow-sm"
+                    : "text-zinc-600 hover:bg-white hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white"
+                }`}
+              >
+                {metric}
+              </button>
+            ))}
+          </div>
+          <SingleMetricBarChart
+            data={rankTab === "By Property" ? propertyDataByMetric[rankMetricTab] : brandDataByMetric[rankMetricTab]}
+            valueFormatter={rankMetricValueFormatter[rankMetricTab]}
+            height={240}
+          />
         </TabbedCard>
       </div>
 

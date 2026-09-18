@@ -1113,6 +1113,28 @@ data for these B2B metrics."*
     two rows for the same month instead of one combined figure if two
     variants both billed that month). Verified live: "ADP" is now one row
     (₹15.95L across 5 months, no separate "adp" row).
+- **2026-09-18 — Overview's "ADR & Occupancy Ranking" split into
+  Revenue/ADR/Occupancy tabs under BOTH By Property and By Brand**, per
+  user direction. Previously the card showed one FIXED metric per outer
+  tab — ADR under By Property, Occupancy under By Brand — two different
+  metrics with no way to see, say, a property's occupancy or a brand's
+  ADR at all. Card renamed "Revenue, ADR & Occupancy Ranking".
+  `TabbedCard` only supports one tab level, so the inner Revenue/ADR/
+  Occupancy row repeats its pill styling inline in `OverviewContent.tsx`
+  rather than adding a second shared component for what's still
+  conceptually "more tabs, one level down".
+  - `getAdrByProperty` (`overview.ts`) already had revenue and nights per
+    property — extended with `availableRoomNights`/`occupancyPct` (via
+    `getAvailableRoomNightsByProperty`, already LP-aware) rather than a
+    new query, so this only added one extra call, not a new fetch.
+  - `getBrandOccupancy` (`brandCategory.ts`) already had sold/available
+    nights per brand — extended with `revenue`/`adr`, switching its LP
+    merge from the narrower `getLpSoldRoomNights` (now unused, deleted)
+    to `getLpOverviewTotals`, which already carries both revenue and
+    nights in one call.
+  - Verified live: By Property → Occupancy renders a 0-100% axis with
+    KDP/HTC/JHS/BH4/GB bars; By Brand → ADR renders a per-night ₹ axis
+    (not the Cr-scale Revenue axis) with Skyla/Aptly/Hyber bars.
 - **Exotel/Reference/Existing tiles relabelled** "263 / 36 closed" →
   "263 leads · 36 closed" for clarity (item 2 — it means 263 leads from
   that source for the owner, 36 converted).
@@ -1132,6 +1154,36 @@ data for these B2B metrics."*
   replace with Looker's actual calculated-field formula if it ever becomes
   available, but a large, verified improvement over the old
   unbounded-to-each-property's-raw-data-end behavior regardless.
+  - **2026-09-18 — REWRITTEN again, this time for guaranteed reconciliation
+    over Looker-matching**, per explicit user direction: "these values
+    should add up correctly to Available... for every timeline filter."
+    The two-different-horizons design above (90 days for Available, a
+    separately-fit 53 for Remaining) plus a deliberately UNWEIGHTED sold
+    count for Remaining (to match what looked like Looker's own
+    convention) turned out to be exactly why Sold+Unsold+Remaining never
+    quite equalled Available: checked live before this fix, This FY summed
+    to 38,072 against an Available of 42,466 — a 4,394-night gap from the
+    two horizons alone, plus a smaller, constant gap (26 nights on This
+    Month) from the weighted-vs-unweighted mismatch wherever BH4's "3
+    Bedroom Apartments" have forward bookings (confirmed live: 36
+    nights' worth of weighted-vs-unweighted difference in BH4's forward
+    window at the time). Rewrote `getRoomNightsGap` so Available, Sold,
+    Unsold, and Remaining are ALL computed over the exact same capped
+    range (one horizon, still 90 days — the one independently validated
+    against Looker's own Available figure), split at today/yesterday, with
+    the same weighted room-night expression throughout. This makes the
+    identity hold by construction: Sold + Unsold + Remaining = Available,
+    always (barring the pathological case of genuinely overbooked raw
+    data). One deliberate side effect: Sold Room Nights on this card can
+    now be capped lower than an unbounded "every night ever sold in this
+    FY" count for a wide scope — acceptable, since this function has
+    exactly one consumer (this card) and its whole point is the 4-way
+    split reconciling, not an independent all-time Sold figure (that's
+    `getBookingStats` elsewhere on the page, uncapped). Verified live
+    across Today/This Month/Last 7 Days/Last 30 Days/This FY, a wide
+    Custom Range spanning the horizon boundary, a fully-past Custom Range,
+    and a deliberately future-dated Custom Range starting after the
+    horizon — all reconcile to diff=0.
 - **Still open — Total Bookings, ALOS**: Total Bookings runs +10% (This FY:
   4,162 vs 3,753) to +230% (This Month: 447 vs 136) high. Tested the
   hypothesis that Looker counts by **ReservationDate** (when a booking was

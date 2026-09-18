@@ -6,7 +6,7 @@
 // FY" — it's "vs whatever the active tab's previous range is").
 import { runQuery, table } from "../client";
 import { KpiFilter, resolveFilter, buildScopeClause, buildPreviousScopeClause, SALES_BOOKING_STAY_FILTER, roomNightUnitsSqlExpr } from "./filters";
-import { getAvailableRoomNights } from "./propertyWindows";
+import { getAvailableRoomNights, getAvailableRoomNightsByProperty } from "./propertyWindows";
 import { getLpOverviewTotals, getLpAdr, LP_PROPERTY } from "./lpMonthly";
 import { bookingCategorySqlExpr, bookingIsUnmappedSqlExpr, BookingCategory } from "@/lib/reference/bookingSourceMap";
 import { safeDivide } from "@/lib/format/currency";
@@ -206,25 +206,48 @@ export interface PropertyAdr {
   revenue: number;
   nights: number;
   adr: number | null;
+  availableRoomNights: number;
+  occupancyPct: number | null;
 }
 
-/** ADR broken out per property, for the same scope as getOverviewKpis. */
+// 2026-09-18: availableRoomNights/occupancyPct added alongside the existing
+// revenue/ADR fields — see brandCategory.ts's getBrandOccupancy header
+// comment for why (Overview's "ADR & Occupancy Ranking" card now shows
+// Revenue/ADR/Occupancy as separate tabs under both By Property and By
+// Brand, not one fixed metric per grouping).
+/** ADR (+ revenue, occupancy) broken out per property, for the same scope as getOverviewKpis. */
 export async function getAdrByProperty(filter: KpiFilter): Promise<PropertyAdr[]> {
   const resolved = resolveFilter(filter);
   const { clause: where, params } = buildScopeClause("Property", "CAST(StayDate AS DATE)", resolved, "");
-  const rows = await runQuery<{ property: string; revenue: number | null; nights: number }>(`
-    SELECT Property AS property, SUM(DailyRevenue) AS revenue, SUM(${roomNightUnitsSqlExpr()}) AS nights
-    FROM ${table("sales_booking")}
-    WHERE ${where}
-    GROUP BY property
-    ORDER BY revenue DESC
-  `, params);
-  const result = rows.map((r) => ({ property: r.property, revenue: r.revenue ?? 0, nights: r.nights, adr: safeDivide(r.revenue ?? 0, r.nights) }));
+  const [rows, availableByProperty] = await Promise.all([
+    runQuery<{ property: string; revenue: number | null; nights: number }>(`
+      SELECT Property AS property, SUM(DailyRevenue) AS revenue, SUM(${roomNightUnitsSqlExpr()}) AS nights
+      FROM ${table("sales_booking")}
+      WHERE ${where}
+      GROUP BY property
+      ORDER BY revenue DESC
+    `, params),
+    getAvailableRoomNightsByProperty(resolved.properties, resolved.period.current),
+  ]);
+  const result = rows.map((r) => {
+    const available = availableByProperty[r.property] ?? 0;
+    return {
+      property: r.property,
+      revenue: r.revenue ?? 0,
+      nights: r.nights,
+      adr: safeDivide(r.revenue ?? 0, r.nights),
+      availableRoomNights: available,
+      occupancyPct: safeDivide(r.nights, available),
+    };
+  });
 
   // LP has zero sales_booking rows — its own row comes from sales_booking_lp_monthly instead.
   if (resolved.properties.includes(LP_PROPERTY)) {
     const lp = await getLpAdr(resolved.period.current);
-    if (lp.nights > 0 || lp.revenue > 0) result.push({ property: LP_PROPERTY, revenue: lp.revenue, nights: lp.nights, adr: lp.adr });
+    if (lp.nights > 0 || lp.revenue > 0) {
+      const lpAvailable = availableByProperty[LP_PROPERTY] ?? 0;
+      result.push({ property: LP_PROPERTY, revenue: lp.revenue, nights: lp.nights, adr: lp.adr, availableRoomNights: lpAvailable, occupancyPct: safeDivide(lp.nights, lpAvailable) });
+    }
   }
 
   return result.sort((a, b) => b.revenue - a.revenue);

@@ -162,12 +162,6 @@ export async function getLpCategoryMix(range: DateRange): Promise<LpCategoryMix[
   return totals.bySource;
 }
 
-/** Total sold room-nights for LP across the range — for Brand's getBrandOccupancy (LP rolls into Aptly alongside BH4). */
-export async function getLpSoldRoomNights(range: DateRange): Promise<number> {
-  const rows = await getLpMonthlyRows(range);
-  return rows.reduce((s, r) => s + (r.SoldRoomNights ?? 0), 0);
-}
-
 export interface LpAdr {
   revenue: number;
   nights: number;
