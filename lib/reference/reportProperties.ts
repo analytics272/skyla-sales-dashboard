@@ -8,5 +8,13 @@
 // compile time — only actual exported consts/arrays do.
 export const REPORT_PROPERTIES = ["KDP", "HTC", "JHS", "BH4", "GB"] as const;
 export type ReportProperty = (typeof REPORT_PROPERTIES)[number];
+
+// 2026-09-19 (PRD_Reports_Section_Final.md §2): "FO" (café outlet, not a
+// room property) is NOT its own column here — per explicit user direction
+// ("include FO in F&B Revenue, don't separate it"). Its F&B revenue is
+// folded into the TOTAL column's F&B/Total Revenue only, counted exactly
+// once (see reports.ts's factsToColumns) — it never appears as its own
+// row/column, and it's never added into any individual hotel property's
+// own F&B figure either.
 export type ReportColumn = ReportProperty | "TOTAL";
 export const REPORT_COLUMNS: ReportColumn[] = [...REPORT_PROPERTIES, "TOTAL"];
