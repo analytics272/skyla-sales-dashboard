@@ -1160,6 +1160,66 @@ data for these B2B metrics."*
   decision, not something changed today) — the dashboard figure is
   correct; the user's manual sheet count simply didn't include Website
   leads. No code change made.
+- **2026-09-19 — Reports tab: dedicated FY selectors, F&B fixed to the
+  real POS source, Reports-page period pills hidden, B2C/OTA/Booking-
+  Behavior notes resolved**. Per `PRD_Reports_Section_Final.md`, a
+  follow-up to the original `Skyla_Dashboard_Reports_Tab_PRD.md` that
+  first built this tab.
+  - **Dedicated FY selectors added to both reports** (`recentFyLabels()`
+    in `financialYear.ts` — current FY + 2 prior, computed once and
+    shared since both reports happen to need the same 3 years). Synced to
+    their own URL params (`?folioFy=`/`?b2bFy=`), independent of each
+    other and of the dashboard's global period filter — see
+    `ReportsContent.tsx`'s `FySelector`. `getFolioBasedReport`/
+    `getB2bDetailReport` (`reports.ts`) now take an `fy` param (default
+    `currentFYLabel()`) instead of the old hardcoded `REPORTS_FY`
+    constant (removed). Folio Based Report's heading is fixed as "Folio
+    Based Report" regardless of the selected FY (PRD's explicit
+    requirement) — the FY selector above it is what shows which year is
+    active; B2B Details' heading DOES show its FY dynamically (no such
+    restriction for that report).
+  - **Real bug found and fixed while building this**: "Overall – till
+    date" always used `today` as its upper date bound regardless of
+    which FY was selected — for a PAST FY (e.g. FY 24-25 while today is
+    in FY 26-27), that meant querying 18 months past the FY's own end.
+    Caught live: selecting FY 24-25 showed "Overall – till date is FY
+    24-25's start through 19 Sep 2026." Fixed by clamping to
+    `min(today, fyEnd)` everywhere the "Overall" block's date range is
+    used — verified live: now correctly reads "…through 31 Mar 2025."
+  - **F&B Revenue switched to the real POS source** — see
+    `lib/bigquery/queries/reports.ts`'s own header comment for the full
+    story (checked live: the old `sales_booking` proxy read ₹587-4,825
+    per hotel vs `fnb_sale`'s real ₹2.4L-18.6L; the reference sheet's own
+    "Overall" F&B cell has a genuine missing-date-filter bug plus
+    duplicates the "FO" café's revenue into every property). Per
+    explicit user direction, FO's F&B is folded into TOTAL only — not
+    its own column, not added to any hotel property.
+  - **Reports page's period pills + Compare-to-Last-Year toggle hidden
+    entirely** (`FilterBar.tsx`'s `hidePeriodControls`), per explicit
+    user direction — both reports ignore them completely (each has its
+    own FY selector instead), so showing inert controls was confusing.
+    Property filter + Reset still apply and stay visible.
+  - **B2C/OTA/Total-Bookings "not yet confirmed" notes resolved** — see
+    `FolioReportTable.tsx`'s own header comment for the full
+    investigation. Checked live against the actual reference sheet:
+    these rows differ from it by a consistent ~5-6x factor (e.g. KDP OTA
+    Nights 1,283 here vs 7,317 in the sheet), while Room Revenue —
+    sourced differently in the sheet — is only ~11% off. That pattern (one
+    uniform large multiplier, isolated to the sheet's own
+    `COUNTIFS('Consolidated Guest list'!...)`-based rows) matches a bug
+    the parallel analyst investigation (`HANDOVER_2026-09-11.md` §14c,
+    placed in `project knowledge/` alongside the PRD — not committed to
+    this repo, contains internal staff detail) already confirmed exists
+    in a different tab of the same workbook: a column that repeats a
+    multi-row booking's full count on every one of its rows. Per
+    explicit user direction ("take data from PMS, the sheet is layout
+    only, not source of truth") and the PRD's own governing rule — these
+    rows are UNCHANGED, still computed from `sales_booking` via the same
+    `bookingCategorySqlExpr` classifier used dashboard-wide; the warning
+    triangles are removed since this is now a confirmed decision, not an
+    open question. B2B Revenue Share's own note is untouched (a
+    different, narrower, still-genuinely-open caveat — only the Overall
+    column's magnitude was checked, not every month).
 - **Exotel/Reference/Existing tiles relabelled** "263 / 36 closed" →
   "263 leads · 36 closed" for clarity (item 2 — it means 263 leads from
   that source for the owner, 36 converted).

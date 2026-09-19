@@ -21,10 +21,28 @@ type MetricRow = { kind: "metric"; label: string; value: (m: FolioReportMetrics)
 type SectionRow = { kind: "section"; label: string };
 type Row = MetricRow | SectionRow;
 
-// Sheet's own row grouping (PRD §1.1/§1.2). "Not yet confirmed" rows (PRD
-// §1.3 — B2C/OTA revenue-adr-share, the whole booking-behavior section) are
-// still built and shown, per the PRD's own "doesn't block the build"
-// direction — flagged with `note` instead of being left out.
+// Sheet's own row grouping (PRD §1.1/§1.2).
+//
+// 2026-09-19 — B2C/OTA/Total-Bookings rows were flagged "not yet
+// independently confirmed against the source sheet" since this file was
+// first built. Checked live against the actual reference sheet this
+// session: our figures differ from it by a consistent ~5-6x factor (e.g.
+// KDP OTA Nights: 1,283 here vs 7,317 in the sheet; Total Bookings: 2,055
+// vs 12,099) — while Room Revenue, sourced differently in the sheet, is
+// only ~11% off. A uniform multiplier isolated to the sheet's
+// `COUNTIFS('Consolidated Guest list'!...)`-based rows, with revenue
+// figures from elsewhere staying close, matches a bug the parallel
+// analyst investigation (`HANDOVER_2026-09-11.md` §14c) already confirmed
+// exists in a DIFFERENT tab of this same workbook: a column that repeats
+// a multi-row booking's full count on every one of its rows, inflating a
+// naive SUM/COUNT several-fold. Per PRD_Reports_Section_Final.md §0's own
+// governing rule ("BigQuery is the sole source of truth for values, the
+// sheet is a template for structure/labels/formulas only") and explicit
+// user direction after this finding — these rows are NOT changed to
+// chase the sheet's number; they keep computing from `sales_booking` via
+// the same `bookingCategorySqlExpr` classifier used dashboard-wide. No
+// more `note`/warning-triangle on these rows — this isn't an open
+// question anymore, it's a confirmed decision.
 const ROWS: Row[] = [
   { kind: "section", label: "Revenue" },
   { kind: "metric", label: "Room Revenue", value: (m) => money(m.roomRevenue) },
@@ -54,18 +72,18 @@ const ROWS: Row[] = [
 
   { kind: "section", label: "B2C" },
   { kind: "metric", label: "B2C Nights", value: (m) => count(m.b2cNights) },
-  { kind: "metric", label: "B2C Revenue", value: (m) => money(m.b2cRevenue), note: "Not yet independently confirmed against the source sheet (PRD §1.3)." },
-  { kind: "metric", label: "B2C ADR", value: (m) => rupee(m.b2cAdr), note: "Not yet independently confirmed against the source sheet (PRD §1.3)." },
-  { kind: "metric", label: "B2C Revenue Share", value: (m) => pct(m.b2cRevenueSharePct), note: "Not yet independently confirmed against the source sheet (PRD §1.3)." },
+  { kind: "metric", label: "B2C Revenue", value: (m) => money(m.b2cRevenue) },
+  { kind: "metric", label: "B2C ADR", value: (m) => rupee(m.b2cAdr) },
+  { kind: "metric", label: "B2C Revenue Share", value: (m) => pct(m.b2cRevenueSharePct) },
 
   { kind: "section", label: "OTA" },
-  { kind: "metric", label: "OTA Nights", value: (m) => count(m.otaNights), note: "Structure not yet directly inspected against the source sheet (PRD §1.3)." },
-  { kind: "metric", label: "OTA Revenue", value: (m) => money(m.otaRevenue), note: "Structure not yet directly inspected against the source sheet (PRD §1.3)." },
-  { kind: "metric", label: "OTA ADR", value: (m) => rupee(m.otaAdr), note: "Structure not yet directly inspected against the source sheet (PRD §1.3)." },
-  { kind: "metric", label: "OTA Revenue Share", value: (m) => pct(m.otaRevenueSharePct), note: "Structure not yet directly inspected against the source sheet (PRD §1.3)." },
+  { kind: "metric", label: "OTA Nights", value: (m) => count(m.otaNights) },
+  { kind: "metric", label: "OTA Revenue", value: (m) => money(m.otaRevenue) },
+  { kind: "metric", label: "OTA ADR", value: (m) => rupee(m.otaAdr) },
+  { kind: "metric", label: "OTA Revenue Share", value: (m) => pct(m.otaRevenueSharePct) },
 
   { kind: "section", label: "Booking Behavior" },
-  { kind: "metric", label: "Total Bookings", value: (m) => count(m.totalBookings), note: "Row group not yet independently confirmed against the source sheet's own grouping (PRD §1.3)." },
+  { kind: "metric", label: "Total Bookings", value: (m) => count(m.totalBookings) },
   { kind: "metric", label: "Repeat Count", value: (m) => count(m.repeatCount) },
   { kind: "metric", label: "Unique Count", value: (m) => count(m.uniqueCount) },
   { kind: "metric", label: "Repeat %", value: (m) => pct(m.repeatSharePct) },
@@ -105,7 +123,12 @@ export default function FolioReportTable({ report }: { report: FolioReport }) {
   return (
     <div className="min-w-0 rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
       <div className="border-b border-zinc-100 px-4 py-3 dark:border-zinc-800">
-        <h3 className="text-lg font-semibold text-zinc-800 dark:text-zinc-100">Folio Based Report {report.fy}</h3>
+        {/* 2026-09-19 (PRD_Reports_Section_Final.md §2): heading fixed as
+            "Folio Based Report" regardless of the selected FY — the FY
+            selector above this card (ReportsContent.tsx) is what shows
+            which year is active; report.fy still appears in the subtitle
+            below since that's explanatory text, not the heading itself. */}
+        <h3 className="text-lg font-semibold text-zinc-800 dark:text-zinc-100">Folio Based Report</h3>
         <p className="mt-0.5 text-xs text-zinc-400 dark:text-zinc-500">
           &quot;Overall – till date&quot; is {report.fy}&apos;s start through {report.asOfLabel} (inclusive). Every other block is a full calendar month —
           months after {report.asOfLabel} show real advance-booking data already on the books, not a projection.

@@ -64,7 +64,7 @@ export default function B2bDetailContent({ report }: { report: B2bDetailReport }
       </div>
 
       <Card
-        title={`FY 26-27 B2B Details — Company × Month (${report.zoneA.length} companies)`}
+        title={`${report.fy} B2B Details — Company × Month (${report.zoneA.length} companies)`}
         subtitle="Click a total column to sort. Source: b2b_bills, live — never a cached sheet pivot cell."
       >
         {/* Bounded scroll box on both axes — load-bearing, not just sizing:

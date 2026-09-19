@@ -32,6 +32,12 @@ export function currentFYLabel(asOf: Date = new Date()): string {
   return fyLabel(fyStartYearOf(asOf));
 }
 
+/** The current FY plus `count - 1` prior ones, most recent first — e.g. recentFyLabels(3) on 19 Sep 2026 -> ["FY 26-27", "FY 25-26", "FY 24-25"]. Used by the Reports tab's dedicated FY selectors (PRD_Reports_Section_Final.md) — both reports' selectable years happen to be the same 3, computed once here rather than duplicated per report. */
+export function recentFyLabels(count: number, asOf: Date = new Date()): string[] {
+  const currentStartYear = fyStartYearOf(asOf);
+  return Array.from({ length: count }, (_, i) => fyLabel(currentStartYear - i));
+}
+
 export function parseFyLabel(fy: string): number {
   const m = /^FY\s*(\d{2})-(\d{2})$/.exec(fy.trim());
   if (!m) throw new Error(`Invalid FY label: ${fy}`);

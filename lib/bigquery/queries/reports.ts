@@ -10,21 +10,22 @@
 // rows) — this file reproduces the sheet's FORMULAS, never its output
 // values, so it is unaffected by that bug.
 //
-// Both reports are fixed to FY 26-27 regardless of the dashboard's global
-// period-tab filter (only the Property filter applies here) — the report is
-// named for one specific FY, the same way Property Targets' fixed FY27
-// sheet doesn't move with the period filter either.
+// 2026-09-19 (PRD_Reports_Section_Final.md §1/§2) — both reports now take a
+// dedicated `fy` parameter instead of being hardcoded to FY 26-27, backed
+// by a local (not global-dashboard-filter) FY selector in the UI — see
+// ReportsContent.tsx. Defaults to `currentFYLabel()` when no FY is
+// selected. Only the Property filter (still global) narrows either report
+// beyond that; the dashboard's period-tab filter never applies here, since
+// each report is inherently scoped to one whole FY at a time.
 import { runQuery, table, fnbTable } from "../client";
 import { bookingCategorySqlExpr } from "@/lib/reference/bookingSourceMap";
 import { SALES_BOOKING_STAY_FILTER, roomNightUnitsSqlExpr } from "./filters";
 import { getAvailableRoomNightsByProperty } from "./propertyWindows";
-import { fyBounds, fyMonthBounds, calendarMonthFromFiscal, DateRange } from "@/lib/reference/financialYear";
+import { fyBounds, fyMonthBounds, calendarMonthFromFiscal, currentFYLabel, DateRange } from "@/lib/reference/financialYear";
 import { safeDivide } from "@/lib/format/currency";
 import { REPORT_PROPERTIES, ReportProperty, ReportColumn } from "@/lib/reference/reportProperties";
 
 export { REPORT_PROPERTIES, REPORT_COLUMNS, type ReportProperty, type ReportColumn } from "@/lib/reference/reportProperties";
-
-export const REPORTS_FY = "FY 26-27";
 
 // The sheet's own property set — five operating hotels, no LP (retired, no
 // live PMS feed, not a column in either source sheet). Fixed in
@@ -468,27 +469,34 @@ function factsToColumns(properties: ReportProperty[], facts: Record<ReportProper
   return columns;
 }
 
-export async function getFolioBasedReport(selectedProperties: string[] | undefined): Promise<FolioReport> {
+export async function getFolioBasedReport(selectedProperties: string[] | undefined, fy: string = currentFYLabel()): Promise<FolioReport> {
   const properties = resolveReportProperties(selectedProperties);
-  const fy = REPORTS_FY;
-  const { start: fyStart } = fyBounds(fy);
+  const { start: fyStart, end: fyEnd } = fyBounds(fy);
   const today = new Date().toISOString().slice(0, 10);
+  // "Overall – till date" only means "through today" for the CURRENT FY. For
+  // a past FY (e.g. FY 24-25 selected while today is in FY 26-27), "today"
+  // is already 1-2 years past that FY's own end — clamping here is what
+  // makes a past FY's "Overall" block equal its own full 12-month total,
+  // instead of silently reaching past the FY boundary into data that
+  // doesn't belong to it. Caught live: selecting FY 24-25 showed "Overall –
+  // till date is FY 24-25's start through 19 Sep 2026" before this fix.
+  const tillDateEnd = today < fyEnd ? today : fyEnd;
 
   const [revCatMonthly, bookingsMonthly, revCatTillDate, bookingsTillDate, b2bBillsAllTime, availableByMonth, availableTillDate, fnbMonthlyRows, fnbTillDateRows] =
     await Promise.all([
       fetchRevenueCategoryByMonth(properties, fy),
       fetchBookingsByMonth(properties, fy),
-      fetchRevenueCategoryTillDate(properties, fyStart, today),
-      fetchBookingsTillDate(properties, fyStart, today),
+      fetchRevenueCategoryTillDate(properties, fyStart, tillDateEnd),
+      fetchBookingsTillDate(properties, fyStart, tillDateEnd),
       fetchB2bBillsRevenueAllTime(properties),
       Promise.all(
         Array.from({ length: 12 }, (_, i) => i + 1).map((fiscalMonth) =>
           getAvailableRoomNightsByProperty(properties, fyMonthBounds(fy, calendarMonthFromFiscal(fiscalMonth)))
         )
       ),
-      getAvailableRoomNightsByProperty(properties, { start: fyStart, end: today } as DateRange),
+      getAvailableRoomNightsByProperty(properties, { start: fyStart, end: tillDateEnd } as DateRange),
       fetchFnbRevenueByMonth(fy),
-      fetchFnbRevenueTillDate(fyStart, today),
+      fetchFnbRevenueTillDate(fyStart, tillDateEnd),
     ]);
 
   const fnbTillDateByProperty = Object.fromEntries(fnbTillDateRows.map((r) => [r.property, r.fnb_revenue ?? 0]));
@@ -517,7 +525,7 @@ export async function getFolioBasedReport(selectedProperties: string[] | undefin
     });
   }
 
-  const asOfDate = new Date(`${today}T00:00:00`);
+  const asOfDate = new Date(`${tillDateEnd}T00:00:00`);
   const asOfLabel = `${asOfDate.getDate()} ${MONTH_ABBR[asOfDate.getMonth()]} ${asOfDate.getFullYear()}`;
 
   return { fy, asOfLabel, columns: [...properties, "TOTAL"], overall, months };
@@ -571,9 +579,8 @@ function monthSortKey(fy: string, label: string): string {
   return `${fy}-${String(fiscal).padStart(2, "0")}`;
 }
 
-export async function getB2bDetailReport(selectedProperties: string[] | undefined): Promise<B2bDetailReport> {
+export async function getB2bDetailReport(selectedProperties: string[] | undefined, fy: string = currentFYLabel()): Promise<B2bDetailReport> {
   const properties = resolveReportProperties(selectedProperties);
-  const fy = REPORTS_FY;
 
   const [zoneARows, zoneBRows] = await Promise.all([
     runQuery<ZoneARawRow>(`
