@@ -25,6 +25,15 @@ export function table(name: string): string {
   return `\`${PROJECT_ID}.${DATASET}.${name}\``;
 }
 
+// 2026-09-19 — F&B POS data (PRD_Reports_Section_Final.md §0) lives in a
+// separate dataset from the rest of the pipeline (`skyla_data`, not
+// `Skyla_Sales_Automation`), so it needs its own qualifier rather than
+// `table()`'s hardcoded DATASET.
+const FNB_DATASET = "skyla_data";
+export function fnbTable(name: string): string {
+  return `\`${PROJECT_ID}.${FNB_DATASET}.${name}\``;
+}
+
 export async function runQuery<T = Record<string, unknown>>(
   query: string,
   params?: Record<string, unknown>

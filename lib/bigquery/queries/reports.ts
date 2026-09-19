@@ -14,7 +14,7 @@
 // period-tab filter (only the Property filter applies here) — the report is
 // named for one specific FY, the same way Property Targets' fixed FY27
 // sheet doesn't move with the period filter either.
-import { runQuery, table } from "../client";
+import { runQuery, table, fnbTable } from "../client";
 import { bookingCategorySqlExpr } from "@/lib/reference/bookingSourceMap";
 import { SALES_BOOKING_STAY_FILTER, roomNightUnitsSqlExpr } from "./filters";
 import { getAvailableRoomNightsByProperty } from "./propertyWindows";
@@ -26,12 +26,18 @@ export { REPORT_PROPERTIES, REPORT_COLUMNS, type ReportProperty, type ReportColu
 
 export const REPORTS_FY = "FY 26-27";
 
-// The sheet's own column set — five operating hotels, no LP (retired, no
-// live PMS feed, not a column in either source sheet) and no "FO" (café
-// outlet, not a room property — only relevant to Reviews, §9 of the KPI
-// reference doc). Fixed in lib/reference/reportProperties.ts (re-exported
-// above for existing call sites) rather than reusing ACTIVE_PROPERTY_CODES,
-// which includes LP.
+// The sheet's own property set — five operating hotels, no LP (retired, no
+// live PMS feed, not a column in either source sheet). Fixed in
+// lib/reference/reportProperties.ts (re-exported above for existing call
+// sites) rather than reusing ACTIVE_PROPERTY_CODES, which includes LP.
+//
+// 2026-09-19 — "FO" (café outlet, not a room property) has real F&B
+// revenue in fnb_sale but is NOT its own column here — per explicit user
+// direction ("include FO in F&B Revenue, don't separate it"). Its revenue
+// is folded into the TOTAL column's F&B/Total Revenue only (see
+// factsToColumns below), counted exactly once — never shown as its own
+// row/column, and never added into any individual hotel property's own
+// F&B figure.
 
 const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -207,7 +213,6 @@ interface RevenueCategoryRow {
   category: "B2B" | "B2C" | "OTA";
   nights: number;
   revenue: number | null;
-  fnb_revenue: number | null;
 }
 
 interface BookingRow {
@@ -222,7 +227,7 @@ interface BookingRow {
   expat_repeat_bookings: number;
 }
 
-/** Revenue/F&B/nights by category, grouped by calendar month, for the whole FY (all 12 months — including months ahead of today, which sales_booking legitimately carries as advance bookings). */
+/** Revenue/nights by category, grouped by calendar month, for the whole FY (all 12 months — including months ahead of today, which sales_booking legitimately carries as advance bookings). F&B is fetched separately, from the real POS source — see fetchFnbRevenueByMonth. */
 async function fetchRevenueCategoryByMonth(properties: string[], fy: string): Promise<RevenueCategoryRow[]> {
   const { start, end } = fyBounds(fy);
   return runQuery<RevenueCategoryRow>(`
@@ -231,8 +236,7 @@ async function fetchRevenueCategoryByMonth(properties: string[], fy: string): Pr
       CAST(DATE_TRUNC(CAST(StayDate AS DATE), MONTH) AS STRING) AS month_start,
       ${bookingCategorySqlExpr("Source")} AS category,
       SUM(${roomNightUnitsSqlExpr()}) AS nights,
-      SUM(DailyRevenue) AS revenue,
-      SUM(DailyOtherRevenueExclusiveTax) AS fnb_revenue
+      SUM(DailyRevenue) AS revenue
     FROM ${table("sales_booking")}
     WHERE Property IN UNNEST(@properties) AND CAST(StayDate AS DATE) BETWEEN @start AND @end AND ${SALES_BOOKING_STAY_FILTER}
     GROUP BY property, month_start, category
@@ -246,12 +250,66 @@ async function fetchRevenueCategoryTillDate(properties: string[], start: string,
       Property AS property,
       ${bookingCategorySqlExpr("Source")} AS category,
       SUM(${roomNightUnitsSqlExpr()}) AS nights,
-      SUM(DailyRevenue) AS revenue,
-      SUM(DailyOtherRevenueExclusiveTax) AS fnb_revenue
+      SUM(DailyRevenue) AS revenue
     FROM ${table("sales_booking")}
     WHERE Property IN UNNEST(@properties) AND CAST(StayDate AS DATE) BETWEEN @start AND @end AND ${SALES_BOOKING_STAY_FILTER}
     GROUP BY property, category
   `, { properties, start, end });
+  return rows.map((r) => ({ ...r, month_start: null }));
+}
+
+// 2026-09-19 (PRD_Reports_Section_Final.md §2) — F&B Revenue, from the real
+// POS source (`skyla_data.fnb_sale`), NOT sales_booking's
+// `DailyOtherRevenueExclusiveTax` (a PMS "extras" proxy — checked live
+// against fnb_sale before this change: it read ₹587-4,825 per hotel for
+// FY26-27 to date, vs fnb_sale's real ₹2.4L-18.6L — the proxy was
+// effectively showing service-charge noise, not F&B sales).
+//
+// Also checked live against the reference sheet itself: its "Overall —
+// till date" F&B Revenue cell uses a bare `SUMIF(property)` with NO date
+// criterion (unlike every other metric row, including its own monthly F&B
+// columns, which correctly use a 3-criteria SUMIFS with a month filter) —
+// so that one cell is summing ALL-TIME fnb_sale data mislabeled as
+// "this FY," and separately adds the ENTIRE "FO" café's revenue into
+// EVERY property's row rather than keeping FO as its own line. Both are
+// sheet-side bugs, not something to replicate (see this file's top-of-file
+// PRD § — reproduce the sheet's formula SHAPE, never its buggy output).
+// Per explicit user direction: F&B here is correctly scoped to the
+// selected FY/month (matching the sheet's own — correct — monthly
+// columns), and FO is counted once as its own column (see reportProperties.ts),
+// not duplicated into KDP/HTC/JHS/BH4/GB.
+//
+// `net_amount` (confirmed live: `net_amount = total_amount - total_tax`)
+// is the pre-tax figure the PRD asks for, matching the tax-exclusive
+// convention used for Room Revenue everywhere else on this dashboard —
+// the PRD's own assumed field name (`total_amount_before_tax`) doesn't
+// exist in the actual schema; `net_amount` is the real equivalent.
+interface FnbRevenueRow {
+  property: string; // KDP/HTC/JHS/BH4/GB/FO (+ LP, filtered out below — retired, excluded from active reporting per PRD §0)
+  month_start: string | null;
+  fnb_revenue: number | null;
+}
+
+async function fetchFnbRevenueByMonth(fy: string): Promise<FnbRevenueRow[]> {
+  const { start, end } = fyBounds(fy);
+  return runQuery<FnbRevenueRow>(`
+    SELECT
+      property,
+      CAST(DATE_TRUNC(CAST(date AS DATE), MONTH) AS STRING) AS month_start,
+      CAST(SUM(net_amount) AS FLOAT64) AS fnb_revenue
+    FROM ${fnbTable("fnb_sale")}
+    WHERE CAST(date AS DATE) BETWEEN @start AND @end AND property != 'LP'
+    GROUP BY property, month_start
+  `, { start, end });
+}
+
+async function fetchFnbRevenueTillDate(start: string, end: string): Promise<FnbRevenueRow[]> {
+  const rows = await runQuery<Omit<FnbRevenueRow, "month_start">>(`
+    SELECT property, CAST(SUM(net_amount) AS FLOAT64) AS fnb_revenue
+    FROM ${fnbTable("fnb_sale")}
+    WHERE CAST(date AS DATE) BETWEEN @start AND @end AND property != 'LP'
+    GROUP BY property
+  `, { start, end });
   return rows.map((r) => ({ ...r, month_start: null }));
 }
 
@@ -366,16 +424,17 @@ function buildFactsByProperty(
   revCat: RevenueCategoryRow[],
   bookings: BookingRow[],
   availableByProperty: Record<string, number>,
-  b2bBillsAllTime: Record<string, number>
+  b2bBillsAllTime: Record<string, number>,
+  fnbByProperty: Record<string, number>
 ): Record<ReportProperty, BaseFacts> {
   const result = {} as Record<ReportProperty, BaseFacts>;
   for (const p of properties) {
     const facts: BaseFacts = { ...EMPTY_FACTS };
     facts.availableRoomNights = availableByProperty[p] ?? 0;
     facts.b2bBillsRevenueAllTime = b2bBillsAllTime[p] ?? 0;
+    facts.fnbRevenue = fnbByProperty[p] ?? 0;
     for (const r of revCat.filter((x) => x.property === p)) {
       facts.roomRevenue += r.revenue ?? 0;
-      facts.fnbRevenue += r.fnb_revenue ?? 0;
       facts.soldRoomNights += r.nights;
       if (r.category === "B2B") { facts.b2bNights += r.nights; facts.b2bRevenue += r.revenue ?? 0; }
       else if (r.category === "B2C") { facts.b2cNights += r.nights; facts.b2cRevenue += r.revenue ?? 0; }
@@ -396,13 +455,15 @@ function buildFactsByProperty(
   return result;
 }
 
-function factsToColumns(properties: ReportProperty[], facts: Record<ReportProperty, BaseFacts>): Record<ReportColumn, FolioReportMetrics> {
+/** fnbFo: FO café's own F&B revenue for this same block's date range — folded into TOTAL's F&B/Total Revenue only (not its own column, not added to any hotel property — see this file's header comment). */
+function factsToColumns(properties: ReportProperty[], facts: Record<ReportProperty, BaseFacts>, fnbFo: number): Record<ReportColumn, FolioReportMetrics> {
   const columns = {} as Record<ReportColumn, FolioReportMetrics>;
   let total = EMPTY_FACTS;
   for (const p of properties) {
     columns[p] = deriveMetrics(facts[p]);
     total = sumFacts(total, facts[p]);
   }
+  total = sumFacts(total, { ...EMPTY_FACTS, fnbRevenue: fnbFo });
   columns.TOTAL = deriveMetrics(total);
   return columns;
 }
@@ -413,7 +474,7 @@ export async function getFolioBasedReport(selectedProperties: string[] | undefin
   const { start: fyStart } = fyBounds(fy);
   const today = new Date().toISOString().slice(0, 10);
 
-  const [revCatMonthly, bookingsMonthly, revCatTillDate, bookingsTillDate, b2bBillsAllTime, availableByMonth, availableTillDate] =
+  const [revCatMonthly, bookingsMonthly, revCatTillDate, bookingsTillDate, b2bBillsAllTime, availableByMonth, availableTillDate, fnbMonthlyRows, fnbTillDateRows] =
     await Promise.all([
       fetchRevenueCategoryByMonth(properties, fy),
       fetchBookingsByMonth(properties, fy),
@@ -426,13 +487,16 @@ export async function getFolioBasedReport(selectedProperties: string[] | undefin
         )
       ),
       getAvailableRoomNightsByProperty(properties, { start: fyStart, end: today } as DateRange),
+      fetchFnbRevenueByMonth(fy),
+      fetchFnbRevenueTillDate(fyStart, today),
     ]);
 
-  const overallFacts = buildFactsByProperty(properties, revCatTillDate, bookingsTillDate, availableTillDate, b2bBillsAllTime);
+  const fnbTillDateByProperty = Object.fromEntries(fnbTillDateRows.map((r) => [r.property, r.fnb_revenue ?? 0]));
+  const overallFacts = buildFactsByProperty(properties, revCatTillDate, bookingsTillDate, availableTillDate, b2bBillsAllTime, fnbTillDateByProperty);
   const overall: FolioReportBlock = {
     key: "overall",
     label: "Overall – till date",
-    columns: factsToColumns(properties, overallFacts),
+    columns: factsToColumns(properties, overallFacts, fnbTillDateByProperty.FO ?? 0),
   };
 
   const months: FolioReportBlock[] = [];
@@ -441,12 +505,15 @@ export async function getFolioBasedReport(selectedProperties: string[] | undefin
     const bounds = fyMonthBounds(fy, calendarMonth);
     const monthRows = revCatMonthly.filter((r) => r.month_start === bounds.start);
     const monthBookings = bookingsMonthly.filter((r) => r.month_start === bounds.start);
-    const facts = buildFactsByProperty(properties, monthRows, monthBookings, availableByMonth[fiscalMonth - 1], b2bBillsAllTime);
+    const monthFnbByProperty = Object.fromEntries(
+      fnbMonthlyRows.filter((r) => r.month_start === bounds.start).map((r) => [r.property, r.fnb_revenue ?? 0])
+    );
+    const facts = buildFactsByProperty(properties, monthRows, monthBookings, availableByMonth[fiscalMonth - 1], b2bBillsAllTime, monthFnbByProperty);
     const calendarYear = parseInt(bounds.start.slice(0, 4), 10);
     months.push({
       key: bounds.start,
       label: `${MONTH_ABBR[calendarMonth - 1]} ${String(calendarYear).slice(-2)}`,
-      columns: factsToColumns(properties, facts),
+      columns: factsToColumns(properties, facts, monthFnbByProperty.FO ?? 0),
     });
   }
 
