@@ -82,6 +82,14 @@ export default function FilterBar() {
   const [customOpen, setCustomOpen] = useState(false);
 
   const activeTab = TABS.find((t) => pathname === `/${t.slug}`);
+  // 2026-09-19, per explicit user direction — the period pills (and the
+  // Compare-to-Last-Year toggle, which only means anything relative to one
+  // of those pills) are visible-but-inert on Reports: both its reports
+  // ignore the global period filter entirely, using their own dedicated
+  // per-report FY selectors instead (see ReportsContent.tsx). Showing
+  // controls that do nothing was confusing, so they're hidden here rather
+  // than left inert — Property + Reset still apply and stay visible.
+  const hidePeriodControls = activeTab?.slug === "reports";
 
   function handlePillClick(key: PeriodKey) {
     if (key === "custom") {
@@ -97,42 +105,46 @@ export default function FilterBar() {
       <h1 className="shrink-0 text-lg font-semibold text-zinc-900 dark:text-zinc-50">{activeTab?.label ?? "Dashboard"}</h1>
 
       <div className="flex flex-wrap items-center justify-end gap-2">
-        <div role="tablist" aria-label="Comparison period" className="relative flex flex-wrap items-center gap-1 rounded-full bg-zinc-100 p-1 dark:bg-zinc-900">
-          {PERIOD_OPTIONS.map((opt) => (
-            <div key={opt.key} className="relative">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={period === opt.key}
-                onClick={() => handlePillClick(opt.key)}
-                className={clsx(
-                  "rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors sm:text-sm",
-                  period === opt.key
-                    ? "bg-teal-700 text-white shadow-sm"
-                    : "text-zinc-600 hover:bg-white hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white"
-                )}
-              >
-                {opt.label}
-              </button>
-              {opt.key === "custom" && customOpen && <CustomRangePopover onClose={() => setCustomOpen(false)} />}
+        {!hidePeriodControls && (
+          <>
+            <div role="tablist" aria-label="Comparison period" className="relative flex flex-wrap items-center gap-1 rounded-full bg-zinc-100 p-1 dark:bg-zinc-900">
+              {PERIOD_OPTIONS.map((opt) => (
+                <div key={opt.key} className="relative">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={period === opt.key}
+                    onClick={() => handlePillClick(opt.key)}
+                    className={clsx(
+                      "rounded-full px-3.5 py-1.5 text-xs font-semibold transition-colors sm:text-sm",
+                      period === opt.key
+                        ? "bg-teal-700 text-white shadow-sm"
+                        : "text-zinc-600 hover:bg-white hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white"
+                    )}
+                  >
+                    {opt.label}
+                  </button>
+                  {opt.key === "custom" && customOpen && <CustomRangePopover onClose={() => setCustomOpen(false)} />}
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
 
-        <button
-          type="button"
-          onClick={() => setCompareYoY(!compareYoY)}
-          title="Compare the current selection to the same dates last year, instead of the preceding period"
-          className={clsx(
-            "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
-            compareYoY
-              ? "border-teal-700 bg-teal-700 text-white"
-              : "border-zinc-300 text-zinc-600 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
-          )}
-        >
-          <span className={clsx("h-2 w-2 rounded-full", compareYoY ? "bg-white" : "bg-zinc-400")} />
-          Compare to Last Year
-        </button>
+            <button
+              type="button"
+              onClick={() => setCompareYoY(!compareYoY)}
+              title="Compare the current selection to the same dates last year, instead of the preceding period"
+              className={clsx(
+                "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                compareYoY
+                  ? "border-teal-700 bg-teal-700 text-white"
+                  : "border-zinc-300 text-zinc-600 hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              )}
+            >
+              <span className={clsx("h-2 w-2 rounded-full", compareYoY ? "bg-white" : "bg-zinc-400")} />
+              Compare to Last Year
+            </button>
+          </>
+        )}
 
         <MultiSelectDropdown
           label="Property"
