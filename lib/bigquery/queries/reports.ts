@@ -24,6 +24,7 @@ import { getAvailableRoomNightsByProperty } from "./propertyWindows";
 import { fyBounds, fyMonthBounds, calendarMonthFromFiscal, currentFYLabel, DateRange } from "@/lib/reference/financialYear";
 import { safeDivide } from "@/lib/format/currency";
 import { REPORT_PROPERTIES, ReportProperty, ReportColumn } from "@/lib/reference/reportProperties";
+import { getPropertyMonthOverride } from "@/lib/reference/historicalPropertyOverrides";
 
 export { REPORT_PROPERTIES, REPORT_COLUMNS, type ReportProperty, type ReportColumn } from "@/lib/reference/reportProperties";
 
@@ -55,6 +56,8 @@ export function resolveReportProperties(selected: string[] | undefined): ReportP
 export interface FolioReportMetrics {
   roomRevenue: number;
   fnbRevenue: number;
+  /** Ancillary/extras revenue (DailyOtherRevenueExclusiveTax) — see fetchOtherRevenueByMonth's own comment. Zero for every property except GB, where it's real and material. */
+  otherRevenue: number;
   totalRevenue: number;
   fnbRevenueSharePct: number | null;
   availableRoomNights: number;
@@ -119,6 +122,7 @@ export interface FolioReport {
 interface BaseFacts {
   roomRevenue: number;
   fnbRevenue: number;
+  otherRevenue: number;
   availableRoomNights: number;
   soldRoomNights: number;
   guestsServed: number;
@@ -138,7 +142,7 @@ interface BaseFacts {
 }
 
 const EMPTY_FACTS: BaseFacts = {
-  roomRevenue: 0, fnbRevenue: 0, availableRoomNights: 0, soldRoomNights: 0, guestsServed: 0,
+  roomRevenue: 0, fnbRevenue: 0, otherRevenue: 0, availableRoomNights: 0, soldRoomNights: 0, guestsServed: 0,
   totalBookings: 0, repeatBookings: 0, b2bNights: 0, b2bRevenue: 0, b2cNights: 0, b2cRevenue: 0,
   otaNights: 0, otaRevenue: 0, b2bBillsRevenueAllTime: 0, expatBookings: 0, expatRevenue: 0,
   expatNights: 0, expatRepeatBookings: 0,
@@ -148,6 +152,7 @@ function sumFacts(a: BaseFacts, b: BaseFacts): BaseFacts {
   return {
     roomRevenue: a.roomRevenue + b.roomRevenue,
     fnbRevenue: a.fnbRevenue + b.fnbRevenue,
+    otherRevenue: a.otherRevenue + b.otherRevenue,
     availableRoomNights: a.availableRoomNights + b.availableRoomNights,
     soldRoomNights: a.soldRoomNights + b.soldRoomNights,
     guestsServed: a.guestsServed + b.guestsServed,
@@ -168,10 +173,11 @@ function sumFacts(a: BaseFacts, b: BaseFacts): BaseFacts {
 }
 
 function deriveMetrics(f: BaseFacts): FolioReportMetrics {
-  const totalRevenue = f.roomRevenue + f.fnbRevenue;
+  const totalRevenue = f.roomRevenue + f.fnbRevenue + f.otherRevenue;
   return {
     roomRevenue: f.roomRevenue,
     fnbRevenue: f.fnbRevenue,
+    otherRevenue: f.otherRevenue,
     totalRevenue,
     fnbRevenueSharePct: safeDivide(f.fnbRevenue, totalRevenue),
     availableRoomNights: f.availableRoomNights,
@@ -314,6 +320,51 @@ async function fetchFnbRevenueTillDate(start: string, end: string): Promise<FnbR
   return rows.map((r) => ({ ...r, month_start: null }));
 }
 
+// 2026-09-21 — GB's Revenue ran a consistent 6-9% below the finance
+// reference workbooks (FY24-25) even though Sold Nights matched — isolated
+// to a nights-fine/revenue-short pattern, the mirror image of JHS's fix
+// above. `sales_booking.DailyOtherRevenueExclusiveTax` (extras/ancillary
+// charges — day-use fees, meeting rooms, etc.) closes that exact gap
+// almost to the rupee for every FY24-25 month checked (e.g. Sep 2024: gap
+// ₹83,100, this column's sum ₹83,100).
+//
+// Deliberately scoped to GB ONLY, not every property — first tried
+// unconditionally (reasoning: BH4/HTC/JHS/KDP showed 0 for the few FY25-26
+// months spot-checked), but that broke JHS's already-correct match once
+// checked across all of FY24-25: JHS alone carries a real ₹74K-133K/month
+// in this column that the workbooks' own Revenue figure does NOT include
+// for JHS (only for GB). So the workbooks' "Revenue" is Room-only for
+// every property except GB, where it's Room + Other combined — a
+// per-property definition difference, not a universal one.
+interface OtherRevenueRow {
+  property: string;
+  month_start: string | null;
+  other_revenue: number | null;
+}
+
+async function fetchOtherRevenueByMonth(properties: string[], fy: string): Promise<OtherRevenueRow[]> {
+  const { start, end } = fyBounds(fy);
+  return runQuery<OtherRevenueRow>(`
+    SELECT
+      Property AS property,
+      CAST(DATE_TRUNC(CAST(StayDate AS DATE), MONTH) AS STRING) AS month_start,
+      SUM(DailyOtherRevenueExclusiveTax) AS other_revenue
+    FROM ${table("sales_booking")}
+    WHERE Property IN UNNEST(@properties) AND Property = 'GB' AND CAST(StayDate AS DATE) BETWEEN @start AND @end AND ${SALES_BOOKING_STAY_FILTER}
+    GROUP BY property, month_start
+  `, { properties, start, end });
+}
+
+async function fetchOtherRevenueTillDate(properties: string[], start: string, end: string): Promise<OtherRevenueRow[]> {
+  const rows = await runQuery<Omit<OtherRevenueRow, "month_start">>(`
+    SELECT Property AS property, SUM(DailyOtherRevenueExclusiveTax) AS other_revenue
+    FROM ${table("sales_booking")}
+    WHERE Property IN UNNEST(@properties) AND Property = 'GB' AND CAST(StayDate AS DATE) BETWEEN @start AND @end AND ${SALES_BOOKING_STAY_FILTER}
+    GROUP BY property
+  `, { properties, start, end });
+  return rows.map((r) => ({ ...r, month_start: null }));
+}
+
 /**
  * Booking-grain metrics (Guests Served, Total Bookings, Repeat Bookings,
  * Expat stats), grouped by calendar month. A booking is bucketed to
@@ -426,7 +477,8 @@ function buildFactsByProperty(
   bookings: BookingRow[],
   availableByProperty: Record<string, number>,
   b2bBillsAllTime: Record<string, number>,
-  fnbByProperty: Record<string, number>
+  fnbByProperty: Record<string, number>,
+  otherByProperty: Record<string, number>
 ): Record<ReportProperty, BaseFacts> {
   const result = {} as Record<ReportProperty, BaseFacts>;
   for (const p of properties) {
@@ -434,6 +486,7 @@ function buildFactsByProperty(
     facts.availableRoomNights = availableByProperty[p] ?? 0;
     facts.b2bBillsRevenueAllTime = b2bBillsAllTime[p] ?? 0;
     facts.fnbRevenue = fnbByProperty[p] ?? 0;
+    facts.otherRevenue = otherByProperty[p] ?? 0;
     for (const r of revCat.filter((x) => x.property === p)) {
       facts.roomRevenue += r.revenue ?? 0;
       facts.soldRoomNights += r.nights;
@@ -454,6 +507,30 @@ function buildFactsByProperty(
     result[p] = facts;
   }
   return result;
+}
+
+/**
+ * Applies `historicalPropertyOverrides.ts`'s targeted fallback, if this
+ * property+month has one — see that file's own header comment for which
+ * two anomalies this covers and why they weren't fixed at the query level.
+ * Only touches the fields the override actually specifies: `soldRoomNights`
+ * replaces the computed value outright; `totalRevenue` is the workbooks'
+ * own Revenue figure, which NEVER includes F&B (confirmed by the GB Other
+ * Revenue investigation — GB's workbook figure is Room+Other, still no
+ * F&B) — so it backs `roomRevenue` into whatever Other Revenue this month
+ * already computed (fnbRevenue is untouched, and simply adds on top of
+ * the target as its own genuinely separate line, same as it would for any
+ * non-overridden month). Deliberately NOT applied to the "Overall – till
+ * date" block — see getFolioBasedReport's own comment at its call site.
+ */
+function applyHistoricalOverride(facts: BaseFacts, property: string, monthKey: string): BaseFacts {
+  const override = getPropertyMonthOverride(property, monthKey);
+  if (!override) return facts;
+  return {
+    ...facts,
+    soldRoomNights: override.soldRoomNights ?? facts.soldRoomNights,
+    roomRevenue: override.totalRevenue !== undefined ? override.totalRevenue - facts.otherRevenue : facts.roomRevenue,
+  };
 }
 
 /** fnbFo: FO café's own F&B revenue for this same block's date range — folded into TOTAL's F&B/Total Revenue only (not its own column, not added to any hotel property — see this file's header comment). */
@@ -482,8 +559,10 @@ export async function getFolioBasedReport(selectedProperties: string[] | undefin
   // till date is FY 24-25's start through 19 Sep 2026" before this fix.
   const tillDateEnd = today < fyEnd ? today : fyEnd;
 
-  const [revCatMonthly, bookingsMonthly, revCatTillDate, bookingsTillDate, b2bBillsAllTime, availableByMonth, availableTillDate, fnbMonthlyRows, fnbTillDateRows] =
-    await Promise.all([
+  const [
+    revCatMonthly, bookingsMonthly, revCatTillDate, bookingsTillDate, b2bBillsAllTime,
+    availableByMonth, availableTillDate, fnbMonthlyRows, fnbTillDateRows, otherMonthlyRows, otherTillDateRows,
+  ] = await Promise.all([
       fetchRevenueCategoryByMonth(properties, fy),
       fetchBookingsByMonth(properties, fy),
       fetchRevenueCategoryTillDate(properties, fyStart, tillDateEnd),
@@ -497,10 +576,19 @@ export async function getFolioBasedReport(selectedProperties: string[] | undefin
       getAvailableRoomNightsByProperty(properties, { start: fyStart, end: tillDateEnd } as DateRange),
       fetchFnbRevenueByMonth(fy),
       fetchFnbRevenueTillDate(fyStart, tillDateEnd),
+      fetchOtherRevenueByMonth(properties, fy),
+      fetchOtherRevenueTillDate(properties, fyStart, tillDateEnd),
     ]);
 
   const fnbTillDateByProperty = Object.fromEntries(fnbTillDateRows.map((r) => [r.property, r.fnb_revenue ?? 0]));
-  const overallFacts = buildFactsByProperty(properties, revCatTillDate, bookingsTillDate, availableTillDate, b2bBillsAllTime, fnbTillDateByProperty);
+  const otherTillDateByProperty = Object.fromEntries(otherTillDateRows.map((r) => [r.property, r.other_revenue ?? 0]));
+  // 2026-09-21: historicalPropertyOverrides.ts's fallback is NOT applied
+  // here — "Overall – till date" is an independently-queried range total,
+  // not a sum of the month blocks below, and neither reference workbook
+  // has an "Overall" concept to override against in the first place (both
+  // are purely month-by-month). The gap this leaves is small and bounded
+  // to whichever override months fall inside the selected FY.
+  const overallFacts = buildFactsByProperty(properties, revCatTillDate, bookingsTillDate, availableTillDate, b2bBillsAllTime, fnbTillDateByProperty, otherTillDateByProperty);
   const overall: FolioReportBlock = {
     key: "overall",
     label: "Overall – till date",
@@ -516,7 +604,13 @@ export async function getFolioBasedReport(selectedProperties: string[] | undefin
     const monthFnbByProperty = Object.fromEntries(
       fnbMonthlyRows.filter((r) => r.month_start === bounds.start).map((r) => [r.property, r.fnb_revenue ?? 0])
     );
-    const facts = buildFactsByProperty(properties, monthRows, monthBookings, availableByMonth[fiscalMonth - 1], b2bBillsAllTime, monthFnbByProperty);
+    const monthOtherByProperty = Object.fromEntries(
+      otherMonthlyRows.filter((r) => r.month_start === bounds.start).map((r) => [r.property, r.other_revenue ?? 0])
+    );
+    const rawFacts = buildFactsByProperty(properties, monthRows, monthBookings, availableByMonth[fiscalMonth - 1], b2bBillsAllTime, monthFnbByProperty, monthOtherByProperty);
+    const facts = Object.fromEntries(
+      properties.map((p) => [p, applyHistoricalOverride(rawFacts[p], p, bounds.start)])
+    ) as Record<ReportProperty, BaseFacts>;
     const calendarYear = parseInt(bounds.start.slice(0, 4), 10);
     months.push({
       key: bounds.start,

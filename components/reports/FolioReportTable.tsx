@@ -47,6 +47,10 @@ const ROWS: Row[] = [
   { kind: "section", label: "Revenue" },
   { kind: "metric", label: "Room Revenue", value: (m) => money(m.roomRevenue) },
   { kind: "metric", label: "F&B Revenue", value: (m) => money(m.fnbRevenue) },
+  // 2026-09-21: ancillary/extras revenue (DailyOtherRevenueExclusiveTax) —
+  // zero for every property except GB, where it's real and material (see
+  // reports.ts's fetchOtherRevenueByMonth comment for the full story).
+  { kind: "metric", label: "Other Revenue", value: (m) => money(m.otherRevenue) },
   { kind: "metric", label: "Total Revenue", value: (m) => money(m.totalRevenue) },
   { kind: "metric", label: "F&B Revenue Share", value: (m) => pct(m.fnbRevenueSharePct) },
 
