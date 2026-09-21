@@ -13,9 +13,6 @@ type SortKey = "totalRevenue" | "totalNights" | "totalAdr";
 export default function B2bDetailContent({ report }: { report: B2bDetailReport }) {
   const [sortKey, setSortKey] = useState<SortKey>("totalRevenue");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
-  // 2026-09-17: one search box filters both zones by company name — Zone A's
-  // own "Company" column, and Zone B's "Bills due from" (the closest thing
-  // it has to a company field, an invoice ledger keyed by bill, not company).
   // "All companies" summary row totals below stay computed from the full,
   // unfiltered report.zoneA, same reasoning as the Bookings/Leads searches.
   const [companySearch, setCompanySearch] = useState("");
@@ -40,9 +37,6 @@ export default function B2bDetailContent({ report }: { report: B2bDetailReport }
   const filteredZoneA = companySearchTrimmed
     ? sortedZoneA.filter((r) => r.company.toLowerCase().includes(companySearchTrimmed))
     : sortedZoneA;
-  const filteredZoneB = companySearchTrimmed
-    ? report.zoneB.filter((r) => (r.billsDueFrom ?? "").toLowerCase().includes(companySearchTrimmed))
-    : report.zoneB;
 
   function onSort(key: SortKey) {
     if (key === sortKey) setSortDir((d) => (d === "desc" ? "asc" : "desc"));
@@ -193,53 +187,6 @@ export default function B2bDetailContent({ report }: { report: B2bDetailReport }
                     </tr>
                   );
                 })}
-              </tbody>
-            </table>
-        </div>
-      </Card>
-
-      <Card
-        title={
-          companySearchTrimmed
-            ? `Invoice Detail (${filteredZoneB.length} of ${report.zoneB.length} bills)`
-            : `Invoice Detail (${report.zoneB.length} bills)`
-        }
-        subtitle="Sorted by Property, then Check In. Source: b2b_bills, live."
-      >
-        <div className="max-h-[480px] overflow-auto">
-            <table className="w-full border-separate border-spacing-0 text-xs">
-              <thead>
-                <tr>
-                  {["Property", "Guest Name", "Check In", "Bill Date", "Inv No", "Business Source", "Nights", "Bills due from", "Room Revenue", "POC", "Month"].map((h) => (
-                    <th key={h} className="sticky top-0 z-10 whitespace-nowrap border-b border-zinc-200 bg-zinc-50 px-2 py-1.5 text-left font-semibold text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filteredZoneB.length === 0 && (
-                  <tr>
-                    <td colSpan={11} className="py-6 text-center text-zinc-400 dark:text-zinc-500">
-                      No bills match &quot;{companySearch}&quot;.
-                    </td>
-                  </tr>
-                )}
-                {filteredZoneB.map((r, i) => (
-                  <tr key={i} className="odd:bg-white even:bg-zinc-50 dark:odd:bg-zinc-950 dark:even:bg-zinc-900">
-                    <td className="whitespace-nowrap border-b border-zinc-100 px-2 py-1 text-zinc-700 dark:border-zinc-800 dark:text-zinc-200">{r.property}</td>
-                    <td className="whitespace-nowrap border-b border-zinc-100 px-2 py-1 text-zinc-600 dark:border-zinc-800 dark:text-zinc-400">{r.guestName ?? "—"}</td>
-                    <td className="whitespace-nowrap border-b border-zinc-100 px-2 py-1 text-zinc-600 dark:border-zinc-800 dark:text-zinc-400">{r.checkIn ?? "—"}</td>
-                    <td className="whitespace-nowrap border-b border-zinc-100 px-2 py-1 text-zinc-600 dark:border-zinc-800 dark:text-zinc-400">{r.billDate ?? "—"}</td>
-                    <td className="whitespace-nowrap border-b border-zinc-100 px-2 py-1 text-zinc-600 dark:border-zinc-800 dark:text-zinc-400">{r.invNo ?? "—"}</td>
-                    <td className="whitespace-nowrap border-b border-zinc-100 px-2 py-1 text-zinc-600 dark:border-zinc-800 dark:text-zinc-400">{r.businessSource ?? "—"}</td>
-                    <td className="whitespace-nowrap border-b border-zinc-100 px-2 py-1 text-right tabular-nums text-zinc-600 dark:border-zinc-800 dark:text-zinc-400">{r.nights.toLocaleString("en-IN")}</td>
-                    <td className="whitespace-nowrap border-b border-zinc-100 px-2 py-1 text-zinc-600 dark:border-zinc-800 dark:text-zinc-400">{r.billsDueFrom ?? "—"}</td>
-                    <td className="whitespace-nowrap border-b border-zinc-100 px-2 py-1 text-right tabular-nums text-zinc-700 dark:border-zinc-800 dark:text-zinc-200">{formatIndianCurrency(r.roomRevenue)}</td>
-                    <td className="whitespace-nowrap border-b border-zinc-100 px-2 py-1 text-zinc-600 dark:border-zinc-800 dark:text-zinc-400">{r.poc ?? "—"}</td>
-                    <td className="whitespace-nowrap border-b border-zinc-100 px-2 py-1 text-zinc-600 dark:border-zinc-800 dark:text-zinc-400">{r.month ?? "—"}</td>
-                  </tr>
-                ))}
               </tbody>
             </table>
         </div>
