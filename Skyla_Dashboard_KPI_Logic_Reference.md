@@ -1438,6 +1438,89 @@ data for these B2B metrics."*
     `propertyTargets.ts`'s fixed FY26-27 plan specifically — there is no
     FY24-25/FY25-26 target to compare against, so a past-FY reading there
     wouldn't mean anything structurally, override or not.
+- **2026-09-21 (full audit) — user reported July 2024 Occupancy showing
+  83.4% instead of the workbook's 86.2% on Overview. Root-caused to two
+  real bugs in the previous version of the dashboard-wide override, both
+  fixed, plus a full company-wide re-audit across all 24 months of both
+  FYs.**
+  - **Bug 1 — LP silently excluded from `historicalSheetData.ts`,** under
+    the wrong assumption that its existing `lpMonthly.ts`-sourced numbers
+    already matched. They don't always: LP has a full, correctly-populated
+    row in BOTH workbooks (every property does), and the small gap between
+    LP's live-computed figures and its own workbook row was exactly enough
+    to move Overview's blended, all-properties Occupancy for July 2024
+    from the workbook's 86.2% down to 83.4%. Fixed by adding LP's data to
+    the historical table like any other property, then auditing every one
+    of `getOverviewKpis`/`getAdrByProperty` (`overview.ts`) and
+    `getBookingStats`/`getRoomNightsGap` (`guestDetail.ts`) for a second,
+    separate bug this introduced: each of these already had its own
+    unconditional "always add LP's live totals" step (LP has zero
+    `sales_booking` rows, so it was always merged in separately) — once LP
+    can ALSO be covered by history, that unconditional add would double-
+    count LP for any range where it's covered. Every one of the four now
+    gates LP's live-fetched Sold Nights/Revenue on "LP requested AND not
+    already covered by history for this specific range" (current and
+    previous checked independently for the compareYoY case); Total
+    Bookings/Guests Served, which have no workbook equivalent, still
+    always come from LP's live totals regardless of coverage.
+  - **Bug 2 — GB's FY24-25 room count was wrong**: the FY24-25 historical
+    table used GB's CURRENT room count (21, `propertyReference.ts`) to
+    derive Available Room Nights, since that workbook has no explicit
+    Total Nights column (only Sold Nights + Occupancy, unlike FY25-26's).
+    Checked live via implied Available = Sold ÷ Occupancy for every GB
+    month in FY24-25 (e.g. Jul 2024: 442 ÷ 0.9505376344086022 = 465 = 15 x
+    31): GB genuinely had only 15 rooms throughout FY24-25, expanding to
+    21 only by FY25-26 (confirmed separately from FY25-26's own explicit
+    Total Nights column: 651 = 21 x 31 for Oct 2025). Every other
+    property's implied room count holds constant at its current value
+    across both FYs — this is GB-specific. Fixed via a FY24-25-only
+    `ROOM_COUNT_2425` table in the (uncommitted) generator script, kept
+    deliberately separate from `propertyReference.ts`'s current counts.
+  - **Verified fixed**: July 2024 Occupancy now reads exactly 86.23%
+    (Sold 4,785 / Available 5,549) on `getOverviewKpis`, matching the
+    workbook to the decimal. `getRoomNightsGap` for the same month
+    reconciles by construction (Sold + Unsold + Remaining = Available).
+  - **Full company-wide re-audit, all 24 months, both FYs** (comparing
+    `getOverviewKpis` against each workbook's own totals — FY24-25 has an
+    explicit company-wide Total Achieved/Sold Nights/Occupancy row;
+    FY25-26 has none, so its "expected total" here is the sum of that
+    workbook's own per-property rows):
+    - **FY24-25: 9 of 12 months match exactly** (Apr-Dec 2024 — nights,
+      revenue, occupancy all to the decimal).
+    - **FY24-25 Jan-Mar 2025 — sheet-side inconsistency, NOT reproduced**:
+      Sold Nights and Revenue match the workbook exactly every month, but
+      Occupancy doesn't (e.g. Jan 2025: ours 72.16% vs the workbook's own
+      78.76%). Diagnosed: the workbook's Sold Nights total for these
+      months already includes GB's tail activity (7 nights in Jan 2025,
+      winding down before full closure), but its own Occupancy % cell
+      doesn't include GB's Available Room Nights in the denominator —
+      recomputing with GB fully excluded from both sides reproduces the
+      workbook's own Occupancy figure exactly. This is the workbook's own
+      numerator/denominator mismatch, not our calculation — per the
+      user's explicit "do not reproduce spreadsheet formula bugs"
+      instruction, our internally-consistent Occupancy (Sold ÷ Available,
+      both scopes matching) is kept as-is.
+    - **FY25-26: 7 of 12 months match exactly** (Sep 2025-Mar 2026 — GB's
+      full "Hyber" era). Apr-Aug 2025 differ, but not because of a
+      dashboard bug: FY25-26's workbook has NO GB row at all before Sep
+      2025 (nothing to fall back to, so GB correctly keeps computing from
+      live BigQuery for this stretch, per the override's own coverage
+      rule) — and GB genuinely has real recorded activity in that window
+      (54 bookings / ₹1,53,000 in Jul 2025, 15 bookings / ₹46,500 in Aug
+      2025, confirmed directly against `sales_booking`), plus its
+      empirically-derived "active window" available-room-nights baseline
+      (`propertyWindows.ts`, a pre-existing, unrelated piece of logic)
+      spans continuously back through the Apr-Jun 2025 gap where it had
+      zero real bookings. Per the user's own "do not invent values"
+      instruction, GB is NOT zeroed out here — there is no workbook figure
+      to fall back to, so its real (if partial/theoretical-window) BigQuery
+      activity is what's shown, same as any property/period the workbooks
+      simply don't cover.
+    - **Reports tab (Folio Based Report) confirmed unaffected** — it has
+      no LP column structurally (never did, PRD-mandated) and never
+      covered GB before Sep 2025 either, so neither bug fix nor the
+      GB-gap finding changes anything there. Spot-checked live: Jul 2024
+      TOTAL (excl. LP) unchanged at 4,349 nights / ₹1,95,60,742.
 - **Exotel/Reference/Existing tiles relabelled** "263 / 36 closed" →
   "263 leads · 36 closed" for clarity (item 2 — it means 263 leads from
   that source for the owner, 36 converted).
