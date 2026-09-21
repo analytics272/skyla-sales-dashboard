@@ -1282,6 +1282,18 @@ data for these B2B metrics."*
     the company-level grid. Removed both the UI (`B2bDetailContent.tsx`)
     and the now-unused `zoneB` query/fetch (`reports.ts`) — one fewer
     `b2b_bills` row-level scan per page load.
+  - **Folio Based Report month columns confirmed immune to the sheet's own
+    "dragged-formula" bug** (per user flag: the reference sheet's Property
+    × Month matrix has Oct'26-Mar'27 columns that wrongly return Apr'26's
+    values — a copy/drag-formula error, not a real business figure).
+    `getFolioBasedReport`'s month loop (`reports.ts`) queries each fiscal
+    month's own `fyMonthBounds` independently and filters every source
+    (`revCatMonthly`, `bookingsMonthly`, `fnbMonthlyRows`,
+    `availableByMonth[fiscalMonth - 1]`) down to that exact month's own
+    `month_start` — there's no spreadsheet-style formula to drag, so this
+    bug class can't occur structurally. Verified live: FY 26-27's Room
+    Revenue declines from ₹2.00Cr (Apr) to ₹6.5L (Oct) down to ₹2.7L
+    (Mar) — a real advance-booking pace curve, never a repeated Apr value.
   - **Overview tab's "Sold/Available/Unsold Room Nights" stat-tile row
     removed** — per explicit user direction that it duplicates the
     Bookings tab's own "Room Nights" card (`BookingsContent.tsx`'s
