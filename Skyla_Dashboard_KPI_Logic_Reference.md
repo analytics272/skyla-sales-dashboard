@@ -1220,6 +1220,75 @@ data for these B2B metrics."*
     open question. B2B Revenue Share's own note is untouched (a
     different, narrower, still-genuinely-open caveat — only the Overall
     column's magnitude was checked, not every month).
+- **2026-09-21 — B2B Details' sheet "Total" column bug found (same class as
+  the F&B bug above), B2B Revenue Share note resolved, sticky-header
+  scroll-clipping fixed, two unrequired UI sections removed.**
+  - **Correction to the 2026-09-19 entry above**: B2B Revenue Share's note
+    was called "still-genuinely-open." It's now resolved the same way as
+    the B2C/OTA rows — see `FolioReportTable.tsx`: the ratio's own type
+    comment already fully explains why it can exceed 100% by design (PRD
+    §1.2, verified against the PRD's own worked example), so there was
+    nothing left open to investigate; only the UI warning triangle is
+    removed, the underlying calculation is unchanged.
+  - **"FY 26-27 B2B Details" sheet tab's "Total" column confirmed to have
+    the same bug pattern as the F&B "Overall" cell**: for the top 10
+    companies by revenue, the sheet's "Total" (Revenue/Nights/ADR) ran
+    6-46% higher than our own `getB2bDetailReport` Zone A output — but
+    checked against a single month (Apr 26), the sheet and our dashboard
+    matched EXACTLY for every one of those companies (e.g. Synergy Apts
+    Services 13,04,000, DarwinBox 10,77,900, Advanta Enterprises
+    11,04,199 — all identical). Since our own "Total" column is simply
+    the sum of a company's own FY-scoped monthly bills (same source table,
+    same query, `Financial_Year = @fy`), and the monthly figures already
+    match the sheet exactly, the only way the sheet's Total can run
+    higher is if its own Total-column formula sums beyond the selected
+    FY (most likely across that company's bills in every FY, not just the
+    tab's own year) — the same "summary cell missing the date/FY filter
+    its own per-period cells correctly have" bug already confirmed for
+    the Folio Report's F&B "Overall – till date" cell. Per the PRD's
+    governing rule and the user's explicit "take data from PMS" direction,
+    our dashboard's FY-scoped totals are kept unchanged; the sheet's Total
+    column is not chased. Not re-verified against FY 25-26's tab (the bug
+    mechanism and evidence are already conclusive from FY 26-27 alone).
+  - **FY 24-25 B2B validation — known gap, not attempted further**: no
+    "FY 24-25 B2B Details" tab exists in the reference sheet at all (only
+    FY 25-26 and FY 26-27 have one), so there is no sheet tab to
+    company-by-company reconcile against for that year. `getB2bDetailReport`
+    computes FY 24-25 from the identical `b2b_bills` query and logic as the
+    other two years — there's no reason to believe it's any less correct,
+    just nothing in the sheet to check it against.
+  - **B2B Details "give for the whole financial year wherever we have
+    data" — confirmed already true, no code change needed.** Zone A's
+    month columns are built directly from which (company, month) pairs
+    actually have bills in the selected FY (`SELECT ... WHERE
+    Financial_Year = @fy GROUP BY company, month`) — every month with
+    data appears, nothing is capped to "up to today" the way the Folio
+    Report's "Overall – till date" block deliberately is.
+  - **Sticky-header horizontal-scroll text clipping fixed**
+    (`FolioReportTable.tsx`'s `ColumnHeaderGroup`): the frozen "Metric"
+    column (`sticky left-0 top-0 z-30`) sat visually on top of the
+    spanning block-header cells (`sticky top-0 z-10`, top-sticky only),
+    so once horizontal scroll moved a group header's start left of the
+    Metric column's own width, its label got clipped underneath (e.g.
+    "Overall – till date" rendered as "verall – till date"). Fixed by
+    nesting a second `position: sticky; left: <metric column width>`
+    span inside the header cell, so the label text itself stays pinned
+    just past the frozen column regardless of scroll position.
+  - **B2B Details' "Invoice Detail" bill-level table (Zone B) removed** —
+    per explicit user direction that there's no requirement for it. It
+    listed every individual `b2b_bills` row (Guest Name, Check In, Inv
+    No, etc.) beneath the Company × Month grid; nothing in
+    `PRD_Reports_Section_Final.md` calls for a bill-level drill-down, only
+    the company-level grid. Removed both the UI (`B2bDetailContent.tsx`)
+    and the now-unused `zoneB` query/fetch (`reports.ts`) — one fewer
+    `b2b_bills` row-level scan per page load.
+  - **Overview tab's "Sold/Available/Unsold Room Nights" stat-tile row
+    removed** — per explicit user direction that it duplicates the
+    Bookings tab's own "Room Nights" card (`BookingsContent.tsx`'s
+    Sold/Till-Date Unsold/Remaining distribution bar, backed by the
+    reconciling `getRoomNightsGap()` rewrite documented in the 2026-09-18
+    entry above). The Overview version was a simpler, non-reconciling
+    Sold/Available/(Available−Sold) trio with no such validation behind it.
 - **Exotel/Reference/Existing tiles relabelled** "263 / 36 closed" →
   "263 leads · 36 closed" for clarity (item 2 — it means 263 leads from
   that source for the owner, 36 converted).

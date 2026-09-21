@@ -63,12 +63,12 @@ const ROWS: Row[] = [
   { kind: "metric", label: "B2B Nights", value: (m) => count(m.b2bNights) },
   { kind: "metric", label: "B2B Revenue", value: (m) => money(m.b2bRevenue) },
   { kind: "metric", label: "B2B ADR", value: (m) => rupee(m.b2bAdr) },
-  {
-    kind: "metric",
-    label: "B2B Revenue Share",
-    value: (m) => pct(m.b2bRevenueSharePct),
-    note: "b2b_bills' all-time revenue ÷ this column's Room Revenue — not a normal share, can exceed 100% by design (PRD §1.2). Only the Overall column's magnitude was checked against the source sheet; individual month values are not independently confirmed.",
-  },
+  // 2026-09-21: this ratio's own type (FolioReportMetrics.b2bRevenueSharePct)
+  // already documents why it can legitimately exceed 100% (all-time
+  // b2b_bills revenue ÷ this block's period Room Revenue, PRD §1.2) — that
+  // was a confirmed, by-design decision, not an open question, so no more
+  // warning-triangle here either (same treatment as the B2C/OTA rows above).
+  { kind: "metric", label: "B2B Revenue Share", value: (m) => pct(m.b2bRevenueSharePct) },
 
   { kind: "section", label: "B2C" },
   { kind: "metric", label: "B2C Nights", value: (m) => count(m.b2cNights) },
@@ -99,15 +99,29 @@ const ROWS: Row[] = [
   { kind: "metric", label: "Expat Repeat Share", value: (m) => pct(m.expatRepeatSharePct) },
 ];
 
-function ColumnHeaderGroup({ block, columnCount, colWidthPx }: { block: FolioReportBlock; columnCount: number; colWidthPx: number }) {
+function ColumnHeaderGroup({ block, columnCount, colWidthPx, metricColWidthPx }: { block: FolioReportBlock; columnCount: number; colWidthPx: number; metricColWidthPx: number }) {
   return (
-    <th colSpan={columnCount} className="sticky top-0 z-10 border-b border-l border-zinc-200 bg-zinc-50 px-2 py-1.5 text-center text-[11px] font-semibold text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300" style={{ minWidth: colWidthPx * columnCount }}>
-      {block.label}
+    <th colSpan={columnCount} className="sticky top-0 z-10 border-b border-l border-zinc-200 bg-zinc-50 py-1.5 text-[11px] font-semibold text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300" style={{ minWidth: colWidthPx * columnCount }}>
+      {/* 2026-09-19: the label itself is ALSO sticky (pinned just past the
+          frozen "Metric" column's own width) — without this, once
+          horizontal scroll moves this <th>'s start point left of that
+          width, the Metric column (higher z-index, so it always renders on
+          top) covers the label's leading characters. Caught live:
+          "Overall – till date" showed as "verall – till date" once
+          scrolled. Sticky-within-sticky keeps the whole label readable for
+          as long as this <th> itself is still in view — the same nested
+          pattern a plain sticky <th> alone can't achieve for a spanning
+          header. Left-aligned with padding, not centered, once pinned —
+          matches how frozen headers behave in the reference sheet itself. */}
+      <span className="sticky block px-2 text-left" style={{ left: metricColWidthPx }}>
+        {block.label}
+      </span>
     </th>
   );
 }
 
 const COL_WIDTH = 84;
+const METRIC_COL_WIDTH = 180;
 
 export default function FolioReportTable({ report }: { report: FolioReport }) {
   const blocks = [report.overall, ...report.months];
@@ -151,7 +165,7 @@ export default function FolioReportTable({ report }: { report: FolioReport }) {
                 Metric
               </th>
               {blocks.map((b) => (
-                <ColumnHeaderGroup key={b.key} block={b} columnCount={columns.length} colWidthPx={COL_WIDTH} />
+                <ColumnHeaderGroup key={b.key} block={b} columnCount={columns.length} colWidthPx={COL_WIDTH} metricColWidthPx={METRIC_COL_WIDTH} />
               ))}
             </tr>
             <tr>

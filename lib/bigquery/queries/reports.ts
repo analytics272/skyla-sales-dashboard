@@ -541,24 +541,9 @@ export interface B2bDetailZoneARow {
   byMonth: { monthKey: string; monthLabel: string; revenue: number; nights: number; adr: number | null }[];
 }
 
-export interface B2bDetailZoneBRow {
-  property: string;
-  guestName: string | null;
-  checkIn: string | null; // ISO date (first 10 chars of the raw Check_In value)
-  billDate: string | null; // ISO date
-  invNo: string | null;
-  businessSource: string | null;
-  nights: number;
-  billsDueFrom: string | null;
-  roomRevenue: number;
-  poc: string | null;
-  month: string | null; // sheet's own "Apr 26"-style label, already on the row
-}
-
 export interface B2bDetailReport {
   fy: string;
   zoneA: B2bDetailZoneARow[];
-  zoneB: B2bDetailZoneBRow[];
 }
 
 interface ZoneARawRow {
@@ -582,43 +567,12 @@ function monthSortKey(fy: string, label: string): string {
 export async function getB2bDetailReport(selectedProperties: string[] | undefined, fy: string = currentFYLabel()): Promise<B2bDetailReport> {
   const properties = resolveReportProperties(selectedProperties);
 
-  const [zoneARows, zoneBRows] = await Promise.all([
-    runQuery<ZoneARawRow>(`
-      SELECT Bills_due_from AS company, Month AS month, SUM(Room_Revenue) AS revenue, SUM(Nights) AS nights
-      FROM ${table("b2b_bills")}
-      WHERE Property IN UNNEST(@properties) AND Financial_Year = @fy AND Bills_due_from IS NOT NULL
-      GROUP BY company, month
-    `, { properties, fy }),
-    runQuery<{
-      property: string;
-      guest_name: string | null;
-      check_in: string | null;
-      bill_date: string | null;
-      inv_no: string | null;
-      business_source: string | null;
-      nights: number | null;
-      bills_due_from: string | null;
-      room_revenue: number | null;
-      poc: string | null;
-      month: string | null;
-    }>(`
-      SELECT
-        Property AS property,
-        Guest_Name AS guest_name,
-        SUBSTR(Check_In, 1, 10) AS check_in,
-        CAST(Bill_Date AS STRING) AS bill_date,
-        Inv_No AS inv_no,
-        Business_Source AS business_source,
-        Nights AS nights,
-        Bills_due_from AS bills_due_from,
-        Room_Revenue AS room_revenue,
-        POC AS poc,
-        Month AS month
-      FROM ${table("b2b_bills")}
-      WHERE Property IN UNNEST(@properties) AND Financial_Year = @fy
-      ORDER BY Property, Check_In
-    `, { properties, fy }),
-  ]);
+  const zoneARows = await runQuery<ZoneARawRow>(`
+    SELECT Bills_due_from AS company, Month AS month, SUM(Room_Revenue) AS revenue, SUM(Nights) AS nights
+    FROM ${table("b2b_bills")}
+    WHERE Property IN UNNEST(@properties) AND Financial_Year = @fy AND Bills_due_from IS NOT NULL
+    GROUP BY company, month
+  `, { properties, fy });
 
   // 2026-09-17: Bills_due_from is a curated field (one entry per contract,
   // not per-invoice free text like sales_company_bills.CompanyName), but
@@ -662,19 +616,5 @@ export async function getB2bDetailReport(selectedProperties: string[] | undefine
     })
     .sort((a, b) => b.totalRevenue - a.totalRevenue);
 
-  const zoneB: B2bDetailZoneBRow[] = zoneBRows.map((r) => ({
-    property: r.property,
-    guestName: r.guest_name,
-    checkIn: r.check_in,
-    billDate: r.bill_date,
-    invNo: r.inv_no,
-    businessSource: r.business_source,
-    nights: r.nights ?? 0,
-    billsDueFrom: r.bills_due_from,
-    roomRevenue: r.room_revenue ?? 0,
-    poc: r.poc,
-    month: r.month,
-  }));
-
-  return { fy, zoneA, zoneB };
+  return { fy, zoneA };
 }
