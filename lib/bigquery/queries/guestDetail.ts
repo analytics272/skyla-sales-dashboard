@@ -84,17 +84,24 @@ export async function getBookingStats(filter: KpiFilter): Promise<BookingStats> 
   // 2026-09-21 — historical workbook override, same rule as getOverviewKpis
   // (see historicalDashboardOverride.ts). Total Bookings and Guests Served
   // have no workbook equivalent (neither sheet counts bookings or guests),
-  // so those two always come from the full-properties query below,
-  // unaffected — only Sold Room Nights and Room Revenue are replaced for
+  // so those two always come from the full-properties query below and from
+  // LP's own totals whenever LP is requested, unaffected by override
+  // coverage — only Sold Room Nights and Room Revenue are replaced for
   // covered properties, via a second query scoped to just the uncovered
   // ones (whatever the full query already computed for those two fields
-  // gets discarded to avoid double-counting the covered properties).
+  // gets discarded to avoid double-counting the covered properties). LP
+  // itself can be covered too (both workbooks have full LP rows — see
+  // historicalSheetData.ts) — `lpNightsRevenueFromLive` gates just its
+  // Sold Nights/Room Revenue contribution, separately from its always-live
+  // bookingsCount/guestsServed.
   const historicalCurrent = getHistoricalOverrideForRange(resolved.properties, resolved.period.current);
   const historicalPrevious = compare ? getHistoricalOverrideForRange(resolved.properties, resolved.period.previous) : {};
   const uncoveredCurrentProps = resolved.properties.filter((p) => !(p in historicalCurrent));
   const uncoveredPreviousProps = resolved.properties.filter((p) => !(p in historicalPrevious));
   const hasCurrentOverride = Object.keys(historicalCurrent).length > 0;
   const hasPreviousOverride = Object.keys(historicalPrevious).length > 0;
+  const lpNightsRevenueFromLiveCurrent = includeLp && !(LP_PROPERTY in historicalCurrent);
+  const lpNightsRevenueFromLivePrevious = includeLp && !(LP_PROPERTY in historicalPrevious);
 
   const [rows, uncoveredRows, prevRows, uncoveredPrevRows, lpTotals, lpPrevTotals] = await Promise.all([
     runQuery<BookingStatsRow>(BOOKING_STATS_SQL(where), params),
@@ -134,11 +141,11 @@ export async function getBookingStats(filter: KpiFilter): Promise<BookingStats> 
   const totalBookings = r.total_bookings + (lpTotals?.bookingsCount ?? 0);
   const guestsServed = (r.guests_served ?? 0) + (lpTotals?.guestsServed ?? 0);
   const soldRoomNights = hasCurrentOverride
-    ? (uncoveredRows?.[0]?.sold_room_nights ?? 0) + histCurrentSums.nights + (lpTotals?.soldRoomNights ?? 0)
-    : r.sold_room_nights + (lpTotals?.soldRoomNights ?? 0);
+    ? (uncoveredRows?.[0]?.sold_room_nights ?? 0) + histCurrentSums.nights + (lpNightsRevenueFromLiveCurrent ? lpTotals?.soldRoomNights ?? 0 : 0)
+    : r.sold_room_nights + (lpNightsRevenueFromLiveCurrent ? lpTotals?.soldRoomNights ?? 0 : 0);
   const roomRevenue = hasCurrentOverride
-    ? (uncoveredRows?.[0]?.room_revenue ?? 0) + histCurrentSums.revenue + (lpTotals?.roomRevenue ?? 0)
-    : (r.room_revenue ?? 0) + (lpTotals?.roomRevenue ?? 0);
+    ? (uncoveredRows?.[0]?.room_revenue ?? 0) + histCurrentSums.revenue + (lpNightsRevenueFromLiveCurrent ? lpTotals?.roomRevenue ?? 0 : 0)
+    : (r.room_revenue ?? 0) + (lpNightsRevenueFromLiveCurrent ? lpTotals?.roomRevenue ?? 0 : 0);
   const alos = safeDivide(soldRoomNights, totalBookings);
   const revenuePerGuest = safeDivide(roomRevenue, guestsServed);
 
@@ -146,10 +153,10 @@ export async function getBookingStats(filter: KpiFilter): Promise<BookingStats> 
   const prevTotalBookings = pr ? pr.total_bookings + (lpPrevTotals?.bookingsCount ?? 0) : null;
   const prevGuestsServed = pr ? (pr.guests_served ?? 0) + (lpPrevTotals?.guestsServed ?? 0) : null;
   const prevSoldRoomNights = pr
-    ? (hasPreviousOverride ? (uncoveredPrevRows?.[0]?.sold_room_nights ?? 0) + histPreviousSums.nights : pr.sold_room_nights) + (lpPrevTotals?.soldRoomNights ?? 0)
+    ? (hasPreviousOverride ? (uncoveredPrevRows?.[0]?.sold_room_nights ?? 0) + histPreviousSums.nights : pr.sold_room_nights) + (lpNightsRevenueFromLivePrevious ? lpPrevTotals?.soldRoomNights ?? 0 : 0)
     : null;
   const prevRoomRevenue = pr
-    ? (hasPreviousOverride ? (uncoveredPrevRows?.[0]?.room_revenue ?? 0) + histPreviousSums.revenue : (pr.room_revenue ?? 0)) + (lpPrevTotals?.roomRevenue ?? 0)
+    ? (hasPreviousOverride ? (uncoveredPrevRows?.[0]?.room_revenue ?? 0) + histPreviousSums.revenue : (pr.room_revenue ?? 0)) + (lpNightsRevenueFromLivePrevious ? lpPrevTotals?.roomRevenue ?? 0 : 0)
     : null;
   const prevAlos = prevSoldRoomNights !== null && prevTotalBookings !== null ? safeDivide(prevSoldRoomNights, prevTotalBookings) : null;
   const prevRevenuePerGuest = prevRoomRevenue !== null && prevGuestsServed !== null ? safeDivide(prevRoomRevenue, prevGuestsServed) : null;
@@ -329,11 +336,17 @@ export async function getRoomNightsGap(filter: KpiFilter): Promise<RoomNightsGap
     // `available` (and every Available call here) already includes LP's
     // contribution — getAvailableRoomNights is LP-aware via
     // propertyWindows.ts. LP has zero sales_booking rows, so its real sold
-    // nights must be added here too, or it would look 100% unsold.
+    // nights must be added here too, or it would look 100% unsold — UNLESS
+    // LP is already covered by the historical override for this exact
+    // range (both workbooks have full LP rows too, see
+    // historicalSheetData.ts), in which case overrideAwareSoldNights/
+    // overrideAwareAvailable above already added LP's workbook figures and
+    // fetching+adding its live total again would double-count it.
+    const tillDateLpFromLive = includeLp && !(LP_PROPERTY in getHistoricalOverrideForRange([LP_PROPERTY], tillDateRange));
     const [tillDateAvailable, tillDateSoldRaw, tillDateLpTotals] = await Promise.all([
       overrideAwareAvailable(resolved.properties, tillDateRange),
       overrideAwareSoldNights(resolved.properties, tillDateRange),
-      includeLp ? getLpOverviewTotals(tillDateRange) : Promise.resolve(null),
+      tillDateLpFromLive ? getLpOverviewTotals(tillDateRange) : Promise.resolve(null),
     ]);
     tillDateSold = tillDateSoldRaw + (tillDateLpTotals?.soldRoomNights ?? 0);
     unsoldRoomNights = Math.max(0, tillDateAvailable - tillDateSold);

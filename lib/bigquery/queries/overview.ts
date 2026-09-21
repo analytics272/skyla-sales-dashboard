@@ -84,8 +84,12 @@ export async function getOverviewKpis(filter: KpiFilter): Promise<OverviewKpis> 
   const compare = filter.compareYoY ?? false;
   // LP (LP Integration PRD Addendum, 2026-08-26) has zero sales_booking rows —
   // its real numbers come from sales_booking_lp_monthly and are merged in
-  // here additively when it's in the selected properties.
-  const includeLp = resolved.properties.includes(LP_PROPERTY);
+  // here additively when it's in the selected properties and not already
+  // covered by the historical override below (both workbooks have full LP
+  // rows too — see historicalSheetData.ts's own comment for why LP is
+  // covered here at all, unlike the Reports tab's Folio Report, which
+  // structurally has no LP column and never will).
+  const includeLpBase = resolved.properties.includes(LP_PROPERTY);
 
   // 2026-09-21 — historical workbook override for a whole-month or whole-FY
   // selection fully inside FY24-25/FY25-26 (see historicalDashboardOverride.ts's
@@ -94,14 +98,20 @@ export async function getOverviewKpis(filter: KpiFilter): Promise<OverviewKpis> 
   // derived from them) are overridden — `bySource` has no reliable sheet
   // equivalent (neither workbook splits nights by category, and FY25-26's
   // has no B2B/B2C/OTA split at all) so it stays fully BigQuery-computed
-  // for every requested property regardless of override coverage. Properties
-  // the workbook doesn't cover for this exact range (LP always; GB outside
-  // its active window in either sheet) fall back to BigQuery same as today —
-  // never zeroed, never partially summed.
+  // for every requested property regardless of override coverage (LP's own
+  // category slice is simply absent from bySource for a covered range,
+  // same accepted limitation as every other overridden property). Properties
+  // the workbook doesn't cover for this exact range (GB outside its active
+  // window in either sheet; LP for any range outside both sheets' coverage)
+  // fall back to BigQuery same as today — never zeroed, never partially summed.
   const historicalCurrent = getHistoricalOverrideForRange(resolved.properties, resolved.period.current);
   const historicalPrevious = compare ? getHistoricalOverrideForRange(resolved.properties, resolved.period.previous) : {};
   const uncoveredCurrentProps = resolved.properties.filter((p) => !(p in historicalCurrent));
   const uncoveredPreviousProps = resolved.properties.filter((p) => !(p in historicalPrevious));
+  // LP's live query only runs when LP is requested AND not already covered
+  // by history for that specific range (current/previous can differ).
+  const includeLp = includeLpBase && !(LP_PROPERTY in historicalCurrent);
+  const includeLpPrevious = includeLpBase && !(LP_PROPERTY in historicalPrevious);
   const { clause: where, params } = buildScopeClause("Property", "CAST(StayDate AS DATE)", { ...resolved, properties: uncoveredCurrentProps }, "");
   const { clause: sourceWhere, params: sourceParams } = buildScopeClause("Property", "CAST(StayDate AS DATE)", resolved, "");
 
@@ -137,7 +147,7 @@ export async function getOverviewKpis(filter: KpiFilter): Promise<OverviewKpis> 
     getAvailableRoomNights(uncoveredCurrentProps, resolved.period.current),
     compare ? getAvailableRoomNights(uncoveredPreviousProps, resolved.period.previous) : Promise.resolve(null),
     includeLp ? getLpOverviewTotals(resolved.period.current) : null,
-    includeLp && compare ? getLpOverviewTotals(resolved.period.previous) : null,
+    includeLpPrevious && compare ? getLpOverviewTotals(resolved.period.previous) : null,
   ]);
 
   const agg = aggRows[0] ?? { room_revenue: 0, extras_revenue: 0, sold_room_nights: 0 };
@@ -300,8 +310,8 @@ export async function getAdrByProperty(filter: KpiFilter): Promise<PropertyAdr[]
     });
   }
 
-  // LP has zero sales_booking rows — its own row comes from sales_booking_lp_monthly instead. Never covered by the historical override (see historicalSheetData.ts).
-  if (resolved.properties.includes(LP_PROPERTY)) {
+  // LP has zero sales_booking rows — its own row comes from sales_booking_lp_monthly instead, unless already covered by the historical override above (both workbooks have LP rows — see historicalSheetData.ts).
+  if (resolved.properties.includes(LP_PROPERTY) && !(LP_PROPERTY in historical)) {
     const lp = await getLpAdr(resolved.period.current);
     if (lp.nights > 0 || lp.revenue > 0) {
       const lpAvailable = availableByProperty[LP_PROPERTY] ?? 0;
