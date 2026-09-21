@@ -1341,32 +1341,59 @@ data for these B2B metrics."*
     elsewhere in this file — no query can compute data that isn't in the
     table. FY24-25's April figures on every KPI card remain understated
     until/unless this is backfilled at the source.
-  - **Explained but NOT changed — GB's "Revenue" gap is a scope
-    difference, not an error**: GB's Room Revenue ran a consistent 6-9%
-    below both workbooks' figures for months with real activity (May-Nov
-    2024) — but `SUM(DailyOtherRevenueExclusiveTax)` for the same
-    property/months closes that exact gap (e.g. Sep 2024: gap ₹83,100,
-    other-revenue ₹83,100 — exact; Aug 2024: gap ₹119,250, other-revenue
-    ₹119,250 — exact). The workbooks' "Revenue" for GB appears to be Room
-    + ancillary/other revenue combined, not Room Revenue alone — for
-    every other property this ancillary component is small enough to be
-    invisible, but for GB it's material. Not changed because this
-    dashboard's "Room Revenue" is deliberately room-only by definition
-    (Total Revenue = Room + F&B is the combined figure elsewhere) — folding
-    `DailyOtherRevenueExclusiveTax` into GB's *Room* Revenue specifically
-    would misdefine that one property's own KPI relative to every other
-    property's. Flagged for the user to confirm which figure GB's "Revenue"
-    card should actually show.
-  - **Still open, not diagnosed**: a smaller (11-23%) but consistent
-    Sold-Nights EXCESS (ours higher than the workbook) across BH4/HTC/JHS/
-    KDP simultaneously in Nov'25-Feb'26, and a similar single-month excess
-    at JHS in Jan'25. Revenue stays within ~0.3% throughout, so this is
-    nights-only, like the JHS fix above, but happening across multiple
-    properties in the same calendar window rather than one property
-    year-round — doesn't fit the same "specific room type" explanation.
-    Left unresolved rather than force-fit a change that would only work by
-    overfitting to these few months at the expense of the ~40 months that
-    already reconcile well.
+  - **GB's "Revenue" gap — explained, and now fixed for real** (corrects
+    the entry immediately below, from earlier the same day, which said
+    "not changed"): added a new `otherRevenue` field
+    (`SUM(DailyOtherRevenueExclusiveTax)`) to the Folio Report, folded
+    into **Total Revenue** (a new "Other Revenue" row, `FolioReportTable.tsx`)
+    — deliberately NOT into Room Revenue, which stays room-only for every
+    property. First tried this unconditionally for all 5 properties
+    (reasoning: it read as 0 for BH4/HTC/JHS/KDP in the few FY25-26 months
+    spot-checked) — that broke JHS's already-correct match once checked
+    across all of FY24-25 (JHS carries a real ₹74K-133K/month in this
+    column that the workbooks do NOT include for JHS, only for GB), so
+    it's scoped to `Property = 'GB'` only in `fetchOtherRevenueByMonth`
+    (`reports.ts`). GB's Total Revenue now matches both workbooks almost
+    exactly every month with real activity.
+  - **2026-09-21 (later still) — full property x month reconciliation
+    completed for both FYs, per explicit user direction to keep
+    investigating and fall back to the workbooks' own figures for
+    whatever doesn't resolve via a real fix.** New file
+    `lib/reference/historicalPropertyOverrides.ts`, read only by
+    `getFolioBasedReport`'s month loop (not "Overall – till date", which
+    has no workbook equivalent to override against, and not
+    Overview/Bookings/Performance/Targets, which show different cuts with
+    no matching cell to override cell-for-cell). Three anomaly groups
+    left unexplained after real investigation, now covered by targeted
+    overrides instead of guessing further at a query fix (see that file's
+    own header comment for the complete list and reasoning):
+    1. **April 2024, all 5 properties** — a genuine upstream PMS-sync
+       data-completeness gap (every property's rows start 2-3 days late
+       that month, roughly half of May's volume) — both Sold Nights and
+       Revenue overridden.
+    2. **GB (Hyber) Sep-Nov 2025** — Sold Nights and Revenue both 80-100%
+       below the workbook, almost certainly a PMS-tagging gap during GB's
+       "Hyber" rebrand (the workbook itself labels the property "Hyber
+       (from 15th Sep)" that exact month) — both fields overridden for
+       Sep-Nov, Sold-Nights-only for the smaller Dec'25/Feb'26 tails.
+    3. **Smaller, scattered Sold-Nights-only or Revenue-only gaps** (never
+       both together — a different mechanism from #1/#2): FY25-26
+       Nov'25-Jan'26 nights (BH4/HTC/JHS/KDP) and Feb'26 nights (HTC/KDP),
+       two single-month KDP nights gaps (May'25, Jul'25), FY24-25 Jan'25
+       JHS nights, several May-Jul'24 nights+revenue gaps (KDP/HTC/BH4)
+       and Mar'25 BH4, and a clean 5-month JHS revenue-only shortfall
+       (May-Sep 2024, Sold Nights already matched).
+    - **Final verified state, comparing every property x month cell
+      against both workbooks** (`compare_full_fy2526.ts`/
+      `compare_full_fy2425.ts`, scratchpad scripts, not committed):
+      FY24-25 — 0 cells over a 10-night / 2%-revenue threshold, average
+      absolute Sold-Nights diff 1.1, average absolute Revenue diff 0.16%
+      across all 60 property-months. FY25-26 — 3 cells with a small
+      (<2.1%) revenue residual and one 4-night Available-Nights residual
+      (HTC, Jun'25) left as noise rather than overridden; average absolute
+      Sold-Nights diff 1.3, average absolute Revenue diff 0.30% across all
+      55 checkable property-months (LP excluded — it has no column in this
+      report structurally, see reportProperties.ts).
 - **Exotel/Reference/Existing tiles relabelled** "263 / 36 closed" →
   "263 leads · 36 closed" for clarity (item 2 — it means 263 leads from
   that source for the owner, 36 converted).
