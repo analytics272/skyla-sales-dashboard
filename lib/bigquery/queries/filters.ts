@@ -60,23 +60,41 @@ export const SALES_BOOKING_STAY_FILTER = "BookingStatus NOT IN ('Void', 'No Show
  * Looker Studio's own figures for the same month too.
  *
  * This is deliberately scoped to the exact `RoomShortCode` text, not a
- * generic "parse the bedroom count out of the room name" rule — `JHS` has
- * 1,790+ nights of its own "Two Bedroom Suite" (and HTC/KDP have "One
- * Bedroom Suite" types), which are ordinary single-room product tiers, one
- * physical room each, already correctly inside those properties' own room
- * counts — those three properties already tied out to Looker Studio using
- * a plain `COUNT(*)` (checked directly), so a broad "any *Bedroom* type
- * gets multiplied" rule would have been wrong and would have broken them.
- * No other property currently has a `RoomShortCode` matching this pattern.
+ * generic "parse the bedroom count out of the room name" rule — HTC/KDP
+ * have "One Bedroom Suite" types, which are ordinary single-room product
+ * tiers, one physical room each, already correctly inside those
+ * properties' own room counts, so a broad "any *Bedroom* type gets
+ * multiplied" rule would have been wrong and would have broken them.
+ *
+ * 2026-09-21 — JHS's "Two Bedroom Suite" (1,792 rows, exclusively at JHS)
+ * ADDED as a second ×2 case, per the same reasoning as BH4's ×3 case
+ * above: two independently maintained finance "Revenue Dashboard"
+ * workbooks (FY24-25, FY25-26, provided by the user) both count JHS Sold
+ * Nights consistently higher than a plain `COUNT(*)` — while Revenue
+ * matches almost exactly every month, isolating the gap to a nights-only
+ * miscount, not a data-source disagreement. Tested by adding back exactly
+ * one extra night per "Two Bedroom Suite" row: this closes the gap to
+ * within a handful of nights (data-entry-noise scale) for 9 of 12 months
+ * in FY25-26 and 10 of 12 in FY24-25 — e.g. FY25-26 Jun'25 705 vs
+ * sheet's 705 (exact), Jul'25 828 vs 828 (exact), Sep'25 794 vs 794
+ * (exact). This SUPERSEDES the previous version of this comment, which
+ * had checked JHS's Two Bedroom Suite against Looker Studio and found it
+ * tied out at ×1 — that check is not being called wrong, just superseded
+ * by a more authoritative, more recently provided source. Two residual
+ * outlier months not explained by this fix (FY25-26 Nov'25-Jan'26 all
+ * ~20-23 nights over; FY24-25 Apr'24 ~178 under, Jan'25 ~23 over) are left
+ * as open, undiagnosed gaps — flagged, not silently absorbed into the
+ * multiplier, since forcing a fit there would risk overfitting to the
+ * outlier months at the expense of the 19 months that already match.
  *
  * Applies only to metrics that represent physical room-night capacity
  * (Sold Room Nights and everything computed from it — Occupancy %, ADR,
  * RevPAR, category/brand/room-format nights breakdowns) — NOT to Total
- * Bookings (a 3BHK stay is still one booking) or Guests Served (a
- * multi-bedroom apartment sleeping N guests is still N guests, not N×3).
+ * Bookings (a multi-bedroom stay is still one booking) or Guests Served
+ * (a multi-bedroom unit sleeping N guests is still N guests, not N×2/3).
  */
 export function roomNightUnitsSqlExpr(alias = ""): string {
-  return `CASE WHEN ${alias}RoomShortCode = '3 Bedroom Apartments' THEN 3 ELSE 1 END`;
+  return `CASE ${alias}RoomShortCode WHEN '3 Bedroom Apartments' THEN 3 WHEN 'Two Bedroom Suite' THEN 2 ELSE 1 END`;
 }
 
 /**
