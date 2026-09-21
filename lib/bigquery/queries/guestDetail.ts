@@ -9,6 +9,7 @@ import { roomTypeMappingSqlUnnest, roomTypeJoinCondition } from "@/lib/reference
 import { GUEST_SERVED_SHEET_SNAPSHOT, GUEST_SERVED_SNAPSHOT_RANGE, GUEST_SERVED_SNAPSHOT_LABEL } from "@/lib/reference/guestServedSheetSnapshot";
 import { safeDivide } from "@/lib/format/currency";
 import { ComparisonMetric } from "./overview";
+import { getHistoricalOverrideForRange } from "@/lib/reference/historicalDashboardOverride";
 
 function comparisonMetric(current: number | null, previous: number | null): ComparisonMetric {
   return { current, previous, pctChange: current !== null && previous !== null ? safeDivide(current - previous, previous) : null };
@@ -80,8 +81,32 @@ export async function getBookingStats(filter: KpiFilter): Promise<BookingStats> 
   const compare = filter.compareYoY ?? false;
   const { clause: where, params } = buildScopeClause("Property", "CAST(StayDate AS DATE)", resolved, "");
 
-  const [rows, prevRows, lpTotals, lpPrevTotals] = await Promise.all([
+  // 2026-09-21 — historical workbook override, same rule as getOverviewKpis
+  // (see historicalDashboardOverride.ts). Total Bookings and Guests Served
+  // have no workbook equivalent (neither sheet counts bookings or guests),
+  // so those two always come from the full-properties query below,
+  // unaffected — only Sold Room Nights and Room Revenue are replaced for
+  // covered properties, via a second query scoped to just the uncovered
+  // ones (whatever the full query already computed for those two fields
+  // gets discarded to avoid double-counting the covered properties).
+  const historicalCurrent = getHistoricalOverrideForRange(resolved.properties, resolved.period.current);
+  const historicalPrevious = compare ? getHistoricalOverrideForRange(resolved.properties, resolved.period.previous) : {};
+  const uncoveredCurrentProps = resolved.properties.filter((p) => !(p in historicalCurrent));
+  const uncoveredPreviousProps = resolved.properties.filter((p) => !(p in historicalPrevious));
+  const hasCurrentOverride = Object.keys(historicalCurrent).length > 0;
+  const hasPreviousOverride = Object.keys(historicalPrevious).length > 0;
+
+  const [rows, uncoveredRows, prevRows, uncoveredPrevRows, lpTotals, lpPrevTotals] = await Promise.all([
     runQuery<BookingStatsRow>(BOOKING_STATS_SQL(where), params),
+    hasCurrentOverride && uncoveredCurrentProps.length > 0
+      ? (() => {
+          const { clause: w, params: p } = buildScopeClause("Property", "CAST(StayDate AS DATE)", { ...resolved, properties: uncoveredCurrentProps }, "u");
+          return runQuery<Pick<BookingStatsRow, "sold_room_nights" | "room_revenue">>(
+            `SELECT SUM(${roomNightUnitsSqlExpr()}) AS sold_room_nights, SUM(DailyRevenue) AS room_revenue FROM ${table("sales_booking")} WHERE ${w}`,
+            p
+          );
+        })()
+      : Promise.resolve(hasCurrentOverride ? [{ sold_room_nights: 0, room_revenue: 0 }] : null),
     // Comparisons are opt-in — skip the previous-period query entirely unless compareYoY is on.
     compare
       ? (() => {
@@ -89,23 +114,43 @@ export async function getBookingStats(filter: KpiFilter): Promise<BookingStats> 
           return runQuery<BookingStatsRow>(BOOKING_STATS_SQL(prevWhere), prevParams);
         })()
       : Promise.resolve(null),
+    compare && hasPreviousOverride && uncoveredPreviousProps.length > 0
+      ? (() => {
+          const { clause: w, params: p } = buildPreviousScopeClause("Property", "CAST(StayDate AS DATE)", { ...resolved, properties: uncoveredPreviousProps }, "pu");
+          return runQuery<Pick<BookingStatsRow, "sold_room_nights" | "room_revenue">>(
+            `SELECT SUM(${roomNightUnitsSqlExpr()}) AS sold_room_nights, SUM(DailyRevenue) AS room_revenue FROM ${table("sales_booking")} WHERE ${w}`,
+            p
+          );
+        })()
+      : Promise.resolve(compare && hasPreviousOverride ? [{ sold_room_nights: 0, room_revenue: 0 }] : null),
     includeLp ? getLpOverviewTotals(resolved.period.current) : Promise.resolve(null),
     includeLp && compare ? getLpOverviewTotals(resolved.period.previous) : Promise.resolve(null),
   ]);
 
+  const histCurrentSums = Object.values(historicalCurrent).reduce((acc, m) => ({ nights: acc.nights + m.soldRoomNights, revenue: acc.revenue + m.revenue }), { nights: 0, revenue: 0 });
+  const histPreviousSums = Object.values(historicalPrevious).reduce((acc, m) => ({ nights: acc.nights + m.soldRoomNights, revenue: acc.revenue + m.revenue }), { nights: 0, revenue: 0 });
+
   const r = rows[0] ?? { total_bookings: 0, guests_served: 0, sold_room_nights: 0, room_revenue: 0 };
   const totalBookings = r.total_bookings + (lpTotals?.bookingsCount ?? 0);
   const guestsServed = (r.guests_served ?? 0) + (lpTotals?.guestsServed ?? 0);
-  const soldRoomNights = r.sold_room_nights + (lpTotals?.soldRoomNights ?? 0);
-  const roomRevenue = (r.room_revenue ?? 0) + (lpTotals?.roomRevenue ?? 0);
+  const soldRoomNights = hasCurrentOverride
+    ? (uncoveredRows?.[0]?.sold_room_nights ?? 0) + histCurrentSums.nights + (lpTotals?.soldRoomNights ?? 0)
+    : r.sold_room_nights + (lpTotals?.soldRoomNights ?? 0);
+  const roomRevenue = hasCurrentOverride
+    ? (uncoveredRows?.[0]?.room_revenue ?? 0) + histCurrentSums.revenue + (lpTotals?.roomRevenue ?? 0)
+    : (r.room_revenue ?? 0) + (lpTotals?.roomRevenue ?? 0);
   const alos = safeDivide(soldRoomNights, totalBookings);
   const revenuePerGuest = safeDivide(roomRevenue, guestsServed);
 
   const pr = prevRows ? prevRows[0] ?? { total_bookings: 0, guests_served: 0, sold_room_nights: 0, room_revenue: 0 } : null;
   const prevTotalBookings = pr ? pr.total_bookings + (lpPrevTotals?.bookingsCount ?? 0) : null;
   const prevGuestsServed = pr ? (pr.guests_served ?? 0) + (lpPrevTotals?.guestsServed ?? 0) : null;
-  const prevSoldRoomNights = pr ? pr.sold_room_nights + (lpPrevTotals?.soldRoomNights ?? 0) : null;
-  const prevRoomRevenue = pr ? (pr.room_revenue ?? 0) + (lpPrevTotals?.roomRevenue ?? 0) : null;
+  const prevSoldRoomNights = pr
+    ? (hasPreviousOverride ? (uncoveredPrevRows?.[0]?.sold_room_nights ?? 0) + histPreviousSums.nights : pr.sold_room_nights) + (lpPrevTotals?.soldRoomNights ?? 0)
+    : null;
+  const prevRoomRevenue = pr
+    ? (hasPreviousOverride ? (uncoveredPrevRows?.[0]?.room_revenue ?? 0) + histPreviousSums.revenue : (pr.room_revenue ?? 0)) + (lpPrevTotals?.roomRevenue ?? 0)
+    : null;
   const prevAlos = prevSoldRoomNights !== null && prevTotalBookings !== null ? safeDivide(prevSoldRoomNights, prevTotalBookings) : null;
   const prevRevenuePerGuest = prevRoomRevenue !== null && prevGuestsServed !== null ? safeDivide(prevRoomRevenue, prevGuestsServed) : null;
 
@@ -224,11 +269,41 @@ function cappedForwardEnd(scopeStart: string, scopeEnd: string, today: string, h
 }
 
 async function weightedSoldNights(properties: string[], range: { start: string; end: string }): Promise<number> {
+  if (properties.length === 0) return 0;
   const rows = await runQuery<{ n: number | null }>(`
     SELECT SUM(${roomNightUnitsSqlExpr()}) AS n FROM ${table("sales_booking")}
     WHERE Property IN UNNEST(@properties) AND CAST(StayDate AS DATE) BETWEEN @start AND @end AND ${SALES_BOOKING_STAY_FILTER}
   `, { properties, start: range.start, end: range.end });
   return rows[0]?.n ?? 0;
+}
+
+// 2026-09-21 — historical workbook override, same rule as getOverviewKpis
+// (historicalDashboardOverride.ts). Both wrappers apply the SAME override
+// to Available and Sold for a given (properties, range) pair — required to
+// keep this function's own "Sold + Unsold + Remaining = Available" identity
+// holding by construction, same as the comment above already establishes
+// for the plain BigQuery case. Since the override only ever matches a
+// whole month/FY fully inside FY24-25/FY25-26 (both entirely in the past),
+// it can only ever affect the till-date branch below, never the forward
+// one — no interaction with FORWARD_HORIZON_DAYS capping to worry about.
+async function overrideAwareAvailable(properties: string[], range: { start: string; end: string }): Promise<number> {
+  const historical = getHistoricalOverrideForRange(properties, range);
+  const uncovered = properties.filter((p) => !(p in historical));
+  const [bigQueryAvailable, histSum] = await Promise.all([
+    getAvailableRoomNights(uncovered, range),
+    Promise.resolve(Object.values(historical).reduce((s, m) => s + m.availableRoomNights, 0)),
+  ]);
+  return bigQueryAvailable + histSum;
+}
+
+async function overrideAwareSoldNights(properties: string[], range: { start: string; end: string }): Promise<number> {
+  const historical = getHistoricalOverrideForRange(properties, range);
+  const uncovered = properties.filter((p) => !(p in historical));
+  const [bigQuerySold, histSum] = await Promise.all([
+    weightedSoldNights(uncovered, range),
+    Promise.resolve(Object.values(historical).reduce((s, m) => s + m.soldRoomNights, 0)),
+  ]);
+  return bigQuerySold + histSum;
 }
 
 export async function getRoomNightsGap(filter: KpiFilter): Promise<RoomNightsGap> {
@@ -241,7 +316,7 @@ export async function getRoomNightsGap(filter: KpiFilter): Promise<RoomNightsGap
   const scopeStart = resolved.period.current.start;
   const scopeEnd = cappedForwardEnd(scopeStart, resolved.period.current.end, today, FORWARD_HORIZON_DAYS);
 
-  const available = await getAvailableRoomNights(resolved.properties, { start: scopeStart, end: scopeEnd });
+  const available = await overrideAwareAvailable(resolved.properties, { start: scopeStart, end: scopeEnd });
 
   // Till-date (past) portion of the capped scope, ending no later than
   // yesterday. Nothing "completed" yet if the scope hasn't started as of
@@ -256,8 +331,8 @@ export async function getRoomNightsGap(filter: KpiFilter): Promise<RoomNightsGap
     // propertyWindows.ts. LP has zero sales_booking rows, so its real sold
     // nights must be added here too, or it would look 100% unsold.
     const [tillDateAvailable, tillDateSoldRaw, tillDateLpTotals] = await Promise.all([
-      getAvailableRoomNights(resolved.properties, tillDateRange),
-      weightedSoldNights(resolved.properties, tillDateRange),
+      overrideAwareAvailable(resolved.properties, tillDateRange),
+      overrideAwareSoldNights(resolved.properties, tillDateRange),
       includeLp ? getLpOverviewTotals(tillDateRange) : Promise.resolve(null),
     ]);
     tillDateSold = tillDateSoldRaw + (tillDateLpTotals?.soldRoomNights ?? 0);

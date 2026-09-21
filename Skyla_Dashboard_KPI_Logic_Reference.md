@@ -1394,6 +1394,50 @@ data for these B2B metrics."*
       Sold-Nights diff 1.3, average absolute Revenue diff 0.30% across all
       55 checkable property-months (LP excluded — it has no column in this
       report structurally, see reportProperties.ts).
+- **2026-09-21 (yet later) — the FY24-25/FY25-26 workbook override extended
+  dashboard-wide** (Overview, Bookings — not just the Reports tab), per
+  explicit user direction: "Overview, Bookings, Performance, Targets, etc
+  all should keep those 2 sheets values... all filters should follow those
+  2 past FY numbers." New files `lib/reference/historicalSheetData.ts`
+  (the full transcribed Property x Month dataset, auto-generated from the
+  same source as the Reports-tab override, LP excluded — see that file's
+  own comment) and `lib/reference/historicalDashboardOverride.ts` (the
+  matching rule, shared by every integration point).
+  - **Exact rule, as specified by the user**: the selected period must be
+    either one whole calendar month, or one of the two FYs' exact full
+    bounds, entirely inside FY24-25/FY25-26 — Today, Last 7/30 Days, and a
+    partial-month Custom Range are NOT covered and always fall back to
+    live BigQuery, with no prorating. FY26-27 (or any other year) is never
+    matched. Coverage is also per-property: GB is absent from the
+    override for any range outside its actual workbook coverage (FY25-26
+    Apr-Aug'25, before the "Hyber" rebrand; FY24-25 Feb-Mar'25, genuinely
+    inactive) and LP is never covered at all (see historicalSheetData.ts) —
+    those fall back to BigQuery for exactly the uncovered property, not
+    the whole request.
+  - **Wired into 4 functions so far**: `getOverviewKpis` and
+    `getAdrByProperty` (`overview.ts` — Overview's main KPI tiles and
+    property ranking bars) and `getBookingStats` and `getRoomNightsGap`
+    (`guestDetail.ts` — Bookings' main stats and Room Nights card).
+    Verified live: `/overview?period=custom&start=2025-04-01&end=2025-04-30&property=KDP`
+    renders "1.01 Cr" (₹10,135,316, exact workbook match);
+    `/bookings` with the same filter shows 1,890 Available / 1,576 Sold
+    (both exact). "This FY" (the current, live FY26-27) confirmed
+    unaffected on both pages.
+  - **Deliberately NOT touched, and why**: `bySource`/`getCategoryMix`
+    (B2B/B2C/OTA nights+revenue mix) — neither workbook splits nights by
+    category, and FY25-26's has no B2B/B2C/OTA split at all, so a partial
+    override would produce a category mix that doesn't sum to the
+    (correctly overridden) top-line total, a worse inconsistency than
+    leaving it live. `getRepeatBookingShare`/`getRoomFormatStats`/
+    `getExpatStats`/cancellation stats, every company/OTA-level query
+    (`b2bContracts.ts`, `otaBreakdown.ts`, `ownerCompanyAnalysis.ts`),
+    `leads.ts`, `brandCategory.ts`, `trends.ts` — none of these have a
+    workbook equivalent at all. **Performance and Targets tabs have
+    nothing applicable**: Performance is Google/OTA review stats plus
+    `getPropertyTargetComparison`, which compares live actuals against
+    `propertyTargets.ts`'s fixed FY26-27 plan specifically — there is no
+    FY24-25/FY25-26 target to compare against, so a past-FY reading there
+    wouldn't mean anything structurally, override or not.
 - **Exotel/Reference/Existing tiles relabelled** "263 / 36 closed" →
   "263 leads · 36 closed" for clarity (item 2 — it means 263 leads from
   that source for the owner, 36 converted).
