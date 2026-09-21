@@ -1301,6 +1301,72 @@ data for these B2B metrics."*
     reconciling `getRoomNightsGap()` rewrite documented in the 2026-09-18
     entry above). The Overview version was a simpler, non-reconciling
     Sold/Available/(Available−Sold) trio with no such validation behind it.
+- **2026-09-21 (later, same day) — property-level Room Nights/Revenue/ARR/
+  Occupancy reconciled against two finance-provided "Revenue Dashboard"
+  reference workbooks (FY24-25, FY25-26; Property x Month grain), per
+  explicit user direction to root-cause and fix the live queries (not
+  hardcode a static override) so this dashboard-wide, all-filters KPI set
+  matches on an ongoing basis, not just for these two closed years.
+  - **KDP roomCount reverted 64 -> 63** — see `propertyReference.ts`'s own
+    comment. Both workbooks independently compute KDP's Total Nights as
+    63 x days-in-month, every month checked; per explicit user
+    confirmation ("63 rooms kdp has"), this supersedes the 2026-09-08
+    correction to 64 (which had been based on the PMS's own Annual Sales
+    Report — not wrong at the time, just superseded by the property
+    owner's own statement of physical room count).
+  - **Real bug fixed: JHS's "Two Bedroom Suite" room type now counted as 2
+    room-nights, not 1** (`roomNightUnitsSqlExpr`, `filters.ts`) — the same
+    physical-capacity logic already applied to BH4's "3 Bedroom
+    Apartments". Found by isolating a pattern: JHS's Sold Nights ran 4-11%
+    under both workbooks every month, while Revenue matched within
+    ~0.3-1.5% — a nights-only miscount, not a data-source disagreement.
+    "Two Bedroom Suite" is exclusively a JHS room type (1,792 rows,
+    confirmed against every property) so this is scoped identically
+    narrowly to the existing BH4 case. Verified live: adding back one
+    night per "Two Bedroom Suite" row closes the gap to within a handful
+    of nights for 9 of 12 months in FY25-26 and 10 of 12 in FY24-25 (e.g.
+    FY25-26 Jun'25 705 vs sheet's 705 exactly, Sep'25 794 vs 794 exactly).
+    This corrects (not contradicts — supersedes with better information)
+    the 2026-09-09 comment on `roomNightUnitsSqlExpr`, which had checked
+    JHS's Two Bedroom Suite against Looker Studio and found it tied out
+    at x1; that check isn't wrong, it just predates these two more
+    authoritative finance workbooks.
+  - **Confirmed real, upstream data gap — NOT a query bug, not fixed**:
+    April 2024 is incomplete in `sales_booking` for every property (row
+    counts roughly half of May 2024's; BH4/GB/HTC's earliest `StayDate`
+    that month is Apr 2-3, not Apr 1) — Revenue/Nights run 27-51% low for
+    every property that month specifically. This is a raw-data
+    completeness gap at the very start of this table's history, the same
+    class of "eZee sync backfill" gap already documented for BH4
+    elsewhere in this file — no query can compute data that isn't in the
+    table. FY24-25's April figures on every KPI card remain understated
+    until/unless this is backfilled at the source.
+  - **Explained but NOT changed — GB's "Revenue" gap is a scope
+    difference, not an error**: GB's Room Revenue ran a consistent 6-9%
+    below both workbooks' figures for months with real activity (May-Nov
+    2024) — but `SUM(DailyOtherRevenueExclusiveTax)` for the same
+    property/months closes that exact gap (e.g. Sep 2024: gap ₹83,100,
+    other-revenue ₹83,100 — exact; Aug 2024: gap ₹119,250, other-revenue
+    ₹119,250 — exact). The workbooks' "Revenue" for GB appears to be Room
+    + ancillary/other revenue combined, not Room Revenue alone — for
+    every other property this ancillary component is small enough to be
+    invisible, but for GB it's material. Not changed because this
+    dashboard's "Room Revenue" is deliberately room-only by definition
+    (Total Revenue = Room + F&B is the combined figure elsewhere) — folding
+    `DailyOtherRevenueExclusiveTax` into GB's *Room* Revenue specifically
+    would misdefine that one property's own KPI relative to every other
+    property's. Flagged for the user to confirm which figure GB's "Revenue"
+    card should actually show.
+  - **Still open, not diagnosed**: a smaller (11-23%) but consistent
+    Sold-Nights EXCESS (ours higher than the workbook) across BH4/HTC/JHS/
+    KDP simultaneously in Nov'25-Feb'26, and a similar single-month excess
+    at JHS in Jan'25. Revenue stays within ~0.3% throughout, so this is
+    nights-only, like the JHS fix above, but happening across multiple
+    properties in the same calendar window rather than one property
+    year-round — doesn't fit the same "specific room type" explanation.
+    Left unresolved rather than force-fit a change that would only work by
+    overfitting to these few months at the expense of the ~40 months that
+    already reconcile well.
 - **Exotel/Reference/Existing tiles relabelled** "263 / 36 closed" →
   "263 leads · 36 closed" for clarity (item 2 — it means 263 leads from
   that source for the owner, 36 converted).

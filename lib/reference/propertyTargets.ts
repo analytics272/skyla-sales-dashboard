@@ -29,6 +29,10 @@
 // workbook's own 18-room `available` figures below (e.g. `available: 540` =
 // 18 x 30 for April) — no discrepancy between the workbook and live
 // inventory for BH4 after all, unlike KDP's genuine 63-vs-64 gap above.
+// 2026-09-21: KDP's roomCount reverted 64 -> 63 in `propertyReference.ts`
+// (see that file's own comment) — this workbook's `available: 1890` figures
+// were the 63-based ones all along, so live/achieved and this plan now
+// agree on KDP's room count again, same as every other property.
 //
 // Actual/achieved figures for comparison against these targets still come
 // from `sales_booking` (real PMS data) — see

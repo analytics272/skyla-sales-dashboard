@@ -34,20 +34,19 @@ export interface PropertyRef {
   status: PropertyStatus;
 }
 
-// 2026-09-08: KDP corrected 63 -> 64. The FY27 planning workbook (see
-// propertyTargets.ts's own header comment) used 63 and this file matched it
-// to cross-check the workbook's column order — but the live PMS Annual Sales
-// Report (annualsalesreport_skyla, user-provided 2026-09-08) shows KDP's
-// "Rooms Available" as 1920/1984/1792 across every one of its 12 months
-// (Sep 2026 - Aug 2027), which is 64 rooms x days-in-month in every single
-// case, not 63. roomCountOf() drives live Available Room Nights (Occupancy%,
-// ADR, RevPAR) sourced from sales_booking — it should match the PMS's actual
-// physical room count, not the planning workbook's. This does NOT touch
-// PROPERTY_TARGETS_FY27's own per-month `available` figures (still the
-// workbook's 63-based numbers, per "targets are static, confirmed not to
-// change") — only the live/achieved side changes, which is the correct side
-// to fix since the discrepancy is in physical inventory, not in the target
-// plan.
+// 2026-09-08: KDP corrected 63 -> 64, based on the live PMS Annual Sales
+// Report (annualsalesreport_skyla) showing "Rooms Available" as a clean
+// 64 x days-in-month across 12 different months.
+//
+// 2026-09-21 — REVERTED 64 -> 63, per explicit user correction ("63 rooms
+// kdp has") after cross-checking two independently maintained "Revenue
+// Dashboard" reference workbooks (FY24-25, FY25-26) that both compute
+// KDP's Total Nights as 63 x days-in-month, every month checked. The
+// Annual Sales Report's 64 figure is not used to override the property
+// owner's own statement of physical room count. Per the doc-honesty
+// convention this repo follows, the 2026-09-08 entry above is left
+// in place rather than deleted — it recorded a real, deliberate decision
+// at the time, later superseded by better information.
 //
 // 2026-09-09, REVERTED same day: BH4 was briefly changed 18 -> 24 after
 // finding 24 distinct RoomNo values under BH4 in sales_booking (100-103,
@@ -97,7 +96,7 @@ export interface PropertyRef {
 // daily folio matrix LP structurally cannot populate.
 // Per explicit user direction this status should not be flipped again.
 export const PROPERTIES: PropertyRef[] = [
-  { code: "KDP", name: "KDP", brand: "Skyla", roomCount: 64, status: "active" },
+  { code: "KDP", name: "KDP", brand: "Skyla", roomCount: 63, status: "active" },
   { code: "HTC", name: "HTC", brand: "Skyla", roomCount: 34, status: "active" },
   { code: "JHS", name: "JHS", brand: "Skyla", roomCount: 33, status: "active" },
   { code: "BH4", name: "BH4", brand: "Aptly", roomCount: 18, status: "active" },
