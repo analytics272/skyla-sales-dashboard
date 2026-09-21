@@ -199,6 +199,11 @@ export default function LeadsContent({
   const filteredDrillTable = companyDrillSearchTrimmed
     ? drillTable.filter((r) => r.company.toLowerCase().includes(companyDrillSearchTrimmed))
     : drillTable;
+  // 2026-09-21: rank must come from this company's position in the full,
+  // unfiltered drillTable (already revenue-sorted) — not from its index
+  // in the filtered/paged array, which reset every match to "1." Same
+  // fix pattern as BookingsContent.tsx's rankMapByTab.
+  const drillRankMap = new Map(drillTable.map((r, i) => [r.company, i + 1]));
   const companyDrillPageCount = Math.max(1, Math.ceil(filteredDrillTable.length / COMPANY_DRILL_TOP_N));
   const pagedDrillTable = filteredDrillTable.slice(
     companyDrillPage * COMPANY_DRILL_TOP_N,
@@ -429,10 +434,10 @@ export default function LeadsContent({
                             </td>
                           </tr>
                         ) : (
-                          pagedDrillTable.map((r, i) => (
+                          pagedDrillTable.map((r) => (
                             <tr key={r.company} className="border-b border-zinc-100 last:border-0 dark:border-zinc-800">
                               <td className="py-1.5 pr-2 text-zinc-700 dark:text-zinc-200">
-                                {companyDrillPage * COMPANY_DRILL_TOP_N + i + 1}. {r.company}
+                                {drillRankMap.get(r.company)}. {r.company}
                               </td>
                               <td className="py-1.5 pl-2 text-right tabular-nums text-zinc-600 dark:text-zinc-400">{r.nights.toLocaleString("en-IN")}</td>
                               <td className="py-1.5 pl-2 text-right tabular-nums text-zinc-600 dark:text-zinc-400">{r.adr !== null ? `₹${Math.round(r.adr).toLocaleString("en-IN")}` : "—"}</td>
