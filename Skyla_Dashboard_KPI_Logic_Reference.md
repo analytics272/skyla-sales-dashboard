@@ -1523,36 +1523,33 @@ data for these B2B metrics."*
       TOTAL (excl. LP) unchanged at 4,349 nights / ₹1,95,60,742.
 - **2026-09-22 — "STRICT dashboard-wide rule" reissued by the user,
   explicitly naming B2B/B2C Target/Achieved among the FY24-25 metrics that
-  must use the exact workbook value wherever displayed.** B2B/B2C
-  Achieved (revenue only — the workbook never splits nights by category)
-  is the one genuinely new piece of coverage this added; everything else
-  named (Total Achieved, Sold Nights, ARR, Occupancy %, and FY25-26's
-  Total/Sale Nights, Revenue, Consolidated ARR, Occupancy %) was already
-  covered by the 2026-09-21 entries above.
-  - **New: B2B/B2C revenue override wired into `getCategoryMix`
-    (guestDetail.ts — Bookings' Revenue/Nights Mix chart) and
+  must use the exact workbook value wherever displayed — then narrowed to
+  a single, precise scope after back-and-forth the same session.** Final,
+  settled state: **only the Room Revenue headline total** (`roomRevenue`
+  in `getOverviewKpis`, and anywhere else Total/Room Revenue is shown) uses
+  the FY24-25 workbook's B2B+B2C sum for a covered property. Everything
+  else named (Total Achieved = Room Revenue, Sold Nights, ARR, Occupancy %,
+  and FY25-26's Total/Sale Nights, Revenue, Consolidated ARR, Occupancy %)
+  was already covered by the 2026-09-21 entries above.
+  - **`getCategoryMix` (guestDetail.ts — Bookings' Revenue/Nights Mix) and
     `getOverviewKpis`'s `bySource` (overview.ts — Overview's Business
-    Category Mix)**, for any FY24-25 whole-month/whole-FY selection.
-    Nights stay live for every category (neither workbook splits nights
-    by category) and OTA revenue stays live too — the workbook's own
-    model is binary B2B/B2C with no OTA bucket, so its "B2C" already
-    folds in whatever this dashboard classifies as OTA. Accepted,
-    documented consequence: once a property's B2B/B2C are workbook-
-    sourced, B2C(workbook) + OTA(BigQuery) no longer sums to that
-    property's own workbook Total the way B2B(workbook) + B2C(workbook)
-    alone does — flagged here, not silently smoothed over. Briefly tried
-    folding OTA into B2C instead (so the visible mix would sum exactly to
-    Room Revenue) after an initial read of "Room Revenue is the sum of
-    B2B and B2C Revenue" as a request to change the mix itself — reverted
-    within the same turn per explicit correction: "OTA is addition" and
-    "B2B and B2C are separate... in the sheets OTA comes under B2C" — i.e.
-    that sentence was describing what Room Revenue already equals (true
-    already, unchanged), not asking for the mix's OTA slice to be merged
-    away. Confirmed live: Room Revenue for KDP Apr 2024 reads ₹43,82,868
-    (= workbook B2B ₹18,50,700 + B2C ₹25,32,168 exactly); the mix's own
-    B2B+B2C+OTA total (₹54,30,737.56) is intentionally higher — OTA is
-    additive on top, not a bug.
-  - **Real bug caught during this work, before push**: `sumMonths()`
+    Category Mix) are deliberately NOT workbook-overridden** — both stay
+    fully live/BigQuery for every category (B2B, B2C, OTA), exactly as
+    before any of this session's work. Briefly tried overriding B2B/B2C
+    revenue here too (reasoning: the workbook's B2B Achieved/B2C Achieved
+    rows are the same figures behind Room Revenue) — reverted within the
+    same turn per explicit user direction confirming the narrower scope:
+    the mix cards should keep showing their own independently-computed
+    numbers regardless of what Room Revenue equals. Confirmed live: Room
+    Revenue for KDP Apr 2024 reads ₹43,82,868 (= workbook B2B ₹18,50,700 +
+    B2C ₹25,32,168 exactly); the same scope's own live `bySource`/
+    `getCategoryMix` total (B2B ₹11,46,458.42 + B2C ₹10,26,064.94 + OTA
+    ₹10,47,869.56 = ₹32,20,392.92) is a completely different, independent
+    number — expected, since this breakdown was intentionally left
+    untouched.
+  - **Real bug caught during this work, before push (the fix itself is
+    still in place, even though nothing currently reads its output)**:
+    `sumMonths()`
     (`historicalDashboardOverride.ts`) defaulted `b2bRevenue`/`b2cRevenue`
     to 0 for every summed month, even ones that never had a B2B/B2C split
     at all (every FY25-26 entry). That made every FY25-26-covered property
