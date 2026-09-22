@@ -1521,6 +1521,79 @@ data for these B2B metrics."*
       covered GB before Sep 2025 either, so neither bug fix nor the
       GB-gap finding changes anything there. Spot-checked live: Jul 2024
       TOTAL (excl. LP) unchanged at 4,349 nights / ₹1,95,60,742.
+- **2026-09-22 — "STRICT dashboard-wide rule" reissued by the user,
+  explicitly naming B2B/B2C Target/Achieved among the FY24-25 metrics that
+  must use the exact workbook value wherever displayed.** B2B/B2C
+  Achieved (revenue only — the workbook never splits nights by category)
+  is the one genuinely new piece of coverage this added; everything else
+  named (Total Achieved, Sold Nights, ARR, Occupancy %, and FY25-26's
+  Total/Sale Nights, Revenue, Consolidated ARR, Occupancy %) was already
+  covered by the 2026-09-21 entries above.
+  - **New: B2B/B2C revenue override wired into `getCategoryMix`
+    (guestDetail.ts — Bookings' Revenue/Nights Mix chart) and
+    `getOverviewKpis`'s `bySource` (overview.ts — Overview's Business
+    Category Mix)**, for any FY24-25 whole-month/whole-FY selection.
+    Nights stay live for every category (neither workbook splits nights
+    by category) and OTA revenue stays live too — the workbook's own
+    model is binary B2B/B2C with no OTA bucket, so its "B2C" already
+    folds in whatever this dashboard classifies as OTA. Accepted,
+    documented consequence: once a property's B2B/B2C are workbook-
+    sourced, B2C(workbook) + OTA(BigQuery) no longer sums to that
+    property's own workbook Total the way B2B(workbook) + B2C(workbook)
+    alone does — flagged here, not silently smoothed over.
+  - **Real bug caught during this work, before push**: `sumMonths()`
+    (`historicalDashboardOverride.ts`) defaulted `b2bRevenue`/`b2cRevenue`
+    to 0 for every summed month, even ones that never had a B2B/B2C split
+    at all (every FY25-26 entry). That made every FY25-26-covered property
+    look "B2B/B2C-split covered" to the two functions above, which zeroed
+    out their real, live B2B/B2C category revenue — caught live before
+    committing (KDP Apr 2025's B2B/B2C category revenue read ₹0 despite
+    real bookings) and fixed: the result only carries `b2bRevenue`/
+    `b2cRevenue` at all when every summed month actually has them.
+    Re-verified after the fix: KDP Apr 2024 (FY24-25) correctly reads B2B
+    ₹18,50,700 / B2C ₹25,32,168 (exact workbook match); KDP Apr 2025
+    (FY25-26) correctly reads live BigQuery figures again, unzeroed.
+    Spot-checked three more cases post-fix (GB Jun 2024, LP Nov 2024, and
+    a full-FY JHS Apr24-Mar25 sum) — all exact matches.
+  - **Explicitly flagged, not implemented — Total/B2B/B2C Target
+    (FY24-25)**: these exist in the workbook, but there is currently no
+    display surface for a FY24-25/FY25-26 "Target" anywhere in this
+    dashboard — the Targets tab (`propertyTargets.ts`) is structurally
+    built around one fixed, current-FY plan (FY26-27) compared against
+    live actuals; it has no concept of an arbitrary past FY's target at
+    all. Per "apply wherever that metric is displayed," there is nowhere
+    to apply it without adding new UI, which was not asked for here — the
+    user would need to say so explicitly before this is built.
+  - **Reports tab (Folio Based Report) — confirmed already compliant,
+    via a narrower mechanism, not touched further.** Reports uses its own
+    `historicalPropertyOverrides.ts`, which only overrides the handful of
+    specific (property, month) cells that didn't already reconcile via
+    the genuine root-cause fixes from 2026-09-21 (KDP room count, JHS's
+    Two Bedroom Suite weighting, GB's Other Revenue) — not the full
+    `historicalSheetData.ts` table Overview/Bookings use. In practice this
+    already produces the exact workbook value for effectively every
+    property-month (verified: average absolute diff 1.1 nights / 0.16%
+    revenue across all 60 FY24-25 property-months, 1.3 nights / 0.30%
+    across FY25-26's 55) — not swapped to the broader mechanism since
+    doing so would change nothing numerically for the near-totality of
+    already-matching cells while adding real regression risk to a
+    working, previously-verified query (Reports also layers its own F&B/
+    Other-Revenue logic on top, which the broader mechanism doesn't know
+    about). Reports also does not gain an LP column here — that's a
+    separate, PRD-mandated structural decision (Reports is a daily folio
+    matrix LP structurally cannot populate), not something this rule
+    reopens.
+  - **Two things this rule's own wording already confirms, not new
+    findings**: (1) "if there is no revenue recorded in the sheet for a
+    property/month, the property is not there" — matches the existing,
+    already-implemented behavior exactly (GB's Apr-Aug 2025 gap in
+    FY25-26 correctly falls back to live BigQuery, not zeroed or
+    invented — see the 2026-09-21 entry above). (2) "do not reproduce
+    known spreadsheet formula errors; use the recorded/intended value" —
+    matches the existing decision to keep our own internally-consistent
+    Occupancy % for FY24-25's Jan-Mar 2025 rather than reproduce the
+    workbook's own numerator/denominator mismatch there (also documented
+    above).
 - **Exotel/Reference/Existing tiles relabelled** "263 / 36 closed" →
   "263 leads · 36 closed" for clarity (item 2 — it means 263 leads from
   that source for the owner, 36 converted).

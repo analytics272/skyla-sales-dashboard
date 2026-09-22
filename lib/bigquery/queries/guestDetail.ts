@@ -379,32 +379,67 @@ export interface CategoryMix {
   revenue: number;
 }
 
+// 2026-09-22 — per explicit user direction ("STRICT dashboard-wide rule"),
+// the FY24-25 workbook's B2B Achieved/B2C Achieved rows (the only one of
+// the two workbooks that splits revenue by category at all) now override
+// this mix's B2B/B2C REVENUE, property by property, for any whole-month or
+// whole-FY FY24-25 selection — same coverage rule as everywhere else (see
+// historicalDashboardOverride.ts). Nights are NEVER overridden here (neither
+// workbook splits nights by category) and OTA revenue is never overridden
+// either (the workbook's own model is binary B2B/B2C — it has no OTA bucket
+// at all, so "B2C" there already folds in whatever this dashboard classifies
+// as OTA). This is a deliberate, accepted consequence of that binary model:
+// once B2B/B2C are workbook-sourced, B2C(sheet) + OTA(BigQuery) no longer
+// sums to the workbook's own Total for that property/month the way
+// B2B(sheet) + B2C(sheet) alone does — flagged, not silently smoothed over.
+async function fetchCategoryMixByPropertyCategory(properties: string[], range: { start: string; end: string }): Promise<{ property: string; category: BookingCategory; nights: number; revenue: number | null }[]> {
+  if (properties.length === 0) return [];
+  return runQuery<{ property: string; category: BookingCategory; nights: number; revenue: number | null }>(`
+    SELECT Property AS property, ${bookingCategorySqlExpr("Source")} AS category, SUM(${roomNightUnitsSqlExpr()}) AS nights, SUM(DailyRevenue) AS revenue
+    FROM ${table("sales_booking")}
+    WHERE Property IN UNNEST(@properties) AND CAST(StayDate AS DATE) BETWEEN @start AND @end AND ${SALES_BOOKING_STAY_FILTER}
+    GROUP BY property, category
+  `, { properties, start: range.start, end: range.end });
+}
+
 export async function getCategoryMix(filter: KpiFilter): Promise<CategoryMix[]> {
   const resolved = resolveFilter(filter);
   const includeLp = resolved.properties.includes(LP_PROPERTY);
-  const { clause: where, params } = buildScopeClause("Property", "CAST(StayDate AS DATE)", resolved, "");
+  const historical = getHistoricalOverrideForRange(resolved.properties, resolved.period.current);
+  const b2bSplitCovered = new Set(Object.entries(historical).filter(([, m]) => m.b2bRevenue !== undefined).map(([p]) => p));
+  const includeLpLive = includeLp && !b2bSplitCovered.has(LP_PROPERTY);
+
   const [rows, lpTotals] = await Promise.all([
-    runQuery<CategoryMix>(`
-      SELECT ${bookingCategorySqlExpr("Source")} AS category, SUM(${roomNightUnitsSqlExpr()}) AS nights, SUM(DailyRevenue) AS revenue
-      FROM ${table("sales_booking")}
-      WHERE ${where}
-      GROUP BY category
-    `, params),
-    includeLp ? getLpOverviewTotals(resolved.period.current) : Promise.resolve(null),
+    fetchCategoryMixByPropertyCategory(resolved.properties, resolved.period.current),
+    includeLpLive ? getLpOverviewTotals(resolved.period.current) : Promise.resolve(null),
   ]);
 
   const merged = new Map<BookingCategory, CategoryMix>();
-  for (const r of rows) merged.set(r.category, r);
-  if (lpTotals) {
-    for (const lp of lpTotals.bySource) {
-      const existing = merged.get(lp.category);
-      if (existing) {
-        existing.nights += lp.nights;
-        existing.revenue += lp.revenue;
-      } else {
-        merged.set(lp.category, { category: lp.category, nights: lp.nights, revenue: lp.revenue });
-      }
+  const add = (category: BookingCategory, nights: number, revenue: number) => {
+    const existing = merged.get(category);
+    if (existing) {
+      existing.nights += nights;
+      existing.revenue += revenue;
+    } else {
+      merged.set(category, { category, nights, revenue });
     }
+  };
+
+  for (const r of rows) {
+    // Nights always come straight from BigQuery. Revenue too, UNLESS this
+    // property's B2B/B2C split is workbook-covered AND this row's own
+    // category is B2B or B2C (OTA revenue for a covered property is still
+    // live — the workbook has no OTA figure to replace it with).
+    const useWorkbookRevenue = b2bSplitCovered.has(r.property) && (r.category === "B2B" || r.category === "B2C");
+    add(r.category, r.nights, useWorkbookRevenue ? 0 : r.revenue ?? 0);
+  }
+  for (const property of b2bSplitCovered) {
+    const m = historical[property];
+    add("B2B", 0, m.b2bRevenue ?? 0);
+    add("B2C", 0, m.b2cRevenue ?? 0);
+  }
+  if (lpTotals) {
+    for (const lp of lpTotals.bySource) add(lp.category, lp.nights, lp.revenue);
   }
   return [...merged.values()].sort((a, b) => b.revenue - a.revenue);
 }
