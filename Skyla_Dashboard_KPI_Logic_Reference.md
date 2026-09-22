@@ -1540,7 +1540,18 @@ data for these B2B metrics."*
     documented consequence: once a property's B2B/B2C are workbook-
     sourced, B2C(workbook) + OTA(BigQuery) no longer sums to that
     property's own workbook Total the way B2B(workbook) + B2C(workbook)
-    alone does — flagged here, not silently smoothed over.
+    alone does — flagged here, not silently smoothed over. Briefly tried
+    folding OTA into B2C instead (so the visible mix would sum exactly to
+    Room Revenue) after an initial read of "Room Revenue is the sum of
+    B2B and B2C Revenue" as a request to change the mix itself — reverted
+    within the same turn per explicit correction: "OTA is addition" and
+    "B2B and B2C are separate... in the sheets OTA comes under B2C" — i.e.
+    that sentence was describing what Room Revenue already equals (true
+    already, unchanged), not asking for the mix's OTA slice to be merged
+    away. Confirmed live: Room Revenue for KDP Apr 2024 reads ₹43,82,868
+    (= workbook B2B ₹18,50,700 + B2C ₹25,32,168 exactly); the mix's own
+    B2B+B2C+OTA total (₹54,30,737.56) is intentionally higher — OTA is
+    additive on top, not a bug.
   - **Real bug caught during this work, before push**: `sumMonths()`
     (`historicalDashboardOverride.ts`) defaulted `b2bRevenue`/`b2cRevenue`
     to 0 for every summed month, even ones that never had a B2B/B2C split

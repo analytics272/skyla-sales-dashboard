@@ -425,11 +425,19 @@ export async function getCategoryMix(filter: KpiFilter): Promise<CategoryMix[]> 
     }
   };
 
+  // 2026-09-22 — explicit user direction, after a brief detour: "Room
+  // Revenue is the sum of B2B and B2C Revenue" describes what Room Revenue
+  // already equals for a covered property (B2B(sheet) + B2C(sheet) =
+  // Total Achieved, unchanged elsewhere) — it does NOT mean OTA should be
+  // folded into B2C here. Confirmed directly: "OTA is addition" — OTA
+  // stays its own separate, live category (nights AND revenue), same as
+  // an uncovered property. Only B2B/B2C REVENUE for a covered property
+  // comes from the workbook; nights always come straight from BigQuery,
+  // for every category including OTA. This means the visible mix's total
+  // (B2B(sheet) + B2C(sheet) + OTA(live)) can run higher than Room Revenue
+  // (B2B(sheet) + B2C(sheet) alone) for a covered property with real OTA
+  // activity — accepted, not a bug: OTA is additional on top, by design.
   for (const r of rows) {
-    // Nights always come straight from BigQuery. Revenue too, UNLESS this
-    // property's B2B/B2C split is workbook-covered AND this row's own
-    // category is B2B or B2C (OTA revenue for a covered property is still
-    // live — the workbook has no OTA figure to replace it with).
     const useWorkbookRevenue = b2bSplitCovered.has(r.property) && (r.category === "B2B" || r.category === "B2C");
     add(r.category, r.nights, useWorkbookRevenue ? 0 : r.revenue ?? 0);
   }

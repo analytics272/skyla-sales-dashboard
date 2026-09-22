@@ -174,6 +174,12 @@ export async function getOverviewKpis(filter: KpiFilter): Promise<OverviewKpis> 
     const existing = bySourceMap.get(category) ?? { nights: 0, revenue: 0 };
     bySourceMap.set(category, { nights: existing.nights + nights, revenue: existing.revenue + revenue });
   };
+  // 2026-09-22 — see getCategoryMix's identical, more-commented version in
+  // guestDetail.ts: OTA stays its own separate, live category (nights AND
+  // revenue) even for a covered property — only B2B/B2C revenue comes from
+  // the workbook. "OTA is addition" (explicit user confirmation) — the
+  // visible mix can total more than Room Revenue for a property with real
+  // OTA activity, which is expected, not a bug.
   for (const r of sourceRows) {
     const useWorkbookRevenue = b2bSplitCoveredCurrent.has(r.property) && (r.category === "B2B" || r.category === "B2C");
     addSource(r.category, r.nights, useWorkbookRevenue ? 0 : r.revenue ?? 0);
