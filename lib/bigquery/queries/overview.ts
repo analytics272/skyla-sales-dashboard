@@ -114,6 +114,13 @@ export async function getOverviewKpis(filter: KpiFilter): Promise<OverviewKpis> 
   const includeLpPrevious = includeLpBase && !(LP_PROPERTY in historicalPrevious);
   const { clause: where, params } = buildScopeClause("Property", "CAST(StayDate AS DATE)", { ...resolved, properties: uncoveredCurrentProps }, "");
   const { clause: sourceWhere, params: sourceParams } = buildScopeClause("Property", "CAST(StayDate AS DATE)", resolved, "");
+  // 2026-09-22 — per explicit user direction, the FY24-25 workbook's B2B
+  // Achieved/B2C Achieved rows (the only one of the two with a category
+  // split at all) override this breakdown's B2B/B2C REVENUE per covered
+  // property — see getCategoryMix's identical, more-commented version in
+  // guestDetail.ts (Bookings' own Revenue Mix) for the full reasoning,
+  // including why OTA revenue and every category's nights stay live.
+  const b2bSplitCoveredCurrent = new Set(Object.entries(historicalCurrent).filter(([, m]) => m.b2bRevenue !== undefined).map(([p]) => p));
 
   const [aggRows, prevAggRows, sourceRows, availableRoomNights, prevAvailableRoomNights, lpCurrent, lpPrevious] = await Promise.all([
     uncoveredCurrentProps.length === 0
@@ -137,12 +144,11 @@ export async function getOverviewKpis(filter: KpiFilter): Promise<OverviewKpis> 
               `, prevParams);
             })())
       : Promise.resolve(null),
-    runQuery<SourceRow>(`
-      SELECT ${bookingCategorySqlExpr("Source")} AS category, SUM(${roomNightUnitsSqlExpr()}) AS nights, SUM(DailyRevenue) AS revenue
+    runQuery<SourceRow & { property: string }>(`
+      SELECT Property AS property, ${bookingCategorySqlExpr("Source")} AS category, SUM(${roomNightUnitsSqlExpr()}) AS nights, SUM(DailyRevenue) AS revenue
       FROM ${table("sales_booking")}
       WHERE ${sourceWhere}
-      GROUP BY category
-      ORDER BY revenue DESC
+      GROUP BY property, category
     `, sourceParams),
     getAvailableRoomNights(uncoveredCurrentProps, resolved.period.current),
     compare ? getAvailableRoomNights(uncoveredPreviousProps, resolved.period.previous) : Promise.resolve(null),
@@ -164,7 +170,19 @@ export async function getOverviewKpis(filter: KpiFilter): Promise<OverviewKpis> 
   const prevAvailableRoomNightsTotal: number | null = prevAvailableRoomNights !== null ? prevAvailableRoomNights + histPrevious.availableRoomNights : null;
 
   const bySourceMap = new Map<BookingCategory, { nights: number; revenue: number }>();
-  for (const r of sourceRows) bySourceMap.set(r.category, { nights: r.nights, revenue: r.revenue ?? 0 });
+  const addSource = (category: BookingCategory, nights: number, revenue: number) => {
+    const existing = bySourceMap.get(category) ?? { nights: 0, revenue: 0 };
+    bySourceMap.set(category, { nights: existing.nights + nights, revenue: existing.revenue + revenue });
+  };
+  for (const r of sourceRows) {
+    const useWorkbookRevenue = b2bSplitCoveredCurrent.has(r.property) && (r.category === "B2B" || r.category === "B2C");
+    addSource(r.category, r.nights, useWorkbookRevenue ? 0 : r.revenue ?? 0);
+  }
+  for (const property of b2bSplitCoveredCurrent) {
+    const m = historicalCurrent[property];
+    addSource("B2B", 0, m.b2bRevenue ?? 0);
+    addSource("B2C", 0, m.b2cRevenue ?? 0);
+  }
 
   if (lpCurrent) {
     roomRevenue += lpCurrent.roomRevenue;

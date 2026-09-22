@@ -67,7 +67,15 @@ function wholePastFy(range: DateRange): string | null {
 }
 
 function sumMonths(months: HistoricalMonthData[]): HistoricalMonthData {
-  return months.reduce(
+  // b2bRevenue/b2cRevenue must stay `undefined` on the result unless EVERY
+  // month being summed actually has them (FY24-25's data; FY25-26's never
+  // does) — defaulting a missing month to 0 would make a FY25-26 property
+  // look "B2B/B2C-split covered" to callers that check `!== undefined`
+  // (getCategoryMix, getOverviewKpis's bySource), silently zeroing their
+  // real B2B/B2C revenue instead of leaving it live. Caught live: KDP Apr
+  // 2025's B2B/B2C category revenue was coming back as 0 before this fix.
+  const hasSplit = months.length > 0 && months.every((m) => m.b2bRevenue !== undefined);
+  const sums = months.reduce(
     (acc, m) => ({
       soldRoomNights: acc.soldRoomNights + m.soldRoomNights,
       availableRoomNights: acc.availableRoomNights + m.availableRoomNights,
@@ -77,6 +85,7 @@ function sumMonths(months: HistoricalMonthData[]): HistoricalMonthData {
     }),
     { soldRoomNights: 0, availableRoomNights: 0, revenue: 0, b2bRevenue: 0, b2cRevenue: 0 }
   );
+  return hasSplit ? sums : { soldRoomNights: sums.soldRoomNights, availableRoomNights: sums.availableRoomNights, revenue: sums.revenue };
 }
 
 /**
