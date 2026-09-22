@@ -379,75 +379,44 @@ export interface CategoryMix {
   revenue: number;
 }
 
-// 2026-09-22 — per explicit user direction ("STRICT dashboard-wide rule"),
-// the FY24-25 workbook's B2B Achieved/B2C Achieved rows (the only one of
-// the two workbooks that splits revenue by category at all) now override
-// this mix's B2B/B2C REVENUE, property by property, for any whole-month or
-// whole-FY FY24-25 selection — same coverage rule as everywhere else (see
-// historicalDashboardOverride.ts). Nights are NEVER overridden here (neither
-// workbook splits nights by category) and OTA revenue is never overridden
-// either (the workbook's own model is binary B2B/B2C — it has no OTA bucket
-// at all, so "B2C" there already folds in whatever this dashboard classifies
-// as OTA). This is a deliberate, accepted consequence of that binary model:
-// once B2B/B2C are workbook-sourced, B2C(sheet) + OTA(BigQuery) no longer
-// sums to the workbook's own Total for that property/month the way
-// B2B(sheet) + B2C(sheet) alone does — flagged, not silently smoothed over.
-async function fetchCategoryMixByPropertyCategory(properties: string[], range: { start: string; end: string }): Promise<{ property: string; category: BookingCategory; nights: number; revenue: number | null }[]> {
-  if (properties.length === 0) return [];
-  return runQuery<{ property: string; category: BookingCategory; nights: number; revenue: number | null }>(`
-    SELECT Property AS property, ${bookingCategorySqlExpr("Source")} AS category, SUM(${roomNightUnitsSqlExpr()}) AS nights, SUM(DailyRevenue) AS revenue
-    FROM ${table("sales_booking")}
-    WHERE Property IN UNNEST(@properties) AND CAST(StayDate AS DATE) BETWEEN @start AND @end AND ${SALES_BOOKING_STAY_FILTER}
-    GROUP BY property, category
-  `, { properties, start: range.start, end: range.end });
-}
-
+// 2026-09-22 — deliberately NOT workbook-overridden, per explicit user
+// direction: only the Room Revenue headline total (getOverviewKpis's own
+// `roomRevenue`, and anywhere else Total/Room Revenue is shown) uses the
+// FY24-25 workbook's B2B+B2C sum. This mix itself — Bookings' Revenue/
+// Nights Mix — stays fully live/BigQuery for every category (B2B, B2C,
+// OTA), same as it always was. First tried overriding B2B/B2C here too
+// (reasoning: the workbook's B2B Achieved/B2C Achieved rows are the same
+// figures that feed Room Revenue) — reverted the same session: the user
+// wants this specific breakdown to keep showing its own independently-
+// computed numbers regardless of what Room Revenue equals, so its own
+// B2B+B2C+OTA sum will not generally match the workbook-sourced Room
+// Revenue total for a covered property/month. That's expected here.
 export async function getCategoryMix(filter: KpiFilter): Promise<CategoryMix[]> {
   const resolved = resolveFilter(filter);
   const includeLp = resolved.properties.includes(LP_PROPERTY);
-  const historical = getHistoricalOverrideForRange(resolved.properties, resolved.period.current);
-  const b2bSplitCovered = new Set(Object.entries(historical).filter(([, m]) => m.b2bRevenue !== undefined).map(([p]) => p));
-  const includeLpLive = includeLp && !b2bSplitCovered.has(LP_PROPERTY);
-
+  const { clause: where, params } = buildScopeClause("Property", "CAST(StayDate AS DATE)", resolved, "");
   const [rows, lpTotals] = await Promise.all([
-    fetchCategoryMixByPropertyCategory(resolved.properties, resolved.period.current),
-    includeLpLive ? getLpOverviewTotals(resolved.period.current) : Promise.resolve(null),
+    runQuery<CategoryMix>(`
+      SELECT ${bookingCategorySqlExpr("Source")} AS category, SUM(${roomNightUnitsSqlExpr()}) AS nights, SUM(DailyRevenue) AS revenue
+      FROM ${table("sales_booking")}
+      WHERE ${where}
+      GROUP BY category
+    `, params),
+    includeLp ? getLpOverviewTotals(resolved.period.current) : Promise.resolve(null),
   ]);
 
   const merged = new Map<BookingCategory, CategoryMix>();
-  const add = (category: BookingCategory, nights: number, revenue: number) => {
-    const existing = merged.get(category);
-    if (existing) {
-      existing.nights += nights;
-      existing.revenue += revenue;
-    } else {
-      merged.set(category, { category, nights, revenue });
-    }
-  };
-
-  // 2026-09-22 — explicit user direction, after a brief detour: "Room
-  // Revenue is the sum of B2B and B2C Revenue" describes what Room Revenue
-  // already equals for a covered property (B2B(sheet) + B2C(sheet) =
-  // Total Achieved, unchanged elsewhere) — it does NOT mean OTA should be
-  // folded into B2C here. Confirmed directly: "OTA is addition" — OTA
-  // stays its own separate, live category (nights AND revenue), same as
-  // an uncovered property. Only B2B/B2C REVENUE for a covered property
-  // comes from the workbook; nights always come straight from BigQuery,
-  // for every category including OTA. This means the visible mix's total
-  // (B2B(sheet) + B2C(sheet) + OTA(live)) can run higher than Room Revenue
-  // (B2B(sheet) + B2C(sheet) alone) for a covered property with real OTA
-  // activity — accepted, not a bug: OTA is additional on top, by design.
-  for (const r of rows) {
-    const useWorkbookRevenue = b2bSplitCovered.has(r.property) && (r.category === "B2B" || r.category === "B2C");
-    add(r.category, r.nights, useWorkbookRevenue ? 0 : r.revenue ?? 0);
-  }
-  for (const property of b2bSplitCovered) {
-    const m = historical[property];
-    add("B2B", 0, m.b2bRevenue ?? 0);
-    add("B2C", 0, m.b2cRevenue ?? 0);
-  }
+  for (const r of rows) merged.set(r.category, r);
   if (lpTotals) {
-    for (const lp of lpTotals.bySource) add(lp.category, lp.nights, lp.revenue);
+    for (const lp of lpTotals.bySource) {
+      const existing = merged.get(lp.category);
+      if (existing) {
+        existing.nights += lp.nights;
+        existing.revenue += lp.revenue;
+      } else {
+        merged.set(lp.category, { category: lp.category, nights: lp.nights, revenue: lp.revenue });
+      }
+    }
   }
   return [...merged.values()].sort((a, b) => b.revenue - a.revenue);
 }
