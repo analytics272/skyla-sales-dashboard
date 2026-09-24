@@ -1301,6 +1301,24 @@ data for these B2B metrics."*
     reconciling `getRoomNightsGap()` rewrite documented in the 2026-09-18
     entry above). The Overview version was a simpler, non-reconciling
     Sold/Available/(Available−Sold) trio with no such validation behind it.
+- **2026-09-21 (later, same day) — Leads' company search showed rank "1"
+  for every match, regardless of true rank.** User screenshotted searching
+  "blue" under Leads' By Owner Detail → Company Analysis and getting
+  "1. BLUE ORANGE HOSPITALITY" — nowhere near rank 1 by revenue. Root
+  cause: the row number was computed from the SEARCH-FILTERED array's own
+  index (`companyDrillPage * COMPANY_DRILL_TOP_N + i + 1`,
+  `LeadsContent.tsx`), not the company's real position in the full,
+  unfiltered, revenue-sorted list — filtering to one match made that match
+  "position 0 of the filtered list" → "1.". This is the same bug class
+  already fixed once in Bookings' own company ranking (2026-09-17 entry
+  above) but in a different file/component, so that earlier fix never
+  reached it. Fixed the same way: build a company → true-rank lookup
+  (`drillRankMap`) from the full `drillTable` BEFORE any search filtering,
+  and look up each row's rank from that map when rendering — search and
+  pagination now only narrow which rows are shown, never the number
+  printed next to them. Verified live: searching "blue" now shows
+  "28. BLUE ORANGE HOSPITALITY" (its real rank among the full company
+  list), not "1.".
 - **2026-09-21 (later, same day) — property-level Room Nights/Revenue/ARR/
   Occupancy reconciled against two finance-provided "Revenue Dashboard"
   reference workbooks (FY24-25, FY25-26; Property x Month grain), per
@@ -1602,6 +1620,41 @@ data for these B2B metrics."*
     Occupancy % for FY24-25's Jan-Mar 2025 rather than reproduce the
     workbook's own numerator/denominator mismatch there (also documented
     above).
+- **2026-09-24 — Leads' "Revenue By Owner" chart investigated after user
+  screenshot (Bhanu highest at ~₹12.5L, then Dikhita ~₹11L, Anjali ~₹5.8L,
+  Rajesh ~₹3L, Sajal ~₹1L) — confirmed correct, no code change.** Unrelated
+  to either finance workbook (`getLeadsByOwner`, `leads.ts`, sourced from
+  `lead_tracker`, a completely different table/domain).
+  - **Root cause of the surprising ranking: the screenshot was "This
+    Month" (September 2026), not "This FY."** Queried `getLeadsByOwner`
+    directly for both: This Month gives Bhanu ₹13.12L / Dikhita ₹10.93L /
+    Anjali ₹6.01L / Rajesh ₹3.13L / Sajal ₹1.25L — matches the screenshot
+    almost exactly. This FY gives a completely different order (Dikhita
+    ₹93.92L / Anjali ₹85.07L / Rajesh ₹57.15L / Sajal ₹44.42L / Bhanu
+    ₹25.81L — Bhanu actually LOWEST for the full year). Both are real,
+    correctly-computed numbers for their own period — Bhanu had an
+    unusually strong September specifically, which is invisible once
+    diluted across the whole FY. This is period-tab behavior working as
+    designed, not a bug (see §"Global comparison-period model" — This
+    Month always means the current calendar month, This FY the current
+    fiscal year; neither is a "recent trend" view, they're genuinely
+    different scopes).
+  - **Owner-row exclusion confirmed correct**: `OWNER_EXCLUDE_SQL`
+    (`leads.ts`) is `LOWER(TRIM(Owner)) NOT IN ('business wa', 'website',
+    'walk in')` — case- and whitespace-insensitive, so it correctly drops
+    the non-owner channel labels that appear in the raw `Owner` column
+    (`Business WA`, `Website`, `Walk in`, and a `walk in` lower-case
+    duplicate — confirmed live in the raw data) from every real owner's
+    ranking. These were never leaking into Bhanu/Dikhita/Anjali/Rajesh/
+    Sajal's totals.
+  - **No stage-filter leak either**: `SUM(TOTAL_EXPR)` here has no
+    `Stage = 'Closed'` filter, unlike a couple of other revenue queries in
+    the same file — checked live whether this matters: revenue is
+    effectively NULL for every non-Closed stage except a handful of small
+    "Low budget" amounts (₹26,000-80,788, negligible next to each owner's
+    multi-crore Closed total), so this file-wide inconsistency doesn't
+    materially affect this chart. Not changed, since the actual numbers
+    it's already producing are correct.
 - **Exotel/Reference/Existing tiles relabelled** "263 / 36 closed" →
   "263 leads · 36 closed" for clarity (item 2 — it means 263 leads from
   that source for the owner, 36 converted).
