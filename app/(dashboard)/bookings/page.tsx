@@ -18,6 +18,8 @@ import { getOtaBreakdown } from "@/lib/bigquery/queries/otaBreakdown";
 import { parseKpiFilter, SearchParams } from "@/lib/filters/parseSearchParams";
 import { resolveFilter } from "@/lib/bigquery/queries/filters";
 import { resolvePeriodFromFilter } from "@/lib/reference/period";
+import { getDataFreshness, TAB_FRESHNESS_SOURCES } from "@/lib/bigquery/queries/syncStatus";
+import SyncFreshnessBanner from "@/components/ui/SyncFreshnessBanner";
 import BookingsContent from "@/components/bookings/BookingsContent";
 
 // 2026-09-02 redesign, fifth pass — merges the old Booking Details and OTA
@@ -45,6 +47,7 @@ export default async function BookingsPage({ searchParams }: { searchParams: Pro
     b2bRetention,
     guestServedAccuracy,
     otaBreakdown,
+    freshness,
   ] = await Promise.all([
     getBookingStats(filter),
     getRoomNightsGap(filter),
@@ -58,24 +61,28 @@ export default async function BookingsPage({ searchParams }: { searchParams: Pro
     getCorporateAccountRetention(resolved.properties),
     getGuestServedAccuracyCheck(),
     getOtaBreakdown(filter),
+    getDataFreshness(TAB_FRESHNESS_SOURCES.bookings),
   ]);
 
   return (
-    <BookingsContent
-      bookingStats={bookingStats}
-      roomNightsGap={roomNightsGap}
-      repeatBookingShare={repeatBookingShare}
-      roomFormatStats={roomFormatStats}
-      expatStats={expatStats}
-      cancellationStats={cancellationStats}
-      cancellationLeadTime={cancellationLeadTime}
-      categoryMix={categoryMix}
-      b2bRanking={b2bRanking}
-      b2bContractSummary={summarizeB2bContracts(b2bRanking)}
-      b2bRangeLabel={b2bRangeLabel}
-      b2bRetention={b2bRetention}
-      guestServedAccuracy={guestServedAccuracy}
-      otaBreakdown={otaBreakdown}
-    />
+    <>
+      <SyncFreshnessBanner sources={freshness} />
+      <BookingsContent
+        bookingStats={bookingStats}
+        roomNightsGap={roomNightsGap}
+        repeatBookingShare={repeatBookingShare}
+        roomFormatStats={roomFormatStats}
+        expatStats={expatStats}
+        cancellationStats={cancellationStats}
+        cancellationLeadTime={cancellationLeadTime}
+        categoryMix={categoryMix}
+        b2bRanking={b2bRanking}
+        b2bContractSummary={summarizeB2bContracts(b2bRanking)}
+        b2bRangeLabel={b2bRangeLabel}
+        b2bRetention={b2bRetention}
+        guestServedAccuracy={guestServedAccuracy}
+        otaBreakdown={otaBreakdown}
+      />
+    </>
   );
 }

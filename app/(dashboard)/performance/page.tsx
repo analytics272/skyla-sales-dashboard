@@ -13,6 +13,8 @@ import { getGoogleReviewStats, getGoogleRatingTrend, getOtaReviewStats, getOtaRa
 import { resolveFilter } from "@/lib/bigquery/queries/filters";
 import { resolvePeriodFromFilter } from "@/lib/reference/period";
 import { parseKpiFilter, SearchParams } from "@/lib/filters/parseSearchParams";
+import { getDataFreshness, TAB_FRESHNESS_SOURCES } from "@/lib/bigquery/queries/syncStatus";
+import SyncFreshnessBanner from "@/components/ui/SyncFreshnessBanner";
 import PerformanceContent from "@/components/performance/PerformanceContent";
 
 // 2026-09-02 redesign, fifth pass — merges the old Targets and Reviews pages.
@@ -41,7 +43,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
   // reused for both the monthly chart (filtered to `range` below) AND the
   // revenueAchievement summary (via summarizeRevenueAchievement, which
   // prorates internally) — no extra BigQuery round trip either way.
-  const [categoryAchievement, monthlyRevenueTargets, adrTargetVsAchieved, occupancyTargetVsAchieved, propertyTargetComparison, googleStats, googleTrend, otaStats, otaTrend] =
+  const [categoryAchievement, monthlyRevenueTargets, adrTargetVsAchieved, occupancyTargetVsAchieved, propertyTargetComparison, googleStats, googleTrend, otaStats, otaTrend, freshness] =
     await Promise.all([
       getCategoryAchievement(targetsFilter),
       getMonthlyRevenueTargets(fy),
@@ -52,26 +54,30 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
       getGoogleRatingTrend(reviewsFilter),
       getOtaReviewStats(reviewsFilter),
       getOtaRatingTrend(reviewsFilter),
+      getDataFreshness(TAB_FRESHNESS_SOURCES.performance),
     ]);
 
   const revenueAchievement = summarizeRevenueAchievement(monthlyRevenueTargets, fy, range);
   const monthlyRevenueTargetsInRange = filterMonthlyToRange(monthlyRevenueTargets, fy, range);
 
   return (
-    <PerformanceContent
-      fy={fy}
-      targetsRangeLabel={targetsRangeLabel}
-      categoryAchievement={categoryAchievement}
-      revenueAchievement={revenueAchievement}
-      monthlyRevenueTargets={monthlyRevenueTargetsInRange}
-      adrTargetVsAchieved={adrTargetVsAchieved}
-      occupancyTargetVsAchieved={occupancyTargetVsAchieved}
-      propertyTargetComparison={propertyTargetComparison}
-      googleStats={googleStats}
-      googleTrend={googleTrend}
-      otaStats={otaStats}
-      otaTrend={otaTrend}
-      compareYoY={filter.compareYoY ?? false}
-    />
+    <>
+      <SyncFreshnessBanner sources={freshness} />
+      <PerformanceContent
+        fy={fy}
+        targetsRangeLabel={targetsRangeLabel}
+        categoryAchievement={categoryAchievement}
+        revenueAchievement={revenueAchievement}
+        monthlyRevenueTargets={monthlyRevenueTargetsInRange}
+        adrTargetVsAchieved={adrTargetVsAchieved}
+        occupancyTargetVsAchieved={occupancyTargetVsAchieved}
+        propertyTargetComparison={propertyTargetComparison}
+        googleStats={googleStats}
+        googleTrend={googleTrend}
+        otaStats={otaStats}
+        otaTrend={otaTrend}
+        compareYoY={filter.compareYoY ?? false}
+      />
+    </>
   );
 }

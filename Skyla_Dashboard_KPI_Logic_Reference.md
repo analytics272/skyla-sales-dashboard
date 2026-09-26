@@ -1655,6 +1655,60 @@ data for these B2B metrics."*
     multi-crore Closed total), so this file-wide inconsistency doesn't
     materially affect this chart. Not changed, since the actual numbers
     it's already producing are correct.
+- **2026-09-26 — the very next day, a real bug: the entire Leads page was
+  down.** `lead_tracker`'s sync silently retyped `date` from STRING to a
+  native DATE column and `Total` from STRING to INT64 (confirmed via
+  INFORMATION_SCHEMA.COLUMNS) — `SUBSTR(date, ...)` and
+  `REPLACE(Total, ...)` both only accept STRING/BYTES, so every exported
+  function in `leads.ts` was throwing a hard BigQuery 400, not silently
+  misparsing. This is the THIRD time this exact table has broken this page
+  from a sync schema change (see `leads.ts`'s own extended comment on
+  `LEAD_DATE_EXPR` for the full three-incident history) — each time in a
+  different direction (format drift within STRING, a string-vs-string
+  comparison bug, and now a full type change away from STRING entirely).
+  Fixed both `LEAD_DATE_EXPR` and `TOTAL_EXPR` by casting to STRING FIRST,
+  before the existing SUBSTR/REPLACE logic — makes both expressions
+  agnostic to whatever type the sync hands back on a given day, instead of
+  assuming STRING forever (which is the assumption that broke three
+  times). Verified live: `getLeadsByOwner`/`getLeadsSummary`/
+  `getLeadsTrend` all run again, `/leads` renders 200 instead of an error.
+- **2026-09-26 (same day) — per-tab data-sync freshness added, after the
+  above incident and the previous day's Revenue By Owner investigation
+  both traced back to the same root cause: nothing anywhere in this
+  dashboard checked whether a table's DATA had actually kept advancing,
+  only (for `sales_booking`) whether the table had been recently
+  WRITTEN to.** New `getDataFreshness()` (`syncStatus.ts`), checking
+  `MAX()` of a real date column per source — `ReservationDate` for
+  `sales_booking` (booking-entry recency; `StayDate` is legitimately
+  future-dated for advance bookings, so it's meaningless as a freshness
+  signal), the same type-agnostic `LEAD_DATE_EXPR` logic for
+  `lead_tracker`, `Bill_Date` for `b2b_bills`, `date` for `fnb_sale`. Each
+  source is queried independently and wrapped in its own try/catch —
+  deliberately not combined into one query — so a schema drift in any
+  single table (exactly what just happened to `lead_tracker`) can only
+  mark that one source as erroring, never take down freshness reporting
+  for every other tab too.
+  - **New `SyncFreshnessBanner` component, wired into all 5 tab pages**
+    (`TAB_FRESHNESS_SOURCES` maps each tab to the sources it actually
+    queries from — Overview/Performance: `sales_booking`; Bookings:
+    `sales_booking` + `b2b_bills`; Leads: `lead_tracker`; Reports:
+    `sales_booking` + `b2b_bills` + `fnb_sale`). Deliberately quiet by
+    default, matching this dashboard's existing convention (e.g.
+    `UnmappedSourceStats` on Overview) — renders nothing when every source
+    for that tab is fresh, a single amber/red banner listing exactly which
+    source(s) are stale/errored/empty otherwise. Threshold: 3 days
+    (`STALE_THRESHOLD_DAYS`) — generous enough to survive a weekend gap on
+    a once-daily sync, tight enough to catch a real stall.
+  - **Immediately surfaced a real, previously-invisible gap**: `b2b_bills`
+    has had no new bill since **2026-08-12** — 45 days stale as of today,
+    confirmed live via `MAX(Bill_Date)`. This affects Bookings (Corporate
+    Account Retention, B2B company rankings) and Reports (B2B Details);
+    both now show the warning. Not investigated further here (root cause
+    is an upstream sync issue, same class as `lead_tracker`'s, but for a
+    different pipeline) — flagged for whoever owns that sync to check.
+  - **Performance's review stats (Google/OTA) are NOT covered** — no
+    freshness signal investigated for those yet; they're a separate,
+    external data source from the BigQuery tables checked here.
 - **Exotel/Reference/Existing tiles relabelled** "263 / 36 closed" →
   "263 leads · 36 closed" for clarity (item 2 — it means 263 leads from
   that source for the owner, 36 converted).
