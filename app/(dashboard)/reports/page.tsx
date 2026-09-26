@@ -1,6 +1,8 @@
 import { getFolioBasedReport, getB2bDetailReport } from "@/lib/bigquery/queries/reports";
 import { parseKpiFilter, SearchParams } from "@/lib/filters/parseSearchParams";
 import { recentFyLabels } from "@/lib/reference/financialYear";
+import { getDataFreshness, TAB_FRESHNESS_SOURCES } from "@/lib/bigquery/queries/syncStatus";
+import SyncFreshnessBanner from "@/components/ui/SyncFreshnessBanner";
 import ReportsContent from "@/components/reports/ReportsContent";
 
 // PRD_Reports_Section_Final.md §1/§2 — each report has its own dedicated FY
@@ -23,10 +25,16 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
   const b2bFy = resolveFy(sp.b2bFy, availableFys, currentFy);
   const folioFy = resolveFy(sp.folioFy, availableFys, currentFy);
 
-  const [folioReport, b2bDetailReport] = await Promise.all([
+  const [folioReport, b2bDetailReport, freshness] = await Promise.all([
     getFolioBasedReport(filter.properties, folioFy),
     getB2bDetailReport(filter.properties, b2bFy),
+    getDataFreshness(TAB_FRESHNESS_SOURCES.reports),
   ]);
 
-  return <ReportsContent folioReport={folioReport} b2bDetailReport={b2bDetailReport} availableFys={availableFys} />;
+  return (
+    <>
+      <SyncFreshnessBanner sources={freshness} />
+      <ReportsContent folioReport={folioReport} b2bDetailReport={b2bDetailReport} availableFys={availableFys} />
+    </>
+  );
 }

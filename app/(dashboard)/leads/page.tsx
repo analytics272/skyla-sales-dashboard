@@ -12,6 +12,8 @@ import {
 } from "@/lib/bigquery/queries/leads";
 import { getOwnerCompanyAnalysis } from "@/lib/bigquery/queries/ownerCompanyAnalysis";
 import { parseKpiFilter, SearchParams } from "@/lib/filters/parseSearchParams";
+import { getDataFreshness, TAB_FRESHNESS_SOURCES } from "@/lib/bigquery/queries/syncStatus";
+import SyncFreshnessBanner from "@/components/ui/SyncFreshnessBanner";
 import LeadsContent from "@/components/leads/LeadsContent";
 
 export default async function LeadsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
@@ -21,7 +23,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
 
   // Item #5 (2026-09-02, eighth pass): Leads MoM is day-wise only now — the
   // month/FY grains from a prior pass are gone.
-  const [summary, momByDay, byProperty, bySource, formatLeadsRevenue, adrByFormat, lostReasons, bookingPace, byOwner, byOwnerSource, ownerCompanyAnalysis] =
+  const [summary, momByDay, byProperty, bySource, formatLeadsRevenue, adrByFormat, lostReasons, bookingPace, byOwner, byOwnerSource, ownerCompanyAnalysis, freshness] =
     await Promise.all([
       getLeadsSummary(leadsFilter),
       getLeadsTrend(leadsFilter, "day"),
@@ -34,22 +36,26 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
       getLeadsByOwner(leadsFilter),
       getLeadsByOwnerSource(leadsFilter),
       getOwnerCompanyAnalysis(filter),
+      getDataFreshness(TAB_FRESHNESS_SOURCES.leads),
     ]);
 
   return (
-    <LeadsContent
-      summary={summary}
-      momByDay={momByDay}
-      byProperty={byProperty}
-      bySource={bySource}
-      formatLeadsRevenue={formatLeadsRevenue}
-      adrByFormat={adrByFormat}
-      lostReasons={lostReasons}
-      bookingPace={bookingPace}
-      byOwner={byOwner}
-      byOwnerSource={byOwnerSource}
-      ownerCompanyAnalysis={ownerCompanyAnalysis}
-      compareYoY={filter.compareYoY ?? false}
-    />
+    <>
+      <SyncFreshnessBanner sources={freshness} />
+      <LeadsContent
+        summary={summary}
+        momByDay={momByDay}
+        byProperty={byProperty}
+        bySource={bySource}
+        formatLeadsRevenue={formatLeadsRevenue}
+        adrByFormat={adrByFormat}
+        lostReasons={lostReasons}
+        bookingPace={bookingPace}
+        byOwner={byOwner}
+        byOwnerSource={byOwnerSource}
+        ownerCompanyAnalysis={ownerCompanyAnalysis}
+        compareYoY={filter.compareYoY ?? false}
+      />
+    </>
   );
 }
