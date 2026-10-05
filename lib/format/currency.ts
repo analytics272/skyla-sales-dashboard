@@ -1,8 +1,10 @@
 // PRD §6.1 — legacy CASE logic: >=1Cr -> "X.XX Cr", >=1L -> "X.XX L", >=1K -> "X.XX K".
-export function formatIndianCurrency(amount: number): string {
+// `crDecimals` lets a headline tile show more precision for crore values (default 2) —
+// e.g. 5,99,79,517 reads "6.00 Cr" at 2 decimals but "5.998 Cr" at 3.
+export function formatIndianCurrency(amount: number, crDecimals = 2): string {
   const abs = Math.abs(amount);
   const sign = amount < 0 ? "-" : "";
-  if (abs >= 1_00_00_000) return `${sign}${(abs / 1_00_00_000).toFixed(2)} Cr`;
+  if (abs >= 1_00_00_000) return `${sign}${(abs / 1_00_00_000).toFixed(crDecimals)} Cr`;
   if (abs >= 1_00_000) return `${sign}${(abs / 1_00_000).toFixed(2)} L`;
   if (abs >= 1_000) return `${sign}${(abs / 1_000).toFixed(2)} K`;
   return `${sign}${abs.toFixed(2)}`;

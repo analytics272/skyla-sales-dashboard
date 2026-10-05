@@ -1,4 +1,4 @@
--- Generated 2026-10-05 from lib/reference/ownerCompanyMapping.ts (267 rows)
+-- Generated 2026-10-05 from lib/reference/ownerCompanyMapping.ts (272 rows)
 INSERT INTO `skyla-analytics.Skyla_Sales_Automation.company_owner_map` (CompanyId, Owner) VALUES
   ('4390200000000000010', 'Sajal'),
   ('4390200000000000170', 'Sajal'),
@@ -21,6 +21,7 @@ INSERT INTO `skyla-analytics.Skyla_Sales_Automation.company_owner_map` (CompanyI
   ('4390200000000010373', 'Bhanu'),
   ('4390200000000010584', 'Bhanu'),
   ('4390200000000011277', 'Sajal'),
+  ('1323000000000000069', 'Sajal'),
   ('1323000000000000338', 'Sajal'),
   ('1323000000000000395', 'Sajal'),
   ('1323000000000000681', 'Sajal'),
@@ -155,6 +156,7 @@ INSERT INTO `skyla-analytics.Skyla_Sales_Automation.company_owner_map` (CompanyI
   ('4390200000000005065', 'Bhanu'),
   ('4390200000000005576', 'Dikhita'),
   ('1405900000000000286', 'Sajal'),
+  ('1405900000000001519', 'Sajal'),
   ('1405900000000003414', 'Bhanu'),
   ('1405900000000004371', 'Sajal'),
   ('1405900000000008618', 'Bhanu'),
@@ -183,6 +185,8 @@ INSERT INTO `skyla-analytics.Skyla_Sales_Automation.company_owner_map` (CompanyI
   ('2227700000000007160', 'Bhanu'),
   ('2227700000000007158', 'Dikhita'),
   ('1323000000000001820', 'Sajal'),
+  ('1323000000000003727', 'Sajal'),
+  ('4390200000000001951', 'Sajal'),
   ('4390200000000006864', 'Bhanu'),
   ('4390200000000007260', 'Rajesh'),
   ('1405900000000000051', 'Bhanu'),
@@ -254,6 +258,7 @@ INSERT INTO `skyla-analytics.Skyla_Sales_Automation.company_owner_map` (CompanyI
   ('2227700000000008228', 'Bhanu'),
   ('2227700000000008239', 'Dikhita'),
   ('2227700000000005488', 'Sajal'),
+  ('21200000000002633', 'Sajal'),
   ('21200000000004341', 'Sajal'),
   ('1405900000000011294', 'Sajal'),
   ('1405900000000011531', 'Bhanu'),

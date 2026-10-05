@@ -35,7 +35,10 @@ test("Aadya Travels is Dhikitha's, exactly once", () => {
 test("unmatched requests are not also mapped, and SLVC is flagged", () => {
   const mappedRequests = new Set(Object.values(OWNER_COMPANY_MAPPING).flatMap((es) => es.map((e) => e.requested.toLowerCase())));
   for (const u of UNMATCHED_REQUESTS) assert.ok(!mappedRequests.has(u.requested.toLowerCase()), `${u.requested} is both mapped and unmatched`);
-  for (const p of PENDING_OWNER_NAMES) assert.ok(!mappedRequests.has(p.name.toLowerCase()), `${p.name} is both mapped and pending`);
+  for (const p of PENDING_OWNER_NAMES) {
+    const mappedTo = owners.find((o) => OWNER_COMPANY_MAPPING[o].some((e) => e.names.some((n) => n.toUpperCase().startsWith(p.name.toUpperCase()))));
+    if (mappedTo) assert.equal(mappedTo, p.owner, `${p.name}: pending owner differs from mapped owner`);
+  }
   assert.ok(UNMATCHED_REQUESTS.some((u) => u.requested === "SLVC"));
 });
 
@@ -43,7 +46,7 @@ test("pending (not-yet-booked) names resolve to the right owners", () => {
   const byName = new Map(PENDING_OWNER_NAMES.map((p) => [p.name, p.owner]));
   for (const n of ["Yashodha", "Oasis", "CCIL", "Stay3Sixty", "Blueground", "Nutmegs Hospitality"]) assert.equal(byName.get(n), "Dikhita");
   assert.equal(byName.get("ACT"), "Sajal");
-  assert.equal(byName.get("Atrium"), "Sajal");
+  assert.equal(byName.get("Atria Convergence Technologies"), "Sajal");
 });
 
 test("pendingOwnerSql builds a CASE with exact-only ACT and prefix-matching others", () => {
@@ -57,4 +60,12 @@ test("pendingOwnerSql builds a CASE with exact-only ACT and prefix-matching othe
 test("Dhikitha / Dikhita spellings resolve to the same canonical owner", () => {
   assert.equal(canonicalOwner("Dhikitha"), canonicalOwner("Dikhita"));
   assert.equal(canonicalOwner(" Dikhita "), canonicalOwner("dikitha"));
+});
+
+test("ACT / Atria Convergence Technologies are Sajal's under every spelling", () => {
+  const atria = OWNER_COMPANY_MAPPING.Sajal.find((e) => e.requested.startsWith("ACT"));
+  assert.ok(atria && atria.names.length >= 3 && atria.names.every((n) => n.startsWith("ATRIA CONVERGENCE TECHNOLOGIES")));
+  const sql = pendingOwnerSql("c.CompanyName").replace(/\s+/g, " ");
+  assert.match(sql, /= 'ACT' THEN 'Sajal'/);
+  assert.match(sql, /'ATRIA CONVERGENCE TECHNOLOGIES '\)\) THEN 'Sajal'/);
 });

@@ -215,7 +215,8 @@ export default function OverviewContent({
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatTile
           label="Room Revenue"
-          value={formatIndianCurrency(overview.roomRevenue)}
+          value={formatIndianCurrency(overview.roomRevenue, 3)}
+          sub={`₹${Math.round(overview.roomRevenue).toLocaleString("en-IN")}`}
           delta={comparison.revenue.pctChange !== null ? { pct: comparison.revenue.pctChange * 100, label: `vs ${comparison.previousLabel}` } : undefined}
         />
         <StatTile

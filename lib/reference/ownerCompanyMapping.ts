@@ -400,6 +400,14 @@ export const OWNER_COMPANY_MAPPING: Record<string, OwnerCompanyAssignment[]> = {
       "names": [
         "ALTOLIVING ENTERPRISE SOFTWARE INDIA PRIVATE LIMITED"
       ]
+    },
+    {
+      "requested": "ACT (Atria Convergence Technologies Ltd)",
+      "names": [
+        "ATRIA CONVERGENCE TECHNOLOGIES  LTD",
+        "ATRIA CONVERGENCE TECHNOLOGIES LIMITED (BLR)",
+        "ATRIA CONVERGENCE TECHNOLOGIES LTD"
+      ]
     }
   ],
   "Bhanu": [
@@ -685,10 +693,12 @@ export const PENDING_OWNER_NAMES: PendingOwnerName[] = [
   { owner: "Dikhita", name: "Stay3Sixty" },
   { owner: "Dikhita", name: "Blueground" },
   { owner: "Dikhita", name: "Nutmegs Hospitality" },
-  // ACT = Atrium (user-confirmed). Exists only in b2b_bills today (308 bills),
-  // not in sales_company_bills, so it can't be mapped by CompanyId yet.
+  // ACT = ATRIA CONVERGENCE TECHNOLOGIES LTD (user-confirmed). b2b_bills calls it
+  // "ACT"; sales_company_bills uses the full name (mapped above by CompanyId).
+  // Both spellings are kept here so a new Zoho CompanyId under either name is
+  // attributed to Sajal automatically.
   { owner: "Sajal", name: "ACT", exact: true },
-  { owner: "Sajal", name: "Atrium" },
+  { owner: "Sajal", name: "Atria Convergence Technologies" },
 ];
 
 // Requested but NOT mapped — awaiting an answer.

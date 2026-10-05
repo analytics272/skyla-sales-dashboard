@@ -6,6 +6,9 @@ import { getOwnerCompanyAnalysis } from "../lib/bigquery/queries/ownerCompanyAna
 import { getMonthlyAchieved, sumAchieved } from "../lib/bigquery/queries/achievedRevenue";
 import { getCategoryAchievement, getMonthlyRevenueTargets, getRevenueAchievement } from "../lib/bigquery/queries/targets";
 import { ACTIVE_PROPERTY_CODES } from "../lib/reference/propertyReference";
+import { getOverviewKpis } from "../lib/bigquery/queries/overview";
+import { getMonthlyTrends } from "../lib/bigquery/queries/trends";
+import { SALES_BOOKING_STAY_FILTER } from "../lib/bigquery/queries/filters";
 
 const inr = (n: number) => Math.round(n).toLocaleString("en-IN");
 let failed = 0;
@@ -48,6 +51,20 @@ async function main() {
   console.log("   category achieved (Oct):", cats.map((c) => `${c.category} ${inr(c.achieved)}/${inr(c.target)}`).join(" | "));
   const mt = await getMonthlyRevenueTargets("FY 26-27");
   console.log("   monthly achieved:", mt.map((x) => `${x.month}:${inr(x.achievedRevenue)}`).join(" "));
+  // 3. Cross-tab: one custom range (Jul 1 - Sep 30 2026) must read identically on every surface
+  const custom = { period: "custom", customStart: "2026-07-01", customEnd: "2026-09-30" } as never;
+  const rawRev = (await runQuery<{ t: number }>(
+    `SELECT SUM(DailyRevenue) t FROM ${table("sales_booking")} WHERE Property IN UNNEST(@p) AND CAST(StayDate AS DATE) BETWEEN '2026-07-01' AND '2026-09-30' AND ${SALES_BOOKING_STAY_FILTER}`, { p: ACTIVE_PROPERTY_CODES }
+  ))[0].t;
+  const ov = await getOverviewKpis(custom);
+  const tr = (await getMonthlyTrends(custom)).current.reduce((a, p) => a + p.revenue, 0);
+  const pf = (await getRevenueAchievement(custom)).achieved;
+  const mixSum = ov.bySource.reduce((a, x) => a + x.revenue, 0);
+  console.log(`   Jul-Sep raw PMS ${inr(rawRev)} | Overview ${inr(ov.roomRevenue)} | Trends ${inr(tr)} | Performance ${inr(pf)} | Category mix ${inr(mixSum)}`);
+  check("Overview == raw PMS", Math.abs(ov.roomRevenue - rawRev) < 1);
+  check("Trends == raw PMS", Math.abs(tr - rawRev) < 1);
+  check("Performance achieved == raw PMS", Math.abs(pf - rawRev) < 1);
+  check("Category mix (B2B+B2C+OTA) == raw PMS", Math.abs(mixSum - rawRev) < 1);
   console.log(failed ? `\n${failed} FAILED` : "\nALL PASSED");
   process.exit(failed ? 1 : 0);
 }
