@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { OWNER_COMPANY_MAPPING, UNMATCHED_REQUESTS, PENDING_OWNER_NAMES, pendingOwnerSql } from "../lib/reference/ownerCompanyMapping";
-import { canonicalOwner } from "../lib/reference/owners";
+import { OWNER_COMPANY_MAPPING, PENDING_OWNER_NAMES, pendingOwnerSql } from "../lib/reference/ownerCompanyMapping";
+import { canonicalOwner, ownersOf, formatOwners } from "../lib/reference/owners";
 
 const owners = Object.keys(OWNER_COMPANY_MAPPING);
 
@@ -32,18 +32,28 @@ test("Aadya Travels is Dhikitha's, exactly once", () => {
   assert.deepEqual(holders, ["Dikhita"]);
 });
 
-test("unmatched requests are not also mapped, and SLVC is flagged", () => {
-  const mappedRequests = new Set(Object.values(OWNER_COMPANY_MAPPING).flatMap((es) => es.map((e) => e.requested.toLowerCase())));
-  for (const u of UNMATCHED_REQUESTS) assert.ok(!mappedRequests.has(u.requested.toLowerCase()), `${u.requested} is both mapped and unmatched`);
+test("pending names never conflict with a mapped company's owner", () => {
   for (const p of PENDING_OWNER_NAMES) {
     const mappedTo = owners.find((o) => OWNER_COMPANY_MAPPING[o].some((e) => e.names.some((n) => n.toUpperCase().startsWith(p.name.toUpperCase()))));
-    if (mappedTo) assert.equal(mappedTo, p.owner, `${p.name}: pending owner differs from mapped owner`);
+    if (mappedTo) assert.ok(p.owners.includes(mappedTo), `${p.name}: pending owners ${p.owners} exclude mapped owner ${mappedTo}`);
   }
-  assert.ok(UNMATCHED_REQUESTS.some((u) => u.requested === "SLVC"));
+});
+
+test("SLVC is shared by Sajal and Bhanu", () => {
+  const slvc = PENDING_OWNER_NAMES.find((p) => p.name === "SLVC");
+  assert.deepEqual([...slvc!.owners].sort(), ["Bhanu", "Sajal"]);
+  assert.match(pendingOwnerSql("c.CompanyName").replace(/\s+/g, " "), /'SLVC '\)\) THEN 'Bhanu\|Sajal'/);
+});
+
+test("shared owner strings split and format correctly", () => {
+  assert.deepEqual(ownersOf("Bhanu|Sajal"), ["bhanu", "sajal"]);
+  assert.deepEqual(ownersOf("Dhikitha"), ["dikitha"]);
+  assert.equal(formatOwners("Bhanu|Sajal"), "Bhanu, Sajal");
+  assert.equal(formatOwners(null), "");
 });
 
 test("pending (not-yet-booked) names resolve to the right owners", () => {
-  const byName = new Map(PENDING_OWNER_NAMES.map((p) => [p.name, p.owner]));
+  const byName = new Map(PENDING_OWNER_NAMES.map((p) => [p.name, p.owners.join("|")]));
   for (const n of ["Yashodha", "Oasis", "CCIL", "Stay3Sixty", "Blueground", "Nutmegs Hospitality"]) assert.equal(byName.get(n), "Dikhita");
   assert.equal(byName.get("ACT"), "Sajal");
   assert.equal(byName.get("Atria Convergence Technologies"), "Sajal");

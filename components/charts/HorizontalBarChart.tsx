@@ -29,7 +29,9 @@ import type { BarDatum } from "./SingleMetricBarChart";
 // truncated by character count same as before — the full name is still
 // available in the Tooltip on hover regardless.
 function TruncatedTick({ x, y, payload, maxChars }: { x?: number; y?: number; payload?: { value?: string }; maxChars: number }) {
-  const raw = payload?.value ?? "";
+  // Optional " ‖ Owner" suffix (Company Rankings): the owner is drawn beside the rank number, not appended to the (truncated) name.
+  const [label, owner] = (payload?.value ?? "").split(" ‖ ");
+  const raw = label;
   const match = raw.match(/^(\d+\.)\s*(.*)$/);
   const rest = match ? match[2] : raw;
   const truncatedRest = rest.length > maxChars ? `${rest.slice(0, maxChars - 1)}…` : rest;
@@ -45,7 +47,10 @@ function TruncatedTick({ x, y, payload, maxChars }: { x?: number; y?: number; pa
   }
   return (
     <text x={x} y={y} textAnchor="end" fill={CHART_TEXT.secondary}>
-      <tspan x={x} dy={-3} fontSize={11} fontWeight={600}>{match[1]}</tspan>
+      <tspan x={x} dy={-3} fontSize={11} fontWeight={600}>
+        {owner && <tspan fontWeight={400} fill={CHART_TEXT.muted}>{owner.length > 22 ? `${owner.slice(0, 21)}…` : owner}  </tspan>}
+        {match[1]}
+      </tspan>
       <tspan x={x} dy={14} fontSize={11}>{truncatedRest}</tspan>
     </text>
   );

@@ -1,4 +1,6 @@
--- Generated 2026-10-05 from lib/reference/ownerCompanyMapping.ts (272 rows)
+-- Generated 2026-10-05 from lib/reference/ownerCompanyMapping.ts (272 rows).
+-- Run ONCE in the BigQuery console while `skyla-analytics.Skyla_Sales_Automation.company_owner_map` is empty (adds rows only; touches no revenue table).
+-- To share a company between two owners, insert one row per owner for the same CompanyId (queries aggregate them, no double counting).
 INSERT INTO `skyla-analytics.Skyla_Sales_Automation.company_owner_map` (CompanyId, Owner) VALUES
   ('4390200000000000010', 'Sajal'),
   ('4390200000000000170', 'Sajal'),
@@ -272,3 +274,6 @@ INSERT INTO `skyla-analytics.Skyla_Sales_Automation.company_owner_map` (CompanyI
   ('2227700000000008674', 'Sajal'),
   ('21200000000005463', 'Bhanu'),
   ('21200000000005558', 'Bhanu');
+
+-- Check afterwards: expect 272 rows in total.
+SELECT Owner, COUNT(*) AS company_ids FROM `skyla-analytics.Skyla_Sales_Automation.company_owner_map` GROUP BY Owner ORDER BY Owner;

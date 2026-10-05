@@ -682,28 +682,26 @@ export const OWNER_COMPANY_MAPPING: Record<string, OwnerCompanyAssignment[]> = {
 // Match = normalized name equals `name`, or starts with `name` + space
 // (`exact` = equals only; used for the short "ACT" so it can't catch "ACT FIBERNET").
 export interface PendingOwnerName {
-  owner: string;
+  owners: string[]; // more than one = shared company; shown under each owner
   name: string;
   exact?: boolean;
 }
 export const PENDING_OWNER_NAMES: PendingOwnerName[] = [
-  { owner: "Dikhita", name: "Yashodha" },
-  { owner: "Dikhita", name: "Oasis" },
-  { owner: "Dikhita", name: "CCIL" },
-  { owner: "Dikhita", name: "Stay3Sixty" },
-  { owner: "Dikhita", name: "Blueground" },
-  { owner: "Dikhita", name: "Nutmegs Hospitality" },
+  { owners: ["Dikhita"], name: "Yashodha" },
+  { owners: ["Dikhita"], name: "Oasis" },
+  { owners: ["Dikhita"], name: "CCIL" },
+  { owners: ["Dikhita"], name: "Stay3Sixty" },
+  { owners: ["Dikhita"], name: "Blueground" },
+  { owners: ["Dikhita"], name: "Nutmegs Hospitality" },
   // ACT = ATRIA CONVERGENCE TECHNOLOGIES LTD (user-confirmed). b2b_bills calls it
   // "ACT"; sales_company_bills uses the full name (mapped above by CompanyId).
   // Both spellings are kept here so a new Zoho CompanyId under either name is
   // attributed to Sajal automatically.
-  { owner: "Sajal", name: "ACT", exact: true },
-  { owner: "Sajal", name: "Atria Convergence Technologies" },
-];
-
-// Requested but NOT mapped — awaiting an answer.
-export const UNMATCHED_REQUESTS: { owner: string; requested: string; note: string }[] = [
-  { owner: "Sajal / Bhanu", requested: "SLVC", note: "user says it sits under BOTH owners, but company_owner_map holds one owner per company; also exists only in b2b_bills (no CompanyId)" },
+  { owners: ["Sajal"], name: "ACT", exact: true },
+  { owners: ["Sajal"], name: "Atria Convergence Technologies" },
+  // SLVC is shared: the user placed it under BOTH Sajal and Bhanu. Exists only in
+  // b2b_bills today (65 bills), so it attributes to both the day it bills.
+  { owners: ["Sajal", "Bhanu"], name: "SLVC" },
 ];
 
 /** Same normalization as b2bContracts.ts / ownerCompanyAnalysis.ts's normKey. */
@@ -717,7 +715,7 @@ export function pendingOwnerSql(nameCol: string): string {
   const whens = PENDING_OWNER_NAMES.map((p) => {
     const n = p.name.toUpperCase().replace(/\./g, "").replace(/'/g, "\\'");
     const cond = p.exact ? `${key} = '${n}'` : `(${key} = '${n}' OR STARTS_WITH(${key}, '${n} '))`;
-    return `WHEN ${cond} THEN '${p.owner}'`;
+    return `WHEN ${cond} THEN '${[...p.owners].sort().join("|")}'`;
   });
   return `CASE ${whens.join(" ")} END`;
 }

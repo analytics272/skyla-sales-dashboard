@@ -87,7 +87,7 @@ export async function getOwnerCompanyAnalysis(filter: KpiFilter): Promise<OwnerC
         c.TotalRevenue AS revenue,
         c.TotalNights AS nights
       FROM ${table("company_revenue_summary")} c
-      LEFT JOIN ${table("company_owner_map")} m ON c.CompanyId = m.CompanyId
+      LEFT JOIN (SELECT CompanyId, STRING_AGG(DISTINCT Owner, '|' ORDER BY Owner) AS Owner FROM ${table("company_owner_map")} GROUP BY CompanyId) m ON c.CompanyId = m.CompanyId
       WHERE c.Property IN UNNEST(@properties)
         AND c.MonthStart BETWEEN DATE_TRUNC(@start, MONTH) AND DATE_TRUNC(@end, MONTH)
     ),

@@ -1,12 +1,15 @@
 // PRD §6.1 — legacy CASE logic: >=1Cr -> "X.XX Cr", >=1L -> "X.XX L", >=1K -> "X.XX K".
-// `crDecimals` lets a headline tile show more precision for crore values (default 2) —
-// e.g. 5,99,79,517 reads "6.00 Cr" at 2 decimals but "5.998 Cr" at 3.
-export function formatIndianCurrency(amount: number, crDecimals = 2): string {
+// 2026-10-05: truncates to 2 decimals instead of rounding, so ₹5,99,79,517 reads
+// "5.99 Cr" (not "6.00 Cr") — a displayed figure never overstates the real one.
+// The 1e-9 absorbs float error (e.g. 1.8 Cr stays 1.80, not 1.79).
+const trunc2 = (v: number) => (Math.floor(v * 100 + 1e-9) / 100).toFixed(2);
+
+export function formatIndianCurrency(amount: number): string {
   const abs = Math.abs(amount);
   const sign = amount < 0 ? "-" : "";
-  if (abs >= 1_00_00_000) return `${sign}${(abs / 1_00_00_000).toFixed(crDecimals)} Cr`;
-  if (abs >= 1_00_000) return `${sign}${(abs / 1_00_000).toFixed(2)} L`;
-  if (abs >= 1_000) return `${sign}${(abs / 1_000).toFixed(2)} K`;
+  if (abs >= 1_00_00_000) return `${sign}${trunc2(abs / 1_00_00_000)} Cr`;
+  if (abs >= 1_00_000) return `${sign}${trunc2(abs / 1_00_000)} L`;
+  if (abs >= 1_000) return `${sign}${trunc2(abs / 1_000)} K`;
   return `${sign}${abs.toFixed(2)}`;
 }
 

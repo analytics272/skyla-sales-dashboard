@@ -119,7 +119,7 @@ export async function getB2bContractRanking(properties: string[], filter: Period
           c.Nights
         FROM ${table("sales_company_bills")} c
         LEFT JOIN dedup_bills b ON c.Property = b.Property AND c.FolioNo = b.Folio_No
-        LEFT JOIN ${table("company_owner_map")} o ON c.CompanyId = o.CompanyId
+        LEFT JOIN (SELECT CompanyId, STRING_AGG(DISTINCT Owner, '|' ORDER BY Owner) AS Owner FROM ${table("company_owner_map")} GROUP BY CompanyId) o ON c.CompanyId = o.CompanyId
         WHERE c.Property IN UNNEST(@properties)
           AND c.BillDate BETWEEN @start AND @end
           AND ${bookingCategorySqlExpr("c.BusinessSource")} IN ('B2B', 'B2C')

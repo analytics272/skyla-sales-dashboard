@@ -45,7 +45,18 @@ async function main() {
 
   if (process.argv.includes("--emit-sql")) {
     const values = toInsert.map(([id, o]) => `('${id}', '${o}')`).join(",\n  ");
-    const sql = `-- Generated ${new Date().toISOString().slice(0, 10)} from lib/reference/ownerCompanyMapping.ts (${toInsert.length} rows)\nINSERT INTO ${table("company_owner_map")} (CompanyId, Owner) VALUES\n  ${values};\n`;
+    const t = table("company_owner_map");
+    const sql = [
+      `-- Generated ${new Date().toISOString().slice(0, 10)} from lib/reference/ownerCompanyMapping.ts (${toInsert.length} rows).`,
+      `-- Run ONCE in the BigQuery console while ${t} is empty (adds rows only; touches no revenue table).`,
+      `-- To share a company between two owners, insert one row per owner for the same CompanyId (queries aggregate them, no double counting).`,
+      `INSERT INTO ${t} (CompanyId, Owner) VALUES`,
+      `  ${values};`,
+      ``,
+      `-- Check afterwards: expect ${toInsert.length} rows in total.`,
+      `SELECT Owner, COUNT(*) AS company_ids FROM ${t} GROUP BY Owner ORDER BY Owner;`,
+      ``,
+    ].join("\n");
     const { writeFileSync } = await import("node:fs");
     writeFileSync("scripts/company-owner-map-insert.sql", sql);
     return console.log(`Wrote scripts/company-owner-map-insert.sql (${toInsert.length} rows)`);

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { LeadsSummary, LeadsTrendSeries, LeadsTrendPoint, LeadsByGroup, FormatLeadsRevenue, AdrByFormat, LostLeadReason, OwnerLeadStatsResult, OwnerSourceCell } from "@/lib/bigquery/queries/leads";
-import { OwnerCompanyRow, canonicalOwner } from "@/lib/reference/owners";
+import { OwnerCompanyRow, canonicalOwner, ownersOf } from "@/lib/reference/owners";
 import StatTile from "@/components/ui/StatTile";
 import Card from "@/components/ui/Card";
 import TabbedCard, { useTabbedCard } from "@/components/ui/TabbedCard";
@@ -176,7 +176,7 @@ export default function LeadsContent({
   // appear under no tab), so owner-wise counts/revenue use the real mapping.
   const ownerMapPopulated = ownerCompanyAnalysis.some((r) => r.owner !== "Unassigned");
   const ownerRowsForActive = ownerCompanyAnalysis.filter(
-    (r) => canonicalOwner(r.owner) === canonicalOwner(activeOwner ?? "") || (!ownerMapPopulated && r.owner === "Unassigned")
+    (r) => ownersOf(r.owner).includes(canonicalOwner(activeOwner ?? "")) || (!ownerMapPopulated && r.owner === "Unassigned")
   );
   const hasUnassignedRows = ownerRowsForActive.some((r) => r.owner === "Unassigned");
   const bizSourceTotals = Array.from(
