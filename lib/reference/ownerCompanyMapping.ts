@@ -667,16 +667,47 @@ export const OWNER_COMPANY_MAPPING: Record<string, OwnerCompanyAssignment[]> = {
   ]
 };
 
-// Requested but NOT mapped — awaiting confirmation. None exist in
-// sales_company_bills (or b2b_bills) under any similar name, except SLVC
-// (b2b_bills only, no CompanyId) and ACT (no unambiguous match).
-export const UNMATCHED_REQUESTS: { owner: string; requested: string; note: string }[] = [
-  { owner: "Dikhita", requested: "Yashodha", note: "not found in company data" },
-  { owner: "Dikhita", requested: "Oasis", note: "not found in company data" },
-  { owner: "Dikhita", requested: "CCIL", note: "not found in company data" },
-  { owner: "Dikhita", requested: "Stay3Sixty", note: "not found in company data" },
-  { owner: "Dikhita", requested: "Blueground", note: "not found in company data" },
-  { owner: "Dikhita", requested: "Nutmegs Hospitality", note: "only Nutmeg Productions exists (different business)" },
-  { owner: "Sajal", requested: "ACT", note: "no unambiguous match; name too short/generic" },
-  { owner: "Sajal / Bhanu", requested: "SLVC", note: "listed under BOTH owners; exists only in b2b_bills (no CompanyId)" },
+// Companies the user confirmed (2026-10-05) as NEW / not yet booked: they
+// belong to the owner below as soon as they first appear in sales_company_bills,
+// with no re-run needed — queries resolve owner by normalized CompanyName for
+// any CompanyId that has no company_owner_map row (see pendingOwnerSql).
+// Match = normalized name equals `name`, or starts with `name` + space
+// (`exact` = equals only; used for the short "ACT" so it can't catch "ACT FIBERNET").
+export interface PendingOwnerName {
+  owner: string;
+  name: string;
+  exact?: boolean;
+}
+export const PENDING_OWNER_NAMES: PendingOwnerName[] = [
+  { owner: "Dikhita", name: "Yashodha" },
+  { owner: "Dikhita", name: "Oasis" },
+  { owner: "Dikhita", name: "CCIL" },
+  { owner: "Dikhita", name: "Stay3Sixty" },
+  { owner: "Dikhita", name: "Blueground" },
+  { owner: "Dikhita", name: "Nutmegs Hospitality" },
+  // ACT = Atrium (user-confirmed). Exists only in b2b_bills today (308 bills),
+  // not in sales_company_bills, so it can't be mapped by CompanyId yet.
+  { owner: "Sajal", name: "ACT", exact: true },
+  { owner: "Sajal", name: "Atrium" },
 ];
+
+// Requested but NOT mapped — awaiting an answer.
+export const UNMATCHED_REQUESTS: { owner: string; requested: string; note: string }[] = [
+  { owner: "Sajal / Bhanu", requested: "SLVC", note: "user says it sits under BOTH owners, but company_owner_map holds one owner per company; also exists only in b2b_bills (no CompanyId)" },
+];
+
+/** Same normalization as b2bContracts.ts / ownerCompanyAnalysis.ts's normKey. */
+export function normKeySql(col: string): string {
+  return `TRIM(REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(UPPER(${col}), r'\\.', ''), r'\\s*\\(', ' ('), r'\\s+', ' '))`;
+}
+
+/** SQL CASE yielding the pending owner for a company name column, else NULL. Use as COALESCE(m.Owner, <this>). */
+export function pendingOwnerSql(nameCol: string): string {
+  const key = normKeySql(nameCol);
+  const whens = PENDING_OWNER_NAMES.map((p) => {
+    const n = p.name.toUpperCase().replace(/\./g, "").replace(/'/g, "\\'");
+    const cond = p.exact ? `${key} = '${n}'` : `(${key} = '${n}' OR STARTS_WITH(${key}, '${n} '))`;
+    return `WHEN ${cond} THEN '${p.owner}'`;
+  });
+  return `CASE ${whens.join(" ")} END`;
+}

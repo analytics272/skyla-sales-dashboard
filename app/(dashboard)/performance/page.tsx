@@ -8,6 +8,7 @@ import {
   resolveTargetsFy,
   resolveTargetsRange,
 } from "@/lib/bigquery/queries/targets";
+import { getMonthlyAchieved, sumAchieved } from "@/lib/bigquery/queries/achievedRevenue";
 import { getPropertyTargetComparison } from "@/lib/bigquery/queries/propertyTargets";
 import { getGoogleReviewStats, getGoogleRatingTrend, getOtaReviewStats, getOtaRatingTrend } from "@/lib/bigquery/queries/reviews";
 import { resolveFilter } from "@/lib/bigquery/queries/filters";
@@ -43,7 +44,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
   // reused for both the monthly chart (filtered to `range` below) AND the
   // revenueAchievement summary (via summarizeRevenueAchievement, which
   // prorates internally) — no extra BigQuery round trip either way.
-  const [categoryAchievement, monthlyRevenueTargets, adrTargetVsAchieved, occupancyTargetVsAchieved, propertyTargetComparison, googleStats, googleTrend, otaStats, otaTrend, freshness] =
+  const [categoryAchievement, monthlyRevenueTargets, adrTargetVsAchieved, occupancyTargetVsAchieved, propertyTargetComparison, googleStats, googleTrend, otaStats, otaTrend, freshness, achievedMonths] =
     await Promise.all([
       getCategoryAchievement(targetsFilter),
       getMonthlyRevenueTargets(fy),
@@ -55,9 +56,10 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
       getOtaReviewStats(reviewsFilter),
       getOtaRatingTrend(reviewsFilter),
       getDataFreshness(TAB_FRESHNESS_SOURCES.performance),
+      getMonthlyAchieved(range),
     ]);
 
-  const revenueAchievement = summarizeRevenueAchievement(monthlyRevenueTargets, fy, range);
+  const revenueAchievement = summarizeRevenueAchievement(monthlyRevenueTargets, fy, range, sumAchieved(achievedMonths).revenue);
   const monthlyRevenueTargetsInRange = filterMonthlyToRange(monthlyRevenueTargets, fy, range);
 
   return (

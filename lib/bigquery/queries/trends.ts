@@ -38,7 +38,7 @@ function monthLabelOf(iso: string): string {
   return `${MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}`;
 }
 
-async function fetchMonthlyPoints(properties: string[], range: DateRange, includeLp: boolean): Promise<MonthlyTrendPoint[]> {
+export async function fetchMonthlyPoints(properties: string[], range: DateRange, includeLp: boolean): Promise<MonthlyTrendPoint[]> {
   const [rows, lpPoints] = await Promise.all([
     runQuery<RawTrendRow>(`
       SELECT

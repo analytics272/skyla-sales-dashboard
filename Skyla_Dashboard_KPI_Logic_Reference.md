@@ -2588,6 +2588,22 @@ the build's own investigation of the B2B Revenue Share formula above.
 - Leads -> By Owner Detail -> Company Analysis: existing LEFT JOIN picks it up. The old "show every Unassigned company under each owner tab" fallback now applies only while the map has no real owner rows; once populated, each tab shows just that owner's companies.
 - Company Rankings query (`b2bContracts.ts`, `getB2bContractRanking`) now returns `owner` (LEFT JOIN `company_owner_map` on CompanyId, `MAX(owner)` per normalized-name group; null = unmapped). Revenue/nights/ADR are unchanged.
 
-**Not mapped (awaiting confirmation):** Yashodha, Oasis, CCIL, Stay3Sixty, Blueground, Nutmegs Hospitality (not in company data; only Nutmeg Productions exists, a different business); ACT (no unambiguous match); SLVC (listed under both Sajal and Bhanu, exists only in `b2b_bills`, which has no CompanyId). Also deliberately excluded false fuzzy hits: NS ENTERPRISES, EXPO GALAXIA, "SOL".
+**Not-yet-booked companies (pending names):** Yashodha, Oasis, CCIL, Stay3Sixty, Blueground, Nutmegs Hospitality -> Dikhita; ACT (= Atrium, user-confirmed) and Atrium -> Sajal. They have no CompanyId yet, so `PENDING_OWNER_NAMES` in `ownerCompanyMapping.ts` assigns them by normalized name (equal, or starts-with name + space; `ACT` equal-only) at query time (`pendingOwnerSql`, used as `COALESCE(company_owner_map.Owner, ...)` in `ownerCompanyAnalysis.ts` and `b2bContracts.ts`) — they attribute automatically the day they first bill, no re-run needed. Caveat: ACT currently exists only in `b2b_bills` (308 bills), not in `sales_company_bills`.
+
+**Still open:** SLVC — user says it sits under both Sajal and Bhanu, but the owner map holds one owner per company (and a second row per CompanyId would fan out every join); it also exists only in `b2b_bills`. Left unassigned until one owner is chosen. Deliberately excluded false fuzzy hits: NS ENTERPRISES, EXPO GALAXIA, "SOL".
+
+**Permissions:** the dashboard service account is read-only on `company_owner_map` (`bigquery.tables.updateData` denied), so `scripts/company-owner-map-insert.sql` (267 rows) must be run once by an admin in the BigQuery console.
 
 **Tests:** `npm test` (node:test via tsx) — mapping integrity (no name under two owners, no duplicates, Aadya once under Dhikitha, unmatched not also mapped).
+
+---
+
+## 14. Performance tab — "Achieved" now PMS-sourced (2026-10-05)
+
+**Rule:** every ACHIEVED figure on the Performance tab comes from PMS; `leadership_targets` supplies TARGETS only. Reason: its `*_Achieved` columns are hand-maintained and go stale mid-month (live: Oct 26 read 59.45 L vs PMS 1.46 Cr -> "Revenue Achievement 25.5%"; Sep 26 read 1.86 Cr vs PMS 2.02 Cr).
+
+**Backend:** `lib/bigquery/queries/achievedRevenue.ts` (`getMonthlyAchieved(range)`): company-wide, all active properties incl. LP; `sales_booking` DailyRevenue by StayDate (`SALES_BOOKING_STAY_FILTER`) + `sales_booking_lp_monthly`; B2B/B2C/OTA via `bookingCategorySqlExpr`; FY24-25/FY25-26 workbook values (`historicalDashboardOverride`) win per property-month where they exist (FY25-26 has no category split, so categories stay live there). Used by `targets.ts` for: Revenue Achievement (exact period range, not a prorated month), B2B/B2C/OTA achieved, the monthly target-vs-achieved chart, the prior-March rollover seed. ADR and Occupancy achieved come from `trends.ts` `fetchMonthlyPoints` (same numbers as the Overview Trends chart; no workbook override there, as on Trends).
+
+**Result (live, 2026-10-05):** This Month Revenue Achievement 62.9% (1.46 Cr of 2.33 Cr), identical to the "Total Achieved" tile. Jul/Aug/Sep PMS = 2,21,68,461 / 1,76,57,025 / 2,01,54,031 = 5.998 Cr vs the user's Excel snapshot 5.989 Cr (+0.63% / +0.19% / -0.41%: live PMS keeps moving after an export; the sheet had 5.82 Cr). Validate with `scripts/validate-owner-and-achieved.ts`.
+
+**Overview Trends chart (Revenue tab):** y-axis ticks are 0 / 60 L / 1.20 Cr / 1.80 Cr, then 10 L steps above 1.80 Cr up to the data max (`revenueAxisTicks` in `OverviewContent.tsx`).

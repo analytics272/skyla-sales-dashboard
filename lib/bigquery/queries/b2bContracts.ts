@@ -67,6 +67,7 @@ import { DateRange } from "@/lib/reference/financialYear";
 import { PeriodFilter, resolvePeriodFromFilter } from "@/lib/reference/period";
 import { SALES_BOOKING_STAY_FILTER } from "./filters";
 import { bookingCategorySqlExpr } from "@/lib/reference/bookingSourceMap";
+import { pendingOwnerSql } from "@/lib/reference/ownerCompanyMapping";
 
 export interface B2bContractRanking {
   company: string; // b2b_bills.Bills_due_from if any bill for this (normalized) company matched it, else one of sales_company_bills.CompanyName's own raw variants
@@ -113,7 +114,7 @@ export async function getB2bContractRanking(properties: string[], filter: Period
           TRIM(REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(UPPER(c.CompanyName), r'\\.', ''), r'\\s*\\(', ' ('), r'\\s+', ' ')) AS normKey,
           b.Contract_Status,
           b.Bills_due_from,
-          o.Owner AS owner,
+          COALESCE(o.Owner, ${pendingOwnerSql("c.CompanyName")}) AS owner,
           c.RoomRevenueExclTax,
           c.Nights
         FROM ${table("sales_company_bills")} c
