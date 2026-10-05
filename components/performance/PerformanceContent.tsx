@@ -142,14 +142,14 @@ export default function PerformanceContent({
         <h3 className="text-base font-semibold text-zinc-800 dark:text-zinc-100">Revenue Targets By Property</h3>
         <p className="text-xs text-zinc-400 dark:text-zinc-500">Reference plan — {targetsRangeLabel}</p>
         <p className="mt-1 text-[11px] text-zinc-400 dark:text-zinc-500">
-          Revenue Achievement (company-wide, leadership targets) and the property rollup beside it (fixed plan vs live bookings) are two
-          separate tracking systems — they won&apos;t match exactly.
+          Achieved revenue is live PMS everywhere on this tab. Revenue Achievement is measured against the company-wide leadership target;
+          the property rollup beside it against the fixed per-property plan — so the two targets can differ slightly.
         </p>
         <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,4fr)]">
           <StatTile
             label="Revenue Achievement"
             value={revenueAchievement.achievedPct !== null ? formatPercent(revenueAchievement.achievedPct) : "—"}
-            sub={`${formatIndianCurrency(revenueAchievement.achieved)} of ${formatIndianCurrency(revenueAchievement.target)} · leadership_targets`}
+            sub={`${formatIndianCurrency(revenueAchievement.achieved)} of ${formatIndianCurrency(revenueAchievement.target)} · target: leadership_targets, achieved: live PMS`}
             progress={revenueAchievement.achievedPct !== null ? { pct: revenueAchievement.achievedPct } : undefined}
           />
           <div className="hidden w-px bg-zinc-200 dark:bg-zinc-800 sm:block" />

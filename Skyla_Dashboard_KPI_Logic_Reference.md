@@ -2571,3 +2571,44 @@ Both zones respect the Property filter (pre-filters `b2b_bills` rows before
 pivoting/listing). Verified live: KDP-filtered Zone A total revenue (₹2.11
 Cr) exactly matches an independent all-time-FY26-27 KDP query run during
 the build's own investigation of the B2B Revenue Share formula above.
+
+---
+
+## 13. Sales-owner -> company mapping (2026-10-05)
+
+**Source of truth:** `lib/reference/ownerCompanyMapping.ts` (owner -> requested name -> exact `sales_company_bills.CompanyName` values). It is pushed into BigQuery `company_owner_map (CompanyId, Owner)` by `scripts/sync-company-owner-map.ts` (dry run by default; `--apply` writes; `--emit-sql` writes `scripts/company-owner-map-insert.sql` for an admin to run). The sync aborts rather than overwrite an existing different owner, and never touches revenue tables.
+
+**Why every CompanyId:** `sales_company_bills` has one CompanyId per property/Zoho instance (198 of 858 names have several), so all IDs of a matched name get the same owner. CompanyId <-> CompanyName was verified 1:1 (no ID carries two names). **Loaded into BigQuery 2026-10-05** (admin ran `scripts/company-owner-map-insert.sql`): 272 rows, no duplicate CompanyIds — Sajal 127, Bhanu 109, Dikhita 30, Anjali 4, Rajesh 2. `sync-company-owner-map.ts` now reports 0 left to insert.
+
+**Owner spelling:** stored as `Dikhita` (same as `lead_tracker.Owner`, which drives the Leads owner tabs); `canonicalOwner()` also accepts `Dhikitha`.
+
+**Owners and sources:** Rajesh, Dhikitha, Anjali from the 2026-10-05 request (the unheaded "Riya Travels / Aadya Travels / Stay3Sixty / CCIL" list was confirmed by the user to be Dhikitha's, so the Aadya Travels conflict is resolved: Dhikitha). Sajal and Bhanu from "Sales Person Company Wise List.xlsx", Sheet1 (A-B / E-F). "Nomads" -> Nomad Temporary Housing (user-confirmed).
+
+**Where it shows:**
+- Leads -> By Owner Detail -> Company Analysis: existing LEFT JOIN picks it up. The old "show every Unassigned company under each owner tab" fallback now applies only while the map has no real owner rows; once populated, each tab shows just that owner's companies.
+- Company Rankings query (`b2bContracts.ts`, `getB2bContractRanking`) now returns `owner` (LEFT JOIN `company_owner_map` on CompanyId, `MAX(owner)` per normalized-name group; null = unmapped). Revenue/nights/ADR are unchanged.
+
+**Not-yet-booked / shared companies (pending names):** Yashodha, Oasis, CCIL, Stay3Sixty, Blueground, Nutmegs Hospitality -> Dikhita; ACT (= Atria Convergence Technologies) -> Sajal; SLVC -> Sajal AND Bhanu (shared). They have no CompanyId yet (or, for ACT/SLVC, only appear in `b2b_bills`), so `PENDING_OWNER_NAMES` in `ownerCompanyMapping.ts` assigns them by normalized name (equal, or starts-with name + space; `ACT` equal-only) at query time (`pendingOwnerSql`, used as `COALESCE(owner subquery, ...)` in `ownerCompanyAnalysis.ts` and `b2bContracts.ts`) — they attribute automatically the day they first bill, no re-run needed.
+
+**Shared owners:** a company may have several rows in `company_owner_map` (one per owner, same CompanyId). Both queries first aggregate owners per CompanyId (`STRING_AGG(DISTINCT Owner, '|')` -> e.g. `Bhanu|Sajal`) before joining, so a shared company never fans out/double-counts its own revenue. `ownersOf()` / `formatOwners()` in `owners.ts` split/format that string: Leads shows a shared company under each owner's tab; Company Rankings shows "Bhanu, Sajal". Per-owner revenue totals therefore include shared companies in both owners (they sum to slightly more than company revenue if any shared company has revenue). Deliberately excluded false fuzzy hits: NS ENTERPRISES, EXPO GALAXIA, "SOL".
+
+**Permissions:** the dashboard service account is read-only on `company_owner_map` (`bigquery.tables.updateData` denied), so loads/changes to that table go through an admin: regenerate the SQL with `scripts/sync-company-owner-map.ts --emit-sql` (it emits only rows not already present) and run it in the BigQuery console.
+
+**Tests:** `npm test` (node:test via tsx) — mapping integrity (no name under two owners, no duplicates, Aadya once under Dhikitha, pending names consistent with mapped owners, SLVC shared, shared-owner helpers) and currency formatting. **Live validation:** `scripts/validate-owner-and-achieved.ts` — owner-wise revenue sums to company revenue (FY 26-27: Unassigned 2,32,46,060 / Sajal 1,80,53,844 / Bhanu 1,12,02,350 / Dikhita 16,83,500 / Anjali 9,94,500 / Rajesh 94,800 = 5,52,75,054); 90 of 191 ranked companies carry an owner.
+
+---
+
+## 14. Performance tab — "Achieved" now PMS-sourced (2026-10-05)
+
+**Rule:** every ACHIEVED figure on the Performance tab comes from PMS; `leadership_targets` supplies TARGETS only. Reason: its `*_Achieved` columns are hand-maintained and go stale mid-month (live: Oct 26 read 59.45 L vs PMS 1.46 Cr -> "Revenue Achievement 25.5%"; Sep 26 read 1.86 Cr vs PMS 2.02 Cr).
+
+**Backend:** `lib/bigquery/queries/achievedRevenue.ts` (`getMonthlyAchieved(range)`): company-wide, all active properties incl. LP; `sales_booking` DailyRevenue by StayDate (`SALES_BOOKING_STAY_FILTER`) + `sales_booking_lp_monthly`; B2B/B2C/OTA via `bookingCategorySqlExpr`; FY24-25/FY25-26 workbook values (`historicalDashboardOverride`) win per property-month where they exist (FY25-26 has no category split, so categories stay live there). Used by `targets.ts` for: Revenue Achievement (exact period range, not a prorated month), B2B/B2C/OTA achieved, the monthly target-vs-achieved chart, the prior-March rollover seed. ADR and Occupancy achieved come from `trends.ts` `fetchMonthlyPoints` (same numbers as the Overview Trends chart; no workbook override there, as on Trends).
+
+**Result (live, 2026-10-05):** This Month Revenue Achievement 62.9% (1.46 Cr of 2.33 Cr), identical to the "Total Achieved" tile. Jul/Aug/Sep PMS = 2,21,68,461 / 1,76,57,025 / 2,01,54,031 = 5.998 Cr vs the user's Excel snapshot 5.989 Cr (+0.63% / +0.19% / -0.41%: live PMS keeps moving after an export; the sheet had 5.82 Cr). Validate with `scripts/validate-owner-and-achieved.ts`.
+
+**Overview Trends chart (Revenue tab):** y-axis ticks are 0 / 60 L / 1.20 Cr / 1.80 Cr, then 10 L steps above 1.80 Cr up to the data max (`revenueAxisTicks` in `OverviewContent.tsx`).
+
+**Addendum (2026-10-05, later):**
+- **ACT = ATRIA CONVERGENCE TECHNOLOGIES LTD** (user-confirmed). `sales_company_bills` carries it as 3 name variants / 5 CompanyIds, mapped to Sajal in `ownerCompanyMapping.ts`. `b2b_bills` calls it "ACT" (308 bills). Both spellings stay in `PENDING_OWNER_NAMES` (`ACT` exact, `Atria Convergence Technologies` prefix) so a new CompanyId under either name still attributes to Sajal. Company Rankings displays the b2b_bills short name ("ACT") when a bill matches it.
+- **Currency display = truncation, dashboard-wide:** `formatIndianCurrency` (`lib/format/currency.ts`) truncates to 2 decimals instead of rounding, so Jul 1-Sep 30 2026 (₹5,99,79,517) reads "5.99 Cr", never "6.00 Cr" — a shown figure can no longer overstate the real one (side effect: any Cr/L/K figure may read up to 0.01 lower than under rounding). Live cross-check for that range: raw PMS = Overview = Trends = Performance achieved = B2B+B2C+OTA mix = ₹5,99,79,517 (`scripts/validate-owner-and-achieved.ts`). The user's Excel snapshot totals 5.989 Cr (-0.15%); no BookingStatus/TransactionStatus filter reproduces it, so it is treated as export-timing drift (note: some old stays still carry in-progress statuses like Stayover — e.g. 544 Sep rows — so the PMS sync may not refresh statuses; revenue totals are unaffected).
+- **Company Rankings owner label:** the owner is drawn beside each rank number (`HorizontalBarChart` tick, via a " ‖ Owner" suffix on the label) and in the tooltip; the Company Rankings search also matches owner names.

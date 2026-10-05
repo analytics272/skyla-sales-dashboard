@@ -14,7 +14,17 @@ export interface OwnerCompanyRow {
 /** lead_tracker Owner spelling -> b2b_bills POC spelling, both lowercased. */
 export const OWNER_ALIASES: Record<string, string> = {
   dikhita: "dikitha",
+  dhikitha: "dikitha",
 };
+
+/** company_owner_map can hold several owners for one company; queries return them joined with "|" (e.g. "Bhanu|Sajal"). */
+export const OWNER_SEPARATOR = "|";
+export function ownersOf(owner: string): string[] {
+  return owner.split(OWNER_SEPARATOR).map((o) => canonicalOwner(o));
+}
+export function formatOwners(owner: string | null): string {
+  return owner ? owner.split(OWNER_SEPARATOR).join(", ") : "";
+}
 
 export function canonicalOwner(name: string): string {
   const k = name.trim().toLowerCase();

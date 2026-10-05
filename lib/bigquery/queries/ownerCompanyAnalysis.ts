@@ -51,6 +51,7 @@ import { runQuery, table } from "../client";
 import { KpiFilter, resolveFilter } from "./filters";
 import { bookingCategorySqlExpr } from "@/lib/reference/bookingSourceMap";
 import type { OwnerCompanyRow } from "@/lib/reference/owners";
+import { pendingOwnerSql } from "@/lib/reference/ownerCompanyMapping";
 
 export type { OwnerCompanyRow } from "@/lib/reference/owners";
 
@@ -78,7 +79,7 @@ export async function getOwnerCompanyAnalysis(filter: KpiFilter): Promise<OwnerC
   const rows = await runQuery<{ owner: string | null; business_source: string; category: string; company: string; revenue: number | null; nights: number }>(`
     WITH per_row AS (
       SELECT
-        m.Owner AS owner,
+        COALESCE(m.Owner, ${pendingOwnerSql("c.CompanyName")}) AS owner,
         c.BusinessSource AS business_source,
         ${bookingCategorySqlExpr("c.BusinessSource")} AS category,
         c.CompanyName AS raw_company,
@@ -86,7 +87,7 @@ export async function getOwnerCompanyAnalysis(filter: KpiFilter): Promise<OwnerC
         c.TotalRevenue AS revenue,
         c.TotalNights AS nights
       FROM ${table("company_revenue_summary")} c
-      LEFT JOIN ${table("company_owner_map")} m ON c.CompanyId = m.CompanyId
+      LEFT JOIN (SELECT CompanyId, STRING_AGG(DISTINCT Owner, '|' ORDER BY Owner) AS Owner FROM ${table("company_owner_map")} GROUP BY CompanyId) m ON c.CompanyId = m.CompanyId
       WHERE c.Property IN UNNEST(@properties)
         AND c.MonthStart BETWEEN DATE_TRUNC(@start, MONTH) AND DATE_TRUNC(@end, MONTH)
     ),

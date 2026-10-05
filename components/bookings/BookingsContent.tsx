@@ -23,6 +23,7 @@ import DonutChart from "@/components/charts/DonutChart";
 import GroupedBarChart from "@/components/charts/GroupedBarChart";
 import SearchInput from "@/components/ui/SearchInput";
 import { formatIndianCurrency, formatPercent } from "@/lib/format/currency";
+import { formatOwners } from "@/lib/reference/owners";
 import { ROOM_TYPE_COLOR, ROOM_TYPE_ORDER, CATEGORY_COLOR, CATEGORY_ORDER } from "@/lib/design/tokens";
 
 const OTA_PALETTE = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--series-4)", "var(--series-5)", "var(--chart-baseline)", "#a855f7", "#0ea5e9"];
@@ -181,14 +182,18 @@ export default function BookingsContent({
     ADR: new Map(b2bAdrRankedFull.map((r, i) => [r.company, i + 1])),
     "Contribution %": new Map(b2bContributionRankedFull.map((r, i) => [r.company, i + 1])),
   };
-  const numbered = (r: { company: string }) => `${rankMapByTab[companyTab].get(r.company)}. ${r.company}`;
+  // " ‖ " splits the owner off the label for HorizontalBarChart's tick (shown beside the rank number); the tooltip shows it too.
+  const numbered = (r: { company: string; owner: string | null }) =>
+    `${rankMapByTab[companyTab].get(r.company)}. ${r.company}${r.owner ? ` ‖ ${formatOwners(r.owner)}` : ""}`;
 
   // Search narrows which rows are shown/paginated only — the coverage
   // caption, contract donut, and "(N) companies" title below still
   // describe the FULL period population, not the live search result.
   const companySearchTrimmed = companySearch.trim().toLowerCase();
-  const applySearch = <T extends { company: string }>(rows: T[]) =>
-    companySearchTrimmed ? rows.filter((r) => r.company.toLowerCase().includes(companySearchTrimmed)) : rows;
+  const applySearch = <T extends { company: string; owner: string | null }>(rows: T[]) =>
+    companySearchTrimmed
+      ? rows.filter((r) => r.company.toLowerCase().includes(companySearchTrimmed) || formatOwners(r.owner).toLowerCase().includes(companySearchTrimmed))
+      : rows;
 
   const b2bRevenueRanked = applySearch(b2bRevenueRankedFull);
   const b2bNightsRanked = applySearch(b2bNightsRankedFull);

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { LeadsSummary, LeadsTrendSeries, LeadsTrendPoint, LeadsByGroup, FormatLeadsRevenue, AdrByFormat, LostLeadReason, OwnerLeadStatsResult, OwnerSourceCell } from "@/lib/bigquery/queries/leads";
-import { OwnerCompanyRow, canonicalOwner } from "@/lib/reference/owners";
+import { OwnerCompanyRow, canonicalOwner, ownersOf } from "@/lib/reference/owners";
 import StatTile from "@/components/ui/StatTile";
 import Card from "@/components/ui/Card";
 import TabbedCard, { useTabbedCard } from "@/components/ui/TabbedCard";
@@ -170,8 +170,13 @@ export default function LeadsContent({
   // active, with an explicit note — the same match narrows itself down
   // automatically, with no code change here, once real Owner values exist.
   const [selectedBizSource, setSelectedBizSource] = useState<string | null>(null);
+  // 2026-10-05: the Unassigned fallback now applies ONLY while company_owner_map
+  // has no real owner rows at all. Once it's populated, each owner tab shows
+  // just that owner's companies (unmapped companies stay "Unassigned" and
+  // appear under no tab), so owner-wise counts/revenue use the real mapping.
+  const ownerMapPopulated = ownerCompanyAnalysis.some((r) => r.owner !== "Unassigned");
   const ownerRowsForActive = ownerCompanyAnalysis.filter(
-    (r) => canonicalOwner(r.owner) === canonicalOwner(activeOwner ?? "") || r.owner === "Unassigned"
+    (r) => ownersOf(r.owner).includes(canonicalOwner(activeOwner ?? "")) || (!ownerMapPopulated && r.owner === "Unassigned")
   );
   const hasUnassignedRows = ownerRowsForActive.some((r) => r.owner === "Unassigned");
   const bizSourceTotals = Array.from(
