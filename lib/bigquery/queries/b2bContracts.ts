@@ -70,6 +70,8 @@ import { bookingCategorySqlExpr } from "@/lib/reference/bookingSourceMap";
 
 export interface B2bContractRanking {
   company: string; // b2b_bills.Bills_due_from if any bill for this (normalized) company matched it, else one of sales_company_bills.CompanyName's own raw variants
+  /** Sales owner from company_owner_map (CompanyId -> Owner, see lib/reference/ownerCompanyMapping.ts); null = company not mapped to an owner. */
+  owner: string | null;
   contractStatus: string | null; // "Contract" if any bill in this company's group has one in b2b_bills, else "No Contract" if any does, else null (no b2b_bills match at all — expected for every B2C row, and any B2B row not yet in b2b_bills)
   roomRevenue: number; // SUM(RoomRevenueExclTax) for this company, B2B+B2C-classified BusinessSource only (OTA excluded) — PMS, tax-exclusive
   nights: number; // SUM(Nights)
@@ -91,7 +93,7 @@ async function getOverallRevenue(properties: string[], range: DateRange): Promis
 export async function getB2bContractRanking(properties: string[], filter: PeriodFilter): Promise<B2bContractRanking[]> {
   const range = resolvePeriodFromFilter(filter).current;
   const [rows, overallRevenue] = await Promise.all([
-    runQuery<{ company: string; contractStatus: string | null; roomRevenue: number | null; nights: number }>(`
+    runQuery<{ company: string; owner: string | null; contractStatus: string | null; roomRevenue: number | null; nights: number }>(`
       WITH dedup_bills AS (
         -- One row per (Property, Folio_No) — mirrors the same dedup this
         -- file has always needed before joining b2b_bills, to avoid
@@ -111,10 +113,12 @@ export async function getB2bContractRanking(properties: string[], filter: Period
           TRIM(REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(UPPER(c.CompanyName), r'\\.', ''), r'\\s*\\(', ' ('), r'\\s+', ' ')) AS normKey,
           b.Contract_Status,
           b.Bills_due_from,
+          o.Owner AS owner,
           c.RoomRevenueExclTax,
           c.Nights
         FROM ${table("sales_company_bills")} c
         LEFT JOIN dedup_bills b ON c.Property = b.Property AND c.FolioNo = b.Folio_No
+        LEFT JOIN ${table("company_owner_map")} o ON c.CompanyId = o.CompanyId
         WHERE c.Property IN UNNEST(@properties)
           AND c.BillDate BETWEEN @start AND @end
           AND ${bookingCategorySqlExpr("c.BusinessSource")} IN ('B2B', 'B2C')
@@ -125,6 +129,7 @@ export async function getB2bContractRanking(properties: string[], filter: Period
         -- grouping by normKey (not by whether a match happened) is what
         -- keeps the whole company as one row either way.
         COALESCE(MAX(Bills_due_from), ANY_VALUE(CompanyName)) AS company,
+        MAX(owner) AS owner,
         CASE
           WHEN LOGICAL_OR(Contract_Status = 'Contract') THEN 'Contract'
           WHEN LOGICAL_OR(Contract_Status = 'No Contract') THEN 'No Contract'
@@ -145,6 +150,7 @@ export async function getB2bContractRanking(properties: string[], filter: Period
   // company's slice of the B2B+B2C channels — per user direction 2026-08-24.
   return rows.map((r) => ({
     company: r.company,
+    owner: r.owner,
     contractStatus: r.contractStatus,
     roomRevenue: r.roomRevenue ?? 0,
     adr: safeDivide(r.roomRevenue ?? 0, r.nights),

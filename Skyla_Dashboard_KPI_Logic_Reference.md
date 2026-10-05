@@ -2571,3 +2571,23 @@ Both zones respect the Property filter (pre-filters `b2b_bills` rows before
 pivoting/listing). Verified live: KDP-filtered Zone A total revenue (₹2.11
 Cr) exactly matches an independent all-time-FY26-27 KDP query run during
 the build's own investigation of the B2B Revenue Share formula above.
+
+---
+
+## 13. Sales-owner -> company mapping (2026-10-05)
+
+**Source of truth:** `lib/reference/ownerCompanyMapping.ts` (owner -> requested name -> exact `sales_company_bills.CompanyName` values). It is pushed into BigQuery `company_owner_map (CompanyId, Owner)` by `scripts/sync-company-owner-map.ts` (dry run by default; `--apply` writes; `--emit-sql` writes `scripts/company-owner-map-insert.sql` for an admin to run). The sync aborts rather than overwrite an existing different owner, and never touches revenue tables.
+
+**Why every CompanyId:** `sales_company_bills` has one CompanyId per property/Zoho instance (198 of 858 names have several), so all IDs of a matched name get the same owner. CompanyId <-> CompanyName was verified 1:1 (no ID carries two names). 267 IDs in total: Sajal 122, Bhanu 109, Dikhita 30, Rajesh 2, Anjali 4.
+
+**Owner spelling:** stored as `Dikhita` (same as `lead_tracker.Owner`, which drives the Leads owner tabs); `canonicalOwner()` also accepts `Dhikitha`.
+
+**Owners and sources:** Rajesh, Dhikitha, Anjali from the 2026-10-05 request (the unheaded "Riya Travels / Aadya Travels / Stay3Sixty / CCIL" list was confirmed by the user to be Dhikitha's, so the Aadya Travels conflict is resolved: Dhikitha). Sajal and Bhanu from "Sales Person Company Wise List.xlsx", Sheet1 (A-B / E-F). "Nomads" -> Nomad Temporary Housing (user-confirmed).
+
+**Where it shows:**
+- Leads -> By Owner Detail -> Company Analysis: existing LEFT JOIN picks it up. The old "show every Unassigned company under each owner tab" fallback now applies only while the map has no real owner rows; once populated, each tab shows just that owner's companies.
+- Company Rankings query (`b2bContracts.ts`, `getB2bContractRanking`) now returns `owner` (LEFT JOIN `company_owner_map` on CompanyId, `MAX(owner)` per normalized-name group; null = unmapped). Revenue/nights/ADR are unchanged.
+
+**Not mapped (awaiting confirmation):** Yashodha, Oasis, CCIL, Stay3Sixty, Blueground, Nutmegs Hospitality (not in company data; only Nutmeg Productions exists, a different business); ACT (no unambiguous match); SLVC (listed under both Sajal and Bhanu, exists only in `b2b_bills`, which has no CompanyId). Also deliberately excluded false fuzzy hits: NS ENTERPRISES, EXPO GALAXIA, "SOL".
+
+**Tests:** `npm test` (node:test via tsx) — mapping integrity (no name under two owners, no duplicates, Aadya once under Dhikitha, unmatched not also mapped).

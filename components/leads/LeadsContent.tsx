@@ -170,8 +170,13 @@ export default function LeadsContent({
   // active, with an explicit note — the same match narrows itself down
   // automatically, with no code change here, once real Owner values exist.
   const [selectedBizSource, setSelectedBizSource] = useState<string | null>(null);
+  // 2026-10-05: the Unassigned fallback now applies ONLY while company_owner_map
+  // has no real owner rows at all. Once it's populated, each owner tab shows
+  // just that owner's companies (unmapped companies stay "Unassigned" and
+  // appear under no tab), so owner-wise counts/revenue use the real mapping.
+  const ownerMapPopulated = ownerCompanyAnalysis.some((r) => r.owner !== "Unassigned");
   const ownerRowsForActive = ownerCompanyAnalysis.filter(
-    (r) => canonicalOwner(r.owner) === canonicalOwner(activeOwner ?? "") || r.owner === "Unassigned"
+    (r) => canonicalOwner(r.owner) === canonicalOwner(activeOwner ?? "") || (!ownerMapPopulated && r.owner === "Unassigned")
   );
   const hasUnassignedRows = ownerRowsForActive.some((r) => r.owner === "Unassigned");
   const bizSourceTotals = Array.from(

@@ -14,6 +14,7 @@ export interface OwnerCompanyRow {
 /** lead_tracker Owner spelling -> b2b_bills POC spelling, both lowercased. */
 export const OWNER_ALIASES: Record<string, string> = {
   dikhita: "dikitha",
+  dhikitha: "dikitha",
 };
 
 export function canonicalOwner(name: string): string {
