@@ -3,7 +3,7 @@
 // One line per series (e.g. one per FY), shared x-axis (e.g. fiscal month).
 // Multi-series -> legend always present (color-matching is the only way to
 // tell lines apart when it's not the mark nearest the reader's eye).
-import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { CartesianGrid, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { CHART_GRIDLINE, CHART_TEXT } from "@/lib/design/tokens";
 
 export default function MultiSeriesLineChart({
@@ -14,6 +14,7 @@ export default function MultiSeriesLineChart({
   height = 280,
   yTicks,
   yDomain,
+  benchmark,
 }: {
   data: Record<string, unknown>[];
   xKey: string;
@@ -24,6 +25,8 @@ export default function MultiSeriesLineChart({
   yTicks?: number[];
   /** Explicit y-axis domain, e.g. [0, 100] for a percentage scale. */
   yDomain?: [number, number];
+  /** Optional dashed horizontal reference line (display only — not part of the data). */
+  benchmark?: { value: number; label: string };
 }) {
   return (
     <ResponsiveContainer width="100%" height={height}>
@@ -44,6 +47,16 @@ export default function MultiSeriesLineChart({
           ticks={yTicks}
           domain={yDomain}
         />
+        {benchmark && (
+          <ReferenceLine
+            y={benchmark.value}
+            stroke="var(--chart-baseline)"
+            strokeDasharray="5 4"
+            strokeWidth={1.5}
+            ifOverflow="extendDomain"
+            label={{ value: benchmark.label, position: "insideTopRight", fill: CHART_TEXT.secondary, fontSize: 11 }}
+          />
+        )}
         <Tooltip
           formatter={(value) => valueFormatter(Number(value))}
           contentStyle={{
