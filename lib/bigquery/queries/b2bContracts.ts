@@ -68,6 +68,7 @@ import { PeriodFilter, resolvePeriodFromFilter } from "@/lib/reference/period";
 import { SALES_BOOKING_STAY_FILTER } from "./filters";
 import { bookingCategorySqlExpr } from "@/lib/reference/bookingSourceMap";
 import { pendingOwnerSql } from "@/lib/reference/ownerCompanyMapping";
+import { dedupB2bBillsCte, normKeySql } from "./companyNaming";
 
 export interface B2bContractRanking {
   company: string; // b2b_bills.Bills_due_from if any bill for this (normalized) company matched it, else one of sales_company_bills.CompanyName's own raw variants
@@ -95,23 +96,14 @@ export async function getB2bContractRanking(properties: string[], filter: Period
   const range = resolvePeriodFromFilter(filter).current;
   const [rows, overallRevenue] = await Promise.all([
     runQuery<{ company: string; owner: string | null; contractStatus: string | null; roomRevenue: number | null; nights: number }>(`
-      WITH dedup_bills AS (
-        -- One row per (Property, Folio_No) — mirrors the same dedup this
-        -- file has always needed before joining b2b_bills, to avoid
-        -- fanning out against a table with duplicate (Property, Folio_No)
-        -- rows (confirmed present, mostly the legacy "Hyber-GB" code).
-        SELECT Property, Folio_No, ANY_VALUE(Contract_Status) AS Contract_Status, ANY_VALUE(Bills_due_from) AS Bills_due_from
-        FROM ${table("b2b_bills")}
-        WHERE Financial_Year != 'FY 99-00'
-        GROUP BY Property, Folio_No
-      ),
+      WITH ${dedupB2bBillsCte()},
       per_bill AS (
         -- normKey merges free-text CompanyName variants of the same real
         -- company (see file header): upper-case, strip periods, collapse
         -- whitespace, force a space before "(" so "X (Y)" and "X(Y)" match.
         SELECT
           c.CompanyName,
-          TRIM(REGEXP_REPLACE(REGEXP_REPLACE(REGEXP_REPLACE(UPPER(c.CompanyName), r'\\.', ''), r'\\s*\\(', ' ('), r'\\s+', ' ')) AS normKey,
+          ${normKeySql("c.CompanyName")} AS normKey,
           b.Contract_Status,
           b.Bills_due_from,
           COALESCE(o.Owner, ${pendingOwnerSql("c.CompanyName")}) AS owner,
