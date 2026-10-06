@@ -1,12 +1,13 @@
 // Revenue-trend y-axis scale with a visible benchmark line (display only — never touches the data).
 //
 // 2026-10-05, per explicit direction:
-//   monthly trend (company-wide months, max well under 5 Cr): benchmark ₹1.7 Cr, ₹20 L steps around/above it
-//   FY-scale trend (series reaching 5 Cr+):                  benchmark ₹23 Cr,  ₹50 L steps around/above it
-// Below the fine-step zone the axis uses coarse steps so it stays readable
-// (otherwise a 23 Cr axis would need ~46 ticks).
+//   monthly view (one monthly point, e.g. This Month):  benchmark ₹1.70 Cr, ₹20 L steps around/above it
+//   FY view (several monthly points, e.g. This FY):      benchmark ₹2.30 Cr, ₹50 L steps around/above it
+// The FY view still plots MONTHLY revenue (peak ~2.2 Cr), so its benchmark has to live on
+// that axis: the requested "₹23 Cr" can't share it (it would flatten every point), and the
+// previous axis topped out at 2.30 Cr — treated as the intended figure. Change FY.benchmark
+// below if a different number was meant. Below the fine-step zone the axis uses coarse steps.
 const LAKH = 100_000;
-const CRORE = 100 * LAKH;
 
 export interface RevenueScale {
   ticks: number[];
@@ -22,15 +23,15 @@ interface Mode {
 }
 
 const MONTHLY: Mode = { benchmark: 170 * LAKH, fineStep: 20 * LAKH, coarseStep: 50 * LAKH, label: "Benchmark ₹1.70 Cr" };
-const FY: Mode = { benchmark: 23 * CRORE, fineStep: 50 * LAKH, coarseStep: 5 * CRORE, label: "Benchmark ₹23 Cr" };
+const FY: Mode = { benchmark: 230 * LAKH, fineStep: 50 * LAKH, coarseStep: 50 * LAKH, label: "Benchmark ₹2.30 Cr" };
 
-/** Series whose max reaches this is an FY-scale series, not months. */
-export const FY_SCALE_THRESHOLD = 5 * CRORE;
+/** A trend with at least this many monthly points is the FY view; fewer is the monthly view. */
+export const FY_VIEW_MIN_POINTS = 3;
 /** Below this share of the benchmark (e.g. a single property) the benchmark isn't meaningful — fall back to a plain scale. */
 const MIN_SHARE_OF_BENCHMARK = 0.5;
 
-export function revenueTrendScale(maxValue: number): RevenueScale {
-  const mode = maxValue >= FY_SCALE_THRESHOLD ? FY : MONTHLY;
+export function revenueTrendScale(maxValue: number, pointCount: number): RevenueScale {
+  const mode = pointCount >= FY_VIEW_MIN_POINTS ? FY : MONTHLY;
 
   if (maxValue < mode.benchmark * MIN_SHARE_OF_BENCHMARK) {
     const step = Math.max(10 * LAKH, Math.ceil(maxValue / 4 / (10 * LAKH)) * 10 * LAKH);
