@@ -76,7 +76,7 @@ async function main() {
     const rankingNames = new Set((await getB2bContractRanking(ACTIVE_PROPERTY_CODES, { period: "custom", customStart: s2, customEnd: e2 } as never)).map((r) => norm(r.company)));
     const mappedSet = new Set((await runQuery<{ n: string }>(`SELECT DISTINCT Bills_due_from n FROM ${table("b2b_bills")} WHERE Bills_due_from IS NOT NULL AND Financial_Year != 'FY 99-00'`)).map((r) => norm(r.n)));
     const pmsSet = new Set((await runQuery<{ n: string }>(`SELECT DISTINCT CompanyName n FROM ${table("sales_company_bills")} WHERE CompanyName IS NOT NULL`)).map((r) => norm(r.n)));
-    let rev = { mapped: 0, pmsOriginal: 0, unnamed: 0, other: 0 };
+    const rev = { mapped: 0, pmsOriginal: 0, unnamed: 0, other: 0 };
     const notInRankings: { name: string; revenue: number }[] = [];
     for (const r of details.zoneA) {
       const k = norm(r.company);
