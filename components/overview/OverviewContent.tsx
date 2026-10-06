@@ -145,7 +145,7 @@ export default function OverviewContent({
     : [{ key: comparison.currentLabel, color: "var(--series-1)" }];
   const maxRevenue = Math.max(0, ...monthlyTrends.current.map((p) => p.revenue), ...monthlyTrends.previous.map((p) => p.revenue));
   // Display-only scale + benchmark line (see lib/format/chartScale.ts); the plotted values are untouched.
-  const revenueScale = revenueTrendScale(maxRevenue);
+  const revenueScale = revenueTrendScale(maxRevenue, monthlyTrends.current.length);
   const TREND_PICK: Record<TrendTab, { pick: (p: TrendSeries["current"][number]) => number | null; valueFormatter: (v: number) => string; yDomain?: [number, number]; yTicks?: number[] }> = {
     Revenue: { pick: (p) => p.revenue, valueFormatter: (v) => formatIndianCurrency(v), yTicks: revenueScale.ticks, yDomain: revenueScale.domain },
     Occupancy: {
