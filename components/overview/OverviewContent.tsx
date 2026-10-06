@@ -28,6 +28,7 @@ import SingleMetricBarChart, { BarDatum } from "@/components/charts/SingleMetric
 import MultiSeriesLineChart from "@/components/charts/MultiSeriesLineChart";
 import DonutChart from "@/components/charts/DonutChart";
 import ProgressBar from "@/components/ui/ProgressBar";
+import { revenueTrendScale } from "@/lib/format/chartScale";
 import { formatIndianCurrency, formatPercent, safeDivide } from "@/lib/format/currency";
 import { CATEGORY_COLOR, CATEGORY_ORDER, BRAND_COLOR, BRAND_ORDER } from "@/lib/design/tokens";
 import { brandOf, Brand } from "@/lib/reference/propertyReference";
@@ -86,20 +87,6 @@ function mergeSeries(
 type TrendTab = "Revenue" | "Occupancy" | "RevPAR" | "ADR";
 const TREND_TABS: TrendTab[] = ["Revenue", "Occupancy", "RevPAR", "ADR"];
 
-// 2026-10-05: Revenue-trend y-axis — coarse 60 L steps up to 1.80 Cr, then 10 L
-// steps above it (so month-to-month differences in the 1.8-2.4 Cr band stay
-// readable). Below 1.8 Cr (e.g. one property) only the coarse ticks apply.
-const LAKH = 100_000;
-function revenueAxisTicks(maxValue: number): number[] {
-  const coarse = [0, 60 * LAKH, 120 * LAKH, 180 * LAKH];
-  if (maxValue <= 180 * LAKH) {
-    while (coarse[coarse.length - 1] < maxValue) coarse.push(coarse[coarse.length - 1] + 60 * LAKH);
-    return coarse;
-  }
-  const top = Math.ceil(maxValue / (10 * LAKH)) * 10 * LAKH;
-  for (let v = 190 * LAKH; v <= top; v += 10 * LAKH) coarse.push(v);
-  return coarse;
-}
 
 // "Occupancy %" specifically isn't addable here — occupancy needs an
 // available-room-nights denominator, and there's no such thing as "available
@@ -157,8 +144,10 @@ export default function OverviewContent({
       ]
     : [{ key: comparison.currentLabel, color: "var(--series-1)" }];
   const maxRevenue = Math.max(0, ...monthlyTrends.current.map((p) => p.revenue), ...monthlyTrends.previous.map((p) => p.revenue));
+  // Display-only scale + benchmark line (see lib/format/chartScale.ts); the plotted values are untouched.
+  const revenueScale = revenueTrendScale(maxRevenue);
   const TREND_PICK: Record<TrendTab, { pick: (p: TrendSeries["current"][number]) => number | null; valueFormatter: (v: number) => string; yDomain?: [number, number]; yTicks?: number[] }> = {
-    Revenue: { pick: (p) => p.revenue, valueFormatter: (v) => formatIndianCurrency(v), yTicks: revenueAxisTicks(maxRevenue), yDomain: [0, revenueAxisTicks(maxRevenue).at(-1)!] },
+    Revenue: { pick: (p) => p.revenue, valueFormatter: (v) => formatIndianCurrency(v), yTicks: revenueScale.ticks, yDomain: revenueScale.domain },
     Occupancy: {
       pick: (p) => (p.occupancyPct !== null ? p.occupancyPct * 100 : null),
       valueFormatter: (v) => `${v.toFixed(0)}%`,
@@ -250,6 +239,7 @@ export default function OverviewContent({
           valueFormatter={activeTrend.valueFormatter}
           yDomain={activeTrend.yDomain}
           yTicks={activeTrend.yTicks}
+          benchmark={trendTab === "Revenue" ? revenueScale.benchmark ?? undefined : undefined}
           height={260}
         />
       </TabbedCard>

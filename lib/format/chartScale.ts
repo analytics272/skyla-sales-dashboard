@@ -1,0 +1,49 @@
+// Revenue-trend y-axis scale with a visible benchmark line (display only — never touches the data).
+//
+// 2026-10-05, per explicit direction:
+//   monthly trend (company-wide months, max well under 5 Cr): benchmark ₹1.7 Cr, ₹20 L steps around/above it
+//   FY-scale trend (series reaching 5 Cr+):                  benchmark ₹23 Cr,  ₹50 L steps around/above it
+// Below the fine-step zone the axis uses coarse steps so it stays readable
+// (otherwise a 23 Cr axis would need ~46 ticks).
+const LAKH = 100_000;
+const CRORE = 100 * LAKH;
+
+export interface RevenueScale {
+  ticks: number[];
+  domain: [number, number];
+  benchmark: { value: number; label: string } | null;
+}
+
+interface Mode {
+  benchmark: number;
+  fineStep: number;
+  coarseStep: number;
+  label: string;
+}
+
+const MONTHLY: Mode = { benchmark: 170 * LAKH, fineStep: 20 * LAKH, coarseStep: 50 * LAKH, label: "Benchmark ₹1.70 Cr" };
+const FY: Mode = { benchmark: 23 * CRORE, fineStep: 50 * LAKH, coarseStep: 5 * CRORE, label: "Benchmark ₹23 Cr" };
+
+/** Series whose max reaches this is an FY-scale series, not months. */
+export const FY_SCALE_THRESHOLD = 5 * CRORE;
+/** Below this share of the benchmark (e.g. a single property) the benchmark isn't meaningful — fall back to a plain scale. */
+const MIN_SHARE_OF_BENCHMARK = 0.5;
+
+export function revenueTrendScale(maxValue: number): RevenueScale {
+  const mode = maxValue >= FY_SCALE_THRESHOLD ? FY : MONTHLY;
+
+  if (maxValue < mode.benchmark * MIN_SHARE_OF_BENCHMARK) {
+    const step = Math.max(10 * LAKH, Math.ceil(maxValue / 4 / (10 * LAKH)) * 10 * LAKH);
+    const top = Math.max(step, Math.ceil(maxValue / step) * step);
+    const ticks: number[] = [];
+    for (let v = 0; v <= top; v += step) ticks.push(v);
+    return { ticks, domain: [0, top], benchmark: null };
+  }
+
+  const fineStart = Math.floor((mode.benchmark - 3 * mode.fineStep) / mode.fineStep) * mode.fineStep;
+  const top = Math.max(Math.ceil(maxValue / mode.fineStep), Math.ceil(mode.benchmark / mode.fineStep)) * mode.fineStep;
+  const ticks: number[] = [];
+  for (let v = 0; v < fineStart; v += mode.coarseStep) ticks.push(v);
+  for (let v = fineStart; v <= top + 1e-6; v += mode.fineStep) ticks.push(v);
+  return { ticks, domain: [0, top], benchmark: { value: mode.benchmark, label: mode.label } };
+}

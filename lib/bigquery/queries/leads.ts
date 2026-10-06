@@ -388,7 +388,10 @@ export async function getBookingPace(filter: LeadsFilter): Promise<number | null
 // Bhanu) plus those 3 source-like entries. Excluded here so this view stays
 // employee-level, matching its purpose — "Leads by source" (a different
 // chart, `getLeadsBySource` below) is where those channel names belong.
-const OWNER_EXCLUDE_SQL = "LOWER(TRIM(Owner)) NOT IN ('business wa', 'website', 'walk in')";
+// 2026-10-06: "sep" (one stray row dated 2026-09-22, no revenue — a month name typed
+// into Owner), "keystack" and "social media" (2024 rows) are also not employees; hidden
+// from owner views only, the lead_tracker rows themselves are untouched.
+const OWNER_EXCLUDE_SQL = "LOWER(TRIM(Owner)) NOT IN ('business wa', 'website', 'walk in', 'sep', 'keystack', 'social media')";
 
 export interface OwnerLeadStats {
   owner: string;
