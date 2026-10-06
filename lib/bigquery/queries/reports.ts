@@ -32,7 +32,8 @@
 // beyond that; the dashboard's period-tab filter never applies here, since
 // each report is inherently scoped to one whole FY at a time.
 import { runQuery, table, fnbTable } from "../client";
-import { REPORT_UNTAGGED_COMPANY } from "@/lib/reference/reportProperties";
+import { REPORT_UNNAMED_COMPANY_SUFFIX } from "@/lib/reference/reportProperties";
+import { dedupB2bBillsCte, normKeySql } from "./companyNaming";
 import { bookingCategorySqlExpr } from "@/lib/reference/bookingSourceMap";
 import { SALES_BOOKING_STAY_FILTER, roomNightUnitsSqlExpr } from "./filters";
 import { getAvailableRoomNightsByProperty } from "./propertyWindows";
@@ -728,18 +729,24 @@ export async function getFolioBasedReport(selectedProperties: string[] | undefin
 
 // --- Report 2: B2B Details --------------------------------------------------
 //
-// 2026-10-06 — now PMS-sourced (b2b_bills is no longer read). Revenue and nights
-// are sales_booking's own B2B-classified stay-nights (the SAME rows the Folio
-// Based Report's "B2B Revenue" row sums, so the two reconcile to the rupee),
-// bucketed by stay month. sales_booking carries no company, so each folio's
-// company comes from sales_company_bills via (Property, FolioNo). Stay-nights
-// whose folio has no company bill yet (checkout not billed / company-bills sync
-// lag — live: most of Sep-Oct 2026) are NOT dropped or guessed: they are grouped
-// as REPORT_UNTAGGED_COMPANY so the report total still equals PMS B2B revenue.
-// The transaction table's own CompanyName is "0" for every row, so it can't help.
+// 2026-10-06 — PMS-sourced revenue (b2b_bills is NOT a revenue source). Revenue and
+// nights are sales_booking's own B2B-classified stay-nights (the SAME rows the Folio
+// Based Report's "B2B Revenue" row sums, so the two reconcile to the rupee), bucketed
+// by stay month.
+//
+// COMPANY NAMES reuse the existing Company Rankings mapping verbatim (see
+// companyNaming.ts): each folio's PMS company is sales_company_bills.CompanyName via
+// (Property, FolioNo); companies are grouped by the shared normalized key; the displayed
+// name is the b2b_bills curated `Bills_due_from` when any folio of the group maps to it,
+// otherwise the ORIGINAL PMS CompanyName. A folio PMS has not billed yet carries no
+// company name in PMS at all (sales_booking only has the guest's name; the transaction
+// table's CompanyName is "0"): if the existing mapping knows it (b2b_bills folio match) it
+// takes that name, otherwise it is listed under its PMS booking source (e.g.
+// "Relocation (B2B) — company not yet billed") so the report total still equals PMS B2B
+// revenue. A valid PMS company name is never replaced by a generic label.
 
 export interface B2bDetailZoneARow {
-  company: string; // PMS company name (sales_company_bills.CompanyName), or REPORT_UNTAGGED_COMPANY
+  company: string; // mapped company name (shared with Company Rankings), else the original PMS CompanyName, else "<PMS source> — company not yet billed"
   totalRevenue: number;
   totalNights: number;
   totalAdr: number | null;
@@ -770,42 +777,63 @@ export async function getB2bDetailReport(selectedProperties: string[] | undefine
   const { start, end } = fyBounds(fy);
 
   const zoneARows = await runQuery<ZoneARawRow>(`
-    WITH comp AS (
+    WITH ${dedupB2bBillsCte()},
+    comp AS (
       SELECT Property, FolioNo, ARRAY_AGG(CompanyName ORDER BY BillDate DESC LIMIT 1)[OFFSET(0)] AS company
       FROM ${table("sales_company_bills")}
       WHERE CompanyName IS NOT NULL AND TRIM(CompanyName) NOT IN ('', '0')
       GROUP BY Property, FolioNo
+    ),
+    stays AS (
+      SELECT
+        b.Source AS source,
+        comp.company AS pms_company,
+        d.Bills_due_from AS mapped_name,
+        CAST(DATE_TRUNC(CAST(b.StayDate AS DATE), MONTH) AS STRING) AS month_start,
+        b.DailyRevenue AS revenue,
+        ${roomNightUnitsSqlExpr("b.")} AS nights
+      FROM ${table("sales_booking")} b
+      LEFT JOIN comp ON comp.Property = b.Property AND comp.FolioNo = b.FolioNo
+      LEFT JOIN dedup_bills d ON d.Property = b.Property AND d.Folio_No = b.FolioNo
+      WHERE b.Property IN UNNEST(@properties) AND CAST(b.StayDate AS DATE) BETWEEN @start AND @end
+        AND ${SALES_BOOKING_STAY_FILTER.replace("BookingStatus", "b.BookingStatus")}
+        AND ${bookingCategorySqlExpr("b.Source")} = 'B2B'
+    ),
+    keyed AS (
+      SELECT *,
+        CASE
+          WHEN pms_company IS NOT NULL THEN ${normKeySql("pms_company")}
+          WHEN mapped_name IS NOT NULL THEN ${normKeySql("mapped_name")}
+          ELSE CONCAT('~', IFNULL(source, ''))
+        END AS grp
+      FROM stays
+    ),
+    agg AS (
+      SELECT grp, month_start, ANY_VALUE(source) AS source, MAX(pms_company) AS pms_company, MAX(mapped_name) AS mapped_name,
+        SUM(revenue) AS revenue, SUM(nights) AS nights
+      FROM keyed
+      GROUP BY grp, month_start
     )
     SELECT
-      COALESCE(comp.company, @untagged) AS company,
-      CAST(DATE_TRUNC(CAST(b.StayDate AS DATE), MONTH) AS STRING) AS month_start,
-      SUM(b.DailyRevenue) AS revenue,
-      SUM(${roomNightUnitsSqlExpr("b.")}) AS nights
-    FROM ${table("sales_booking")} b
-    LEFT JOIN comp ON comp.Property = b.Property AND comp.FolioNo = b.FolioNo
-    WHERE b.Property IN UNNEST(@properties) AND CAST(b.StayDate AS DATE) BETWEEN @start AND @end
-      AND ${SALES_BOOKING_STAY_FILTER.replace("BookingStatus", "b.BookingStatus")}
-      AND ${bookingCategorySqlExpr("b.Source")} = 'B2B'
-    GROUP BY company, month_start
-  `, { properties, start, end, untagged: REPORT_UNTAGGED_COMPANY });
+      -- Same rule as Company Rankings: curated b2b_bills name if ANY folio of the group has one, else the original PMS name.
+      COALESCE(MAX(mapped_name) OVER (PARTITION BY grp), MAX(pms_company) OVER (PARTITION BY grp), CONCAT(IFNULL(source, 'B2B'), @unnamedSuffix)) AS company,
+      month_start, revenue, nights
+    FROM agg
+  `, { properties, start, end, unnamedSuffix: REPORT_UNNAMED_COMPANY_SUFFIX });
 
-  // Company names are typed inconsistently across bills (e.g. "ADP" vs "adp",
-  // "X (Y)" vs "X(Y)"); merge by the same normalized key as b2bContracts.ts,
-  // re-summing per month rather than concatenating, so two variants billing the
-  // same month sum instead of double-listing.
+  // The SQL can still yield the same company under two groups (a folio matched only via
+  // b2b_bills vs one matched via PMS CompanyName whose normalized keys differ but whose
+  // display names agree) — merge those by the normalized DISPLAY name, re-summing per month.
   const normalizeCompanyKey = (name: string) =>
     name.trim().toUpperCase().replace(/\./g, "").replace(/\s*\(/g, " (").replace(/\s+/g, " ");
 
-  const byCompany = new Map<string, { display: string; displayRevenue: number; months: Map<string, { monthLabel: string; revenue: number; nights: number }> }>();
+  const byCompany = new Map<string, { display: string; months: Map<string, { monthLabel: string; revenue: number; nights: number }> }>();
   for (const r of zoneARows) {
     const key = normalizeCompanyKey(r.company);
     let entry = byCompany.get(key);
     if (!entry) {
-      entry = { display: r.company, displayRevenue: r.revenue ?? 0, months: new Map() };
+      entry = { display: r.company, months: new Map() };
       byCompany.set(key, entry);
-    } else if ((r.revenue ?? 0) > entry.displayRevenue) {
-      entry.display = r.company; // display the highest-revenue spelling of the company
-      entry.displayRevenue = r.revenue ?? 0;
     }
     const monthKey = monthSortKeyFromStart(fy, r.month_start);
     const d = new Date(`${r.month_start}T00:00:00`);

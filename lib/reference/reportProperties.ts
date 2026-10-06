@@ -19,5 +19,5 @@ export type ReportProperty = (typeof REPORT_PROPERTIES)[number];
 export type ReportColumn = ReportProperty | "TOTAL";
 export const REPORT_COLUMNS: ReportColumn[] = [...REPORT_PROPERTIES, "TOTAL"];
 
-/** Row label for PMS B2B stay-nights whose folio has no company bill yet — grouped, never guessed, so B2B Details totals still equal PMS B2B revenue. */
-export const REPORT_UNTAGGED_COMPANY = "Company not yet tagged in PMS";
+/** Suffix for B2B Details rows whose folio PMS has not billed to a company yet and the existing mapping doesn't know either — the row reads "<PMS booking source> — company not yet billed", never a name that PMS actually supplied. */
+export const REPORT_UNNAMED_COMPANY_SUFFIX = " — company not yet billed";

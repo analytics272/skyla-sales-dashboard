@@ -5,7 +5,9 @@ import { getFolioBasedReport, getB2bDetailReport } from "../lib/bigquery/queries
 import { SALES_BOOKING_STAY_FILTER } from "../lib/bigquery/queries/filters";
 import { bookingCategorySqlExpr } from "../lib/reference/bookingSourceMap";
 import { fyBounds } from "../lib/reference/financialYear";
-import { REPORT_UNTAGGED_COMPANY } from "../lib/reference/reportProperties";
+import { REPORT_UNNAMED_COMPANY_SUFFIX } from "../lib/reference/reportProperties";
+import { getB2bContractRanking } from "../lib/bigquery/queries/b2bContracts";
+import { ACTIVE_PROPERTY_CODES } from "../lib/reference/propertyReference";
 
 const PROPS = ["KDP", "HTC", "JHS", "BH4", "GB"];
 const inr = (n: number) => Math.round(n).toLocaleString("en-IN");
@@ -48,7 +50,7 @@ async function main() {
     const rOther = sumMonths((m) => m.otherRevenue);
     const rB2b = sumMonths((m) => m.b2bRevenue);
     const b2bDetailTotal = b2b.zoneA.reduce((s, r) => s + r.totalRevenue, 0);
-    const untagged = b2b.zoneA.find((r) => r.company === REPORT_UNTAGGED_COMPANY)?.totalRevenue ?? 0;
+    const untagged = b2b.zoneA.filter((r) => r.company.endsWith(REPORT_UNNAMED_COMPANY_SUFFIX)).reduce((x, r) => x + r.totalRevenue, 0);
 
     console.log("Source / logic                                  BEFORE            AFTER (report)    direct-SQL check");
     console.log(`Room revenue  (sales_booking)                   ${inr(room).padStart(14)}    ${inr(rRoom).padStart(14)}    ${inr(room).padStart(14)}`);
@@ -64,6 +66,34 @@ async function main() {
     check(`${fy}: PMS-only F&B is a small remainder of PMS-posted F&B (not the whole of it)`, pmsOnly <= txPosInPms * 0.25 + 100000, `${inr(pmsOnly)} of ${inr(txPosInPms)} posted`);
     check(`${fy}: Other >= PMS extras (legacy GB only adds before coverage)`, rOther >= txOther - 1, `${inr(rOther)} vs ${inr(txOther)}`);
     check(`${fy}: FO F&B counted once in TOTAL only`, fnbPosFo >= 0 && rFnb >= fnbPosFo, `FO ${inr(fnbPosFo)}`);
+  }
+
+  // ---- company names: B2B Details vs the shared Company Rankings mapping
+  const norm = (n: string) => n.trim().toUpperCase().replace(/\./g, "").replace(/\s*\(/g, " (").replace(/\s+/g, " ");
+  for (const fy2 of ["FY 25-26", "FY 26-27"]) {
+    const { start: s2, end: e2 } = fyBounds(fy2);
+    const details = await getB2bDetailReport(undefined, fy2);
+    const rankingNames = new Set((await getB2bContractRanking(ACTIVE_PROPERTY_CODES, { period: "custom", customStart: s2, customEnd: e2 } as never)).map((r) => norm(r.company)));
+    const mappedSet = new Set((await runQuery<{ n: string }>(`SELECT DISTINCT Bills_due_from n FROM ${table("b2b_bills")} WHERE Bills_due_from IS NOT NULL AND Financial_Year != 'FY 99-00'`)).map((r) => norm(r.n)));
+    const pmsSet = new Set((await runQuery<{ n: string }>(`SELECT DISTINCT CompanyName n FROM ${table("sales_company_bills")} WHERE CompanyName IS NOT NULL`)).map((r) => norm(r.n)));
+    let rev = { mapped: 0, pmsOriginal: 0, unnamed: 0, other: 0 };
+    const notInRankings: { name: string; revenue: number }[] = [];
+    for (const r of details.zoneA) {
+      const k = norm(r.company);
+      if (r.company.endsWith(REPORT_UNNAMED_COMPANY_SUFFIX)) rev.unnamed += r.totalRevenue;
+      else if (mappedSet.has(k)) rev.mapped += r.totalRevenue;
+      else if (pmsSet.has(k)) rev.pmsOriginal += r.totalRevenue;
+      else rev.other += r.totalRevenue;
+      if (!r.company.endsWith(REPORT_UNNAMED_COMPANY_SUFFIX) && !rankingNames.has(k)) notInRankings.push({ name: r.company, revenue: r.totalRevenue });
+    }
+    const named = details.zoneA.filter((r) => !r.company.endsWith(REPORT_UNNAMED_COMPANY_SUFFIX));
+    const sameAsRankings = named.filter((r) => rankingNames.has(norm(r.company))).length;
+    console.log(`\n-- ${fy2} names: ${named.length} named rows, ${sameAsRankings} appear verbatim (normalized) in Company Rankings`);
+    console.log(`   revenue shown under: mapped b2b_bills name ${inr(rev.mapped)} | original PMS name ${inr(rev.pmsOriginal)} | unnamed (no company anywhere) ${inr(rev.unnamed)} | OTHER (must be 0) ${inr(rev.other)}`);
+    notInRankings.sort((a, b) => b.revenue - a.revenue);
+    console.log(`   named rows not in Rankings (Rankings is bill-date based, Details is stay-date based): ${notInRankings.length}; top: ${notInRankings.slice(0, 5).map((x) => `${x.name} (${inr(x.revenue)})`).join("; ")}`);
+    check(`${fy2}: every named B2B Details row is a mapped b2b_bills name or an original PMS name`, rev.other === 0, `other=${inr(rev.other)}`);
+    check(`${fy2}: no row says the old generic "Company not yet tagged in PMS"`, !details.zoneA.some((r) => r.company === "Company not yet tagged in PMS"));
   }
 
   // property filter: KDP only
