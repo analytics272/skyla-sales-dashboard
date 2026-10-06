@@ -18,3 +18,6 @@ export type ReportProperty = (typeof REPORT_PROPERTIES)[number];
 // own F&B figure either.
 export type ReportColumn = ReportProperty | "TOTAL";
 export const REPORT_COLUMNS: ReportColumn[] = [...REPORT_PROPERTIES, "TOTAL"];
+
+/** Row label for PMS B2B stay-nights whose folio has no company bill yet — grouped, never guessed, so B2B Details totals still equal PMS B2B revenue. */
+export const REPORT_UNTAGGED_COMPANY = "Company not yet tagged in PMS";

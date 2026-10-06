@@ -2616,3 +2616,35 @@ the build's own investigation of the B2B Revenue Share formula above.
 **Addendum (2026-10-06):**
 - **Revenue Trends benchmark + scale** (`lib/format/chartScale.ts` `revenueTrendScale(max, pointCount)`, drawn by `MultiSeriesLineChart`'s optional `benchmark` dashed line; display only — plotted values untouched), Overview Trends Revenue tab: **monthly view** (fewer than 3 monthly points, e.g. This Month) -> benchmark ₹1.70 Cr, ticks 0 / 50 L, then 20 L steps from 1.00 Cr past the data max; **FY view** (3+ monthly points, e.g. This FY) -> benchmark ₹2.30 Cr, 50 L steps (0, 50 L, 1.00, 1.50, 2.00, 2.50 Cr…). The requested FY benchmark was "₹23 Cr", but that chart plots monthly revenue (peak ~2.2 Cr) so a 23 Cr line cannot share its axis; the axis had topped out at 2.30 Cr, so ₹2.30 Cr is used — change `FY.benchmark` in `chartScale.ts` if another figure was meant (a true 23 Cr line needs a cumulative-FY chart). A series under half the benchmark (e.g. one property) gets a plain scale with no benchmark line.
 - **Leads owner views:** `OWNER_EXCLUDE_SQL` (`leads.ts`) now also hides `sep` (one stray 2026-09-22 row, no revenue), `keystack` and `social media` (2024 rows) alongside business wa / website / walk in — tabs, owner revenue chart, heatmap and totals now cover Anjali, Dikhita, Rajesh, Sajal, Bhanu only. lead_tracker rows are untouched.
+
+---
+
+## 15. Reports tab — source mapping moved fully to PMS (2026-10-06)
+
+`b2b_bills` is **no longer read by the Reports tab** (it was stale since 2026-08-12 and duplicated B2B revenue PMS already carries). Its freshness check is replaced on this tab by PMS Extra Charges + PMS Company Bills (`syncStatus.ts` `TAB_FRESHNESS_SOURCES.reports`); Bookings still uses b2b_bills for Contract_Status only (unchanged).
+
+| Revenue type | Source table | Logic |
+|---|---|---|
+| Room revenue, nights, B2B / B2C / OTA revenue | `sales_booking` | `DailyRevenue` by StayDate, `SALES_BOOKING_STAY_FILTER`, category via `bookingCategorySqlExpr(Source)` — **unchanged** |
+| F&B revenue | `skyla_data.fnb_sale` **+** PMS-only slice of `sales_transaction_classified` | POS `net_amount` (complete F&B, incl. "Room Posting" bills) + PMS "F&B Service" lines whose POS voucher is **not** in `fnb_sale` + manual F&B postings (no voucher). FO café folded into TOTAL once (unchanged). |
+| Other (extras) revenue | `sales_transaction_classified` | `scope = 'EXTRA_CHARGE'` excluding F&B Service (laundry, taxi, additional occupancy, day use, late checkout, extra mattress, cancellation fees…), `ChargeAmount` (tax-exclusive; taxes are separate rows), by `line_dt`. Before a property's PMS transaction data begins (GB: 2025-07-01) the old GB-only `DailyOtherRevenueExclusiveTax` still applies, so FY24-25 GB keeps matching the finance workbooks. |
+| B2B Revenue Share (Folio) | `sales_booking` | PMS B2B revenue ÷ PMS Room Revenue (plain share like B2C/OTA; was all-time b2b_bills ÷ room revenue, up to 1,000%+). |
+| B2B Details (company × month) | `sales_booking` + `sales_company_bills` | Same B2B-classified stay-nights as the Folio's "B2B Revenue" row (reconciles to the rupee), bucketed by stay month; company from `sales_company_bills` via (Property, FolioNo). Folios with no company bill yet are grouped as **"Company not yet tagged in PMS"** (never guessed/dropped). |
+
+**Why F&B is not simply the PMS transaction table:** PMS "F&B Service" lines are POS bills posted to the room folio — the same sales as `fnb_sale` rows with payment_method "Room Posting" (vouchers match ~92%; BH4/GB/HTC/JHS PMS-posted totals are within 1-3% of POS room-posting totals). Adding them on top would double count. Only the unmatched remainder is added (FY25-26: ₹8.61 L, almost all KDP's 1,556 vouchers missing from POS).
+
+**Transaction table facts** (`sales_transaction_table`, created 2026-10-05, 260,278 rows, Jan 2025 → Oct 2026; KDP/HTC/JHS from Jan 2025, BH4 Feb 2025, GB Jul 2025): extras only — no base "Room Charges" lines (room revenue stays in `sales_booking`); extras have no duplicate rows; its `CompanyName` is "0" on every row, so it cannot name companies.
+
+**Known gap (data pipeline, not code):** `sales_company_bills` ends 2026-09-11 and tags only ~51% of July-2026 B2B revenue (Aug ~64%, Sep ~15%), so FY26-27 B2B Details shows ₹3.28 Cr as "not yet tagged" (FY25-26: ₹23.4 L, FY24-25: ₹15.0 L). The total stays right; the company split needs the company-bills sync to catch up.
+
+**Reconciliation (live, 2026-10-06; `scripts/validate-reports-pms.ts`; all checks pass):**
+
+| | FY 24-25 | FY 25-26 | FY 26-27 |
+|---|---|---|---|
+| Room revenue (old = new) | 21.28 Cr | 23.57 Cr | 13.82 Cr |
+| B2B Details total — old (b2b_bills) | 10.09 Cr | 13.02 Cr | 5.27 Cr |
+| B2B Details total — new (PMS) = Folio B2B = direct PMS | 10.10 Cr | 13.96 Cr | 8.27 Cr |
+| F&B — old (POS only) → new (POS + PMS-only) | 1.79 → 1.79 Cr | 2.15 → 2.23 Cr | 1.27 → 1.29 Cr |
+| Other — old → new | 0.07 → 0.08 Cr | 0.00 → 0.15 Cr | 0.00 → 0.09 Cr |
+
+Verified against the previous code (git HEAD): across all months/properties/columns only F&B, Other, Total Revenue, F&B Share and B2B Revenue Share changed — every other Folio metric is identical.
