@@ -5,6 +5,7 @@ import type { B2bDetailReport } from "@/lib/bigquery/queries/reports";
 import Card from "@/components/ui/Card";
 import SearchInput from "@/components/ui/SearchInput";
 import { formatIndianCurrency } from "@/lib/format/currency";
+import { REPORT_UNTAGGED_COMPANY } from "@/lib/reference/reportProperties";
 
 const rupee = (v: number | null) => (v !== null ? `₹${Math.round(v).toLocaleString("en-IN")}` : "—");
 
@@ -50,6 +51,8 @@ export default function B2bDetailContent({ report }: { report: B2bDetailReport }
 
   const totalRevenue = report.zoneA.reduce((s, r) => s + r.totalRevenue, 0);
   const totalNights = report.zoneA.reduce((s, r) => s + r.totalNights, 0);
+  const taggedCompanyCount = report.zoneA.filter((r) => r.company !== REPORT_UNTAGGED_COMPANY).length;
+  const untagged = report.zoneA.find((r) => r.company === REPORT_UNTAGGED_COMPANY);
 
   return (
     <div className="space-y-4">
@@ -58,8 +61,8 @@ export default function B2bDetailContent({ report }: { report: B2bDetailReport }
       </div>
 
       <Card
-        title={`${report.fy} B2B Details — Company × Month (${report.zoneA.length} companies)`}
-        subtitle="Click a total column to sort. Source: b2b_bills, live — never a cached sheet pivot cell."
+        title={`${report.fy} B2B Details — Company × Month (${taggedCompanyCount} companies)`}
+        subtitle={`Click a total column to sort. Source: PMS — B2B stay revenue by stay month (same B2B Revenue as the Folio Based Report), company from PMS company bills.${untagged ? ` ${formatIndianCurrency(untagged.totalRevenue)} is not yet tagged to a company (company bills lag checkout) and is listed as "${REPORT_UNTAGGED_COMPANY}".` : ""}`}
       >
         {/* Bounded scroll box on both axes — load-bearing, not just sizing:
             see FolioReportTable.tsx's identical comment for why a sticky-

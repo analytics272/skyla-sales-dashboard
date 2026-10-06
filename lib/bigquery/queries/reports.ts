@@ -1,10 +1,24 @@
 // Reports tab — Skyla_Dashboard_Reports_Tab_PRD.md.
 //
+// 2026-10-06 — SOURCE MAPPING (everything here is PMS now; b2b_bills is no
+// longer read anywhere in this file):
+//   Room / B2B / B2C / OTA revenue + nights ... sales_booking (DailyRevenue, by StayDate)
+//   F&B revenue ............................... skyla_data.fnb_sale (POS, net_amount) PLUS two PMS-only
+//                                               slices from sales_transaction_classified that POS lacks:
+//                                               F&B Service lines whose POS voucher is NOT in fnb_sale,
+//                                               and manual F&B postings (no voucher)
+//   Other (extras) revenue .................... sales_transaction_classified, scope EXTRA_CHARGE excluding
+//                                               F&B Service (laundry, taxi, day use, additional occupancy…)
+//   B2B Details (company x month) ............. sales_booking B2B revenue, company from sales_company_bills
+//                                               via (Property, FolioNo)
+// PMS "F&B Service" lines posted to a room folio are the SAME sales already in
+// fnb_sale (payment_method "Room Posting"; verified ~1:1 by voucher no.), so
+// they are never added on top — only the unmatched remainder is.
 // GOVERNING PRINCIPLE (PRD §0): the Revenue Workbook sheets ("Folio Based
 // Report FY 26-27", "FY 26-27 B2B Details") are a template for structure,
 // column labels, and formula shape ONLY. Every number here comes from the
 // same BigQuery tables and query patterns the rest of the dashboard already
-// uses (sales_booking, b2b_bills) — never from reading a cached sheet cell.
+// uses (sales_booking, PMS transaction tables) — never from reading a cached sheet cell.
 // The live sheet's Oct26-Mar27 columns are known to be frozen on April's
 // values (a sheet-side formula bug, confirmed on two independent metric
 // rows) — this file reproduces the sheet's FORMULAS, never its output
@@ -18,6 +32,7 @@
 // beyond that; the dashboard's period-tab filter never applies here, since
 // each report is inherently scoped to one whole FY at a time.
 import { runQuery, table, fnbTable } from "../client";
+import { REPORT_UNTAGGED_COMPANY } from "@/lib/reference/reportProperties";
 import { bookingCategorySqlExpr } from "@/lib/reference/bookingSourceMap";
 import { SALES_BOOKING_STAY_FILTER, roomNightUnitsSqlExpr } from "./filters";
 import { getAvailableRoomNightsByProperty } from "./propertyWindows";
@@ -56,7 +71,7 @@ export function resolveReportProperties(selected: string[] | undefined): ReportP
 export interface FolioReportMetrics {
   roomRevenue: number;
   fnbRevenue: number;
-  /** Ancillary/extras revenue (DailyOtherRevenueExclusiveTax) — see fetchOtherRevenueByMonth's own comment. Zero for every property except GB, where it's real and material. */
+  /** Ancillary/extras revenue (laundry, taxi, day use, additional occupancy…) from PMS transaction lines — see fetchPmsExtras. Before a property's PMS transaction data begins, GB falls back to sales_booking.DailyOtherRevenueExclusiveTax (the old source) and other properties read 0. */
   otherRevenue: number;
   totalRevenue: number;
   fnbRevenueSharePct: number | null;
@@ -70,12 +85,7 @@ export interface FolioReportMetrics {
   b2bNights: number;
   b2bRevenue: number;
   b2bAdr: number | null;
-  /** Non-obvious by design (PRD §1.2) — b2b_bills' ALL-TIME Room_Revenue for
-   * this property (a separate, cumulative contract-billing figure) divided
-   * by THIS block's sales_booking Room Revenue. Can legitimately exceed
-   * 100% (verified against the PRD's own worked example: KDP's all-time
-   * b2b_bills revenue is multiple times its FY26-27 sales_booking revenue).
-   * Do not "fix" this to look like a normal share — it isn't one. */
+  /** 2026-10-06: now a plain share like B2C/OTA — this block's PMS B2B revenue ÷ its PMS Room Revenue. (It used to divide b2b_bills' ALL-TIME revenue by the block's room revenue and could exceed 100%; b2b_bills is no longer a source.) */
   b2bRevenueSharePct: number | null;
   b2cNights: number;
   b2cRevenue: number;
@@ -134,7 +144,6 @@ interface BaseFacts {
   b2cRevenue: number;
   otaNights: number;
   otaRevenue: number;
-  b2bBillsRevenueAllTime: number;
   expatBookings: number;
   expatRevenue: number;
   expatNights: number;
@@ -144,7 +153,7 @@ interface BaseFacts {
 const EMPTY_FACTS: BaseFacts = {
   roomRevenue: 0, fnbRevenue: 0, otherRevenue: 0, availableRoomNights: 0, soldRoomNights: 0, guestsServed: 0,
   totalBookings: 0, repeatBookings: 0, b2bNights: 0, b2bRevenue: 0, b2cNights: 0, b2cRevenue: 0,
-  otaNights: 0, otaRevenue: 0, b2bBillsRevenueAllTime: 0, expatBookings: 0, expatRevenue: 0,
+  otaNights: 0, otaRevenue: 0, expatBookings: 0, expatRevenue: 0,
   expatNights: 0, expatRepeatBookings: 0,
 };
 
@@ -164,7 +173,6 @@ function sumFacts(a: BaseFacts, b: BaseFacts): BaseFacts {
     b2cRevenue: a.b2cRevenue + b.b2cRevenue,
     otaNights: a.otaNights + b.otaNights,
     otaRevenue: a.otaRevenue + b.otaRevenue,
-    b2bBillsRevenueAllTime: a.b2bBillsRevenueAllTime + b.b2bBillsRevenueAllTime,
     expatBookings: a.expatBookings + b.expatBookings,
     expatRevenue: a.expatRevenue + b.expatRevenue,
     expatNights: a.expatNights + b.expatNights,
@@ -190,7 +198,7 @@ function deriveMetrics(f: BaseFacts): FolioReportMetrics {
     b2bNights: f.b2bNights,
     b2bRevenue: f.b2bRevenue,
     b2bAdr: safeDivide(f.b2bRevenue, f.b2bNights),
-    b2bRevenueSharePct: safeDivide(f.b2bBillsRevenueAllTime, f.roomRevenue),
+    b2bRevenueSharePct: safeDivide(f.b2bRevenue, f.roomRevenue),
     b2cNights: f.b2cNights,
     b2cRevenue: f.b2cRevenue,
     b2cAdr: safeDivide(f.b2cRevenue, f.b2cNights),
@@ -342,8 +350,15 @@ interface OtherRevenueRow {
   other_revenue: number | null;
 }
 
-async function fetchOtherRevenueByMonth(properties: string[], fy: string): Promise<OtherRevenueRow[]> {
+// 2026-10-06 — LEGACY Other Revenue (GB only), now used ONLY for dates before a
+// property's PMS transaction data begins (`pmsCoverageStart` below) — GB's
+// transaction rows start 2025-07-01, so GB's FY24-25 / early FY25-26 months keep
+// reconciling to the finance workbooks exactly as before. `legacyEnd` clips the
+// range to the day before that coverage start so the two sources never overlap.
+async function fetchLegacyOtherRevenueByMonth(properties: string[], fy: string, legacyEnd: string): Promise<OtherRevenueRow[]> {
   const { start, end } = fyBounds(fy);
+  const clippedEnd = legacyEnd < end ? legacyEnd : end;
+  if (clippedEnd < start) return [];
   return runQuery<OtherRevenueRow>(`
     SELECT
       Property AS property,
@@ -352,17 +367,100 @@ async function fetchOtherRevenueByMonth(properties: string[], fy: string): Promi
     FROM ${table("sales_booking")}
     WHERE Property IN UNNEST(@properties) AND Property = 'GB' AND CAST(StayDate AS DATE) BETWEEN @start AND @end AND ${SALES_BOOKING_STAY_FILTER}
     GROUP BY property, month_start
-  `, { properties, start, end });
+  `, { properties, start, end: clippedEnd });
 }
 
-async function fetchOtherRevenueTillDate(properties: string[], start: string, end: string): Promise<OtherRevenueRow[]> {
+async function fetchLegacyOtherRevenueTillDate(properties: string[], start: string, end: string, legacyEnd: string): Promise<OtherRevenueRow[]> {
+  const clippedEnd = legacyEnd < end ? legacyEnd : end;
+  if (clippedEnd < start) return [];
   const rows = await runQuery<Omit<OtherRevenueRow, "month_start">>(`
     SELECT Property AS property, SUM(DailyOtherRevenueExclusiveTax) AS other_revenue
     FROM ${table("sales_booking")}
     WHERE Property IN UNNEST(@properties) AND Property = 'GB' AND CAST(StayDate AS DATE) BETWEEN @start AND @end AND ${SALES_BOOKING_STAY_FILTER}
     GROUP BY property
+  `, { properties, start, end: clippedEnd });
+  return rows.map((r) => ({ ...r, month_start: null }));
+}
+
+// 2026-10-06 — PMS transaction lines (sales_transaction_classified, a view over
+// sales_transaction_table: one row per charge line, ChargeAmount is tax-exclusive,
+// taxes are separate rows). Dated by DetailRecordDate (line_dt), like fnb_sale's `date`.
+//   other_revenue  = EXTRA_CHARGE lines that are NOT F&B Service (laundry, taxi, day use, late
+//                    checkout, additional occupancy, extra mattress, cancellation fees…)
+//   pms_only_fnb   = F&B that fnb_sale (POS) does not contain: (a) F&B Service lines with a POS
+//                    voucher that has no matching receipt/order no. in fnb_sale for that
+//                    property (verified live: ~1,556 KDP FY25-26 lines, ₹7.7 L), and
+//                    (b) manual F&B postings with no POS voucher. Matched vouchers are the
+//                    same sales as POS "Room Posting" bills and are deliberately NOT added.
+// POS keys are DISTINCT per (property, key) so the LEFT JOIN cannot fan out.
+interface PmsExtrasRow {
+  property: string;
+  month_start: string | null;
+  other_revenue: number | null;
+  pms_only_fnb: number | null;
+}
+
+const PMS_EXTRAS_SELECT = `
+    WITH tx AS (
+      SELECT Property, line_dt, charge_type, is_pos_bill, ChargeAmount,
+        REGEXP_EXTRACT(ChargeDescription, r'Voucher no : ([^, ]+)') AS voucher
+      FROM ${table("sales_transaction_classified")}
+      WHERE scope = 'EXTRA_CHARGE' AND Property IN UNNEST(@properties) AND line_dt BETWEEN @start AND @end
+    ),
+    pos AS (
+      SELECT DISTINCT property, receipt_no AS k FROM ${fnbTable("fnb_sale")} WHERE receipt_no IS NOT NULL
+      UNION DISTINCT
+      SELECT DISTINCT property, order_no AS k FROM ${fnbTable("fnb_sale")} WHERE order_no IS NOT NULL
+    )`;
+
+async function fetchPmsExtrasByMonth(properties: string[], fy: string): Promise<PmsExtrasRow[]> {
+  const { start, end } = fyBounds(fy);
+  return runQuery<PmsExtrasRow>(`${PMS_EXTRAS_SELECT}
+    SELECT tx.Property AS property, CAST(DATE_TRUNC(tx.line_dt, MONTH) AS STRING) AS month_start,
+      SUM(IF(tx.charge_type NOT LIKE 'F&B Service%', tx.ChargeAmount, 0)) AS other_revenue,
+      SUM(IF(tx.charge_type LIKE 'F&B Service (manual%' OR (tx.is_pos_bill AND pos.k IS NULL), tx.ChargeAmount, 0)) AS pms_only_fnb
+    FROM tx LEFT JOIN pos ON pos.property = tx.Property AND pos.k = tx.voucher
+    GROUP BY property, month_start
+  `, { properties, start, end });
+}
+
+async function fetchPmsExtrasTillDate(properties: string[], start: string, end: string): Promise<PmsExtrasRow[]> {
+  const rows = await runQuery<Omit<PmsExtrasRow, "month_start">>(`${PMS_EXTRAS_SELECT}
+    SELECT tx.Property AS property,
+      SUM(IF(tx.charge_type NOT LIKE 'F&B Service%', tx.ChargeAmount, 0)) AS other_revenue,
+      SUM(IF(tx.charge_type LIKE 'F&B Service (manual%' OR (tx.is_pos_bill AND pos.k IS NULL), tx.ChargeAmount, 0)) AS pms_only_fnb
+    FROM tx LEFT JOIN pos ON pos.property = tx.Property AND pos.k = tx.voucher
+    GROUP BY property
   `, { properties, start, end });
   return rows.map((r) => ({ ...r, month_start: null }));
+}
+
+/** First date each property has ANY row in the PMS transaction table (taxes included) — from here on, extras come from PMS transactions; before it, the legacy GB-only source applies. */
+async function fetchPmsCoverageStart(): Promise<Record<string, string>> {
+  const rows = await runQuery<{ property: string; first_dt: string | null }>(`
+    SELECT Property AS property, CAST(MIN(line_dt) AS STRING) AS first_dt
+    FROM ${table("sales_transaction_classified")}
+    GROUP BY property
+  `);
+  return Object.fromEntries(rows.filter((r) => r.first_dt).map((r) => [r.property, r.first_dt as string]));
+}
+
+/** Merges PMS-only F&B into the POS F&B rows (same property+month key), creating a row where POS has none. */
+function mergePmsOnlyFnb(fnbRows: FnbRevenueRow[], extras: PmsExtrasRow[]): FnbRevenueRow[] {
+  const out = fnbRows.map((r) => ({ ...r }));
+  for (const e of extras) {
+    const add = e.pms_only_fnb ?? 0;
+    if (!add) continue;
+    const hit = out.find((r) => r.property === e.property && r.month_start === e.month_start);
+    if (hit) hit.fnb_revenue = (hit.fnb_revenue ?? 0) + add;
+    else out.push({ property: e.property, month_start: e.month_start, fnb_revenue: add });
+  }
+  return out;
+}
+
+/** PMS other_revenue rows as OtherRevenueRow (same shape the legacy rows use), so the two sources concatenate. */
+function pmsOtherRows(extras: PmsExtrasRow[]): OtherRevenueRow[] {
+  return extras.map((e) => ({ property: e.property, month_start: e.month_start, other_revenue: e.other_revenue }));
 }
 
 /**
@@ -461,22 +559,11 @@ async function fetchBookingsForRange(properties: string[], start: string, end: s
   return rows;
 }
 
-async function fetchB2bBillsRevenueAllTime(properties: string[]): Promise<Record<string, number>> {
-  const rows = await runQuery<{ property: string; revenue: number | null }>(`
-    SELECT Property AS property, SUM(Room_Revenue) AS revenue
-    FROM ${table("b2b_bills")}
-    WHERE Property IN UNNEST(@properties) AND Financial_Year != 'FY 99-00'
-    GROUP BY property
-  `, { properties });
-  return Object.fromEntries(rows.map((r) => [r.property, r.revenue ?? 0]));
-}
-
 function buildFactsByProperty(
   properties: ReportProperty[],
   revCat: RevenueCategoryRow[],
   bookings: BookingRow[],
   availableByProperty: Record<string, number>,
-  b2bBillsAllTime: Record<string, number>,
   fnbByProperty: Record<string, number>,
   otherByProperty: Record<string, number>
 ): Record<ReportProperty, BaseFacts> {
@@ -484,7 +571,6 @@ function buildFactsByProperty(
   for (const p of properties) {
     const facts: BaseFacts = { ...EMPTY_FACTS };
     facts.availableRoomNights = availableByProperty[p] ?? 0;
-    facts.b2bBillsRevenueAllTime = b2bBillsAllTime[p] ?? 0;
     facts.fnbRevenue = fnbByProperty[p] ?? 0;
     facts.otherRevenue = otherByProperty[p] ?? 0;
     for (const r of revCat.filter((x) => x.property === p)) {
@@ -529,7 +615,8 @@ function applyHistoricalOverride(facts: BaseFacts, property: string, monthKey: s
   return {
     ...facts,
     soldRoomNights: override.soldRoomNights ?? facts.soldRoomNights,
-    roomRevenue: override.totalRevenue !== undefined ? override.totalRevenue - facts.otherRevenue : facts.roomRevenue,
+    // Workbook "Revenue" = Room + Other for GB, Room only for every other property — so Other is backed out for GB only (extras are now real for every property).
+    roomRevenue: override.totalRevenue !== undefined ? override.totalRevenue - (property === "GB" ? facts.otherRevenue : 0) : facts.roomRevenue,
   };
 }
 
@@ -559,15 +646,20 @@ export async function getFolioBasedReport(selectedProperties: string[] | undefin
   // till date is FY 24-25's start through 19 Sep 2026" before this fix.
   const tillDateEnd = today < fyEnd ? today : fyEnd;
 
+  const coverageStart = await fetchPmsCoverageStart();
+  // Legacy (GB-only) Other Revenue stops the day before GB's PMS transaction data begins.
+  const dayBefore = (iso: string) => new Date(new Date(`${iso}T00:00:00Z`).getTime() - 86400000).toISOString().slice(0, 10);
+  const legacyEnd = coverageStart.GB ? dayBefore(coverageStart.GB) : "9999-12-31";
+
   const [
-    revCatMonthly, bookingsMonthly, revCatTillDate, bookingsTillDate, b2bBillsAllTime,
-    availableByMonth, availableTillDate, fnbMonthlyRows, fnbTillDateRows, otherMonthlyRows, otherTillDateRows,
+    revCatMonthly, bookingsMonthly, revCatTillDate, bookingsTillDate,
+    availableByMonth, availableTillDate, posMonthlyRows, posTillDateRows, legacyOtherMonthly, legacyOtherTillDate,
+    pmsExtrasMonthly, pmsExtrasTillDate,
   ] = await Promise.all([
       fetchRevenueCategoryByMonth(properties, fy),
       fetchBookingsByMonth(properties, fy),
       fetchRevenueCategoryTillDate(properties, fyStart, tillDateEnd),
       fetchBookingsTillDate(properties, fyStart, tillDateEnd),
-      fetchB2bBillsRevenueAllTime(properties),
       Promise.all(
         Array.from({ length: 12 }, (_, i) => i + 1).map((fiscalMonth) =>
           getAvailableRoomNightsByProperty(properties, fyMonthBounds(fy, calendarMonthFromFiscal(fiscalMonth)))
@@ -576,19 +668,32 @@ export async function getFolioBasedReport(selectedProperties: string[] | undefin
       getAvailableRoomNightsByProperty(properties, { start: fyStart, end: tillDateEnd } as DateRange),
       fetchFnbRevenueByMonth(fy),
       fetchFnbRevenueTillDate(fyStart, tillDateEnd),
-      fetchOtherRevenueByMonth(properties, fy),
-      fetchOtherRevenueTillDate(properties, fyStart, tillDateEnd),
+      fetchLegacyOtherRevenueByMonth(properties, fy, legacyEnd),
+      fetchLegacyOtherRevenueTillDate(properties, fyStart, tillDateEnd, legacyEnd),
+      fetchPmsExtrasByMonth(properties, fy),
+      fetchPmsExtrasTillDate(properties, fyStart, tillDateEnd),
     ]);
 
-  const fnbTillDateByProperty = Object.fromEntries(fnbTillDateRows.map((r) => [r.property, r.fnb_revenue ?? 0]));
-  const otherTillDateByProperty = Object.fromEntries(otherTillDateRows.map((r) => [r.property, r.other_revenue ?? 0]));
+  // F&B = POS + the PMS-only slice; Other = PMS extras (+ legacy GB before PMS coverage).
+  const fnbMonthlyRows = mergePmsOnlyFnb(posMonthlyRows, pmsExtrasMonthly);
+  const fnbTillDateRows = mergePmsOnlyFnb(posTillDateRows, pmsExtrasTillDate);
+  const otherMonthlyRows = [...legacyOtherMonthly, ...pmsOtherRows(pmsExtrasMonthly)];
+  const otherTillDateRows = [...legacyOtherTillDate, ...pmsOtherRows(pmsExtrasTillDate)];
+
+  const sumBy = <T extends { property: string }>(rows: T[], pick: (r: T) => number | null): Record<string, number> => {
+    const out: Record<string, number> = {};
+    for (const r of rows) out[r.property] = (out[r.property] ?? 0) + (pick(r) ?? 0);
+    return out;
+  };
+  const fnbTillDateByProperty = sumBy(fnbTillDateRows, (r) => r.fnb_revenue);
+  const otherTillDateByProperty = sumBy(otherTillDateRows, (r) => r.other_revenue);
   // 2026-09-21: historicalPropertyOverrides.ts's fallback is NOT applied
   // here — "Overall – till date" is an independently-queried range total,
   // not a sum of the month blocks below, and neither reference workbook
   // has an "Overall" concept to override against in the first place (both
   // are purely month-by-month). The gap this leaves is small and bounded
   // to whichever override months fall inside the selected FY.
-  const overallFacts = buildFactsByProperty(properties, revCatTillDate, bookingsTillDate, availableTillDate, b2bBillsAllTime, fnbTillDateByProperty, otherTillDateByProperty);
+  const overallFacts = buildFactsByProperty(properties, revCatTillDate, bookingsTillDate, availableTillDate, fnbTillDateByProperty, otherTillDateByProperty);
   const overall: FolioReportBlock = {
     key: "overall",
     label: "Overall – till date",
@@ -601,13 +706,9 @@ export async function getFolioBasedReport(selectedProperties: string[] | undefin
     const bounds = fyMonthBounds(fy, calendarMonth);
     const monthRows = revCatMonthly.filter((r) => r.month_start === bounds.start);
     const monthBookings = bookingsMonthly.filter((r) => r.month_start === bounds.start);
-    const monthFnbByProperty = Object.fromEntries(
-      fnbMonthlyRows.filter((r) => r.month_start === bounds.start).map((r) => [r.property, r.fnb_revenue ?? 0])
-    );
-    const monthOtherByProperty = Object.fromEntries(
-      otherMonthlyRows.filter((r) => r.month_start === bounds.start).map((r) => [r.property, r.other_revenue ?? 0])
-    );
-    const rawFacts = buildFactsByProperty(properties, monthRows, monthBookings, availableByMonth[fiscalMonth - 1], b2bBillsAllTime, monthFnbByProperty, monthOtherByProperty);
+    const monthFnbByProperty = sumBy(fnbMonthlyRows.filter((r) => r.month_start === bounds.start), (r) => r.fnb_revenue);
+    const monthOtherByProperty = sumBy(otherMonthlyRows.filter((r) => r.month_start === bounds.start), (r) => r.other_revenue);
+    const rawFacts = buildFactsByProperty(properties, monthRows, monthBookings, availableByMonth[fiscalMonth - 1], monthFnbByProperty, monthOtherByProperty);
     const facts = Object.fromEntries(
       properties.map((p) => [p, applyHistoricalOverride(rawFacts[p], p, bounds.start)])
     ) as Record<ReportProperty, BaseFacts>;
@@ -625,10 +726,20 @@ export async function getFolioBasedReport(selectedProperties: string[] | undefin
   return { fy, asOfLabel, columns: [...properties, "TOTAL"], overall, months };
 }
 
-// --- Report 2: FY 26-27 B2B Details --------------------------------------
+// --- Report 2: B2B Details --------------------------------------------------
+//
+// 2026-10-06 — now PMS-sourced (b2b_bills is no longer read). Revenue and nights
+// are sales_booking's own B2B-classified stay-nights (the SAME rows the Folio
+// Based Report's "B2B Revenue" row sums, so the two reconcile to the rupee),
+// bucketed by stay month. sales_booking carries no company, so each folio's
+// company comes from sales_company_bills via (Property, FolioNo). Stay-nights
+// whose folio has no company bill yet (checkout not billed / company-bills sync
+// lag — live: most of Sep-Oct 2026) are NOT dropped or guessed: they are grouped
+// as REPORT_UNTAGGED_COMPANY so the report total still equals PMS B2B revenue.
+// The transaction table's own CompanyName is "0" for every row, so it can't help.
 
 export interface B2bDetailZoneARow {
-  company: string; // Bills_due_from
+  company: string; // PMS company name (sales_company_bills.CompanyName), or REPORT_UNTAGGED_COMPANY
   totalRevenue: number;
   totalNights: number;
   totalAdr: number | null;
@@ -642,60 +753,69 @@ export interface B2bDetailReport {
 
 interface ZoneARawRow {
   company: string;
-  month: string; // e.g. "Apr 26"
+  month_start: string; // ISO first-of-month
   revenue: number | null;
   nights: number | null;
 }
 
-/** Fiscal-month order for "Apr 26".."Mar 27"-style labels, so Zone A's month columns render Apr->Mar rather than the table's own arbitrary/alphabetical row order. */
-function monthSortKey(fy: string, label: string): string {
-  const m = /^(\w{3})[\s-]?(\d{2})$/.exec(label.trim());
-  if (!m) return label;
-  const idx = MONTH_ABBR.indexOf(m[1]);
-  if (idx < 0) return label;
-  const calendarMonth = idx + 1;
+/** Fiscal-order sort key for a month: `${fy}-01` (Apr) … `${fy}-12` (Mar). */
+function monthSortKeyFromStart(fy: string, monthStart: string): string {
+  const calendarMonth = parseInt(monthStart.slice(5, 7), 10);
   const fiscal = calendarMonth >= 4 ? calendarMonth - 3 : calendarMonth + 9;
   return `${fy}-${String(fiscal).padStart(2, "0")}`;
 }
 
 export async function getB2bDetailReport(selectedProperties: string[] | undefined, fy: string = currentFYLabel()): Promise<B2bDetailReport> {
   const properties = resolveReportProperties(selectedProperties);
+  const { start, end } = fyBounds(fy);
 
   const zoneARows = await runQuery<ZoneARawRow>(`
-    SELECT Bills_due_from AS company, Month AS month, SUM(Room_Revenue) AS revenue, SUM(Nights) AS nights
-    FROM ${table("b2b_bills")}
-    WHERE Property IN UNNEST(@properties) AND Financial_Year = @fy AND Bills_due_from IS NOT NULL
-    GROUP BY company, month
-  `, { properties, fy });
+    WITH comp AS (
+      SELECT Property, FolioNo, ARRAY_AGG(CompanyName ORDER BY BillDate DESC LIMIT 1)[OFFSET(0)] AS company
+      FROM ${table("sales_company_bills")}
+      WHERE CompanyName IS NOT NULL AND TRIM(CompanyName) NOT IN ('', '0')
+      GROUP BY Property, FolioNo
+    )
+    SELECT
+      COALESCE(comp.company, @untagged) AS company,
+      CAST(DATE_TRUNC(CAST(b.StayDate AS DATE), MONTH) AS STRING) AS month_start,
+      SUM(b.DailyRevenue) AS revenue,
+      SUM(${roomNightUnitsSqlExpr("b.")}) AS nights
+    FROM ${table("sales_booking")} b
+    LEFT JOIN comp ON comp.Property = b.Property AND comp.FolioNo = b.FolioNo
+    WHERE b.Property IN UNNEST(@properties) AND CAST(b.StayDate AS DATE) BETWEEN @start AND @end
+      AND ${SALES_BOOKING_STAY_FILTER.replace("BookingStatus", "b.BookingStatus")}
+      AND ${bookingCategorySqlExpr("b.Source")} = 'B2B'
+    GROUP BY company, month_start
+  `, { properties, start, end, untagged: REPORT_UNTAGGED_COMPANY });
 
-  // 2026-09-17: Bills_due_from is a curated field (one entry per contract,
-  // not per-invoice free text like sales_company_bills.CompanyName), but
-  // still gets typed inconsistently across bills by different staff —
-  // confirmed live: "ADP" vs "adp", "Vyjayanthi Movies" vs "VYJAYANTHI
-  // MOVIES". Same normalization as b2bContracts.ts's company-name dedup
-  // (see that file's header comment for the full story), applied here in
-  // JS since the (company, month) grouping already happens client-side —
-  // merge by the normalized key, re-summing per month (not just
-  // concatenating byMonth rows) in case two variants both billed the same
-  // month, which a naive merge would otherwise double-list instead of sum.
+  // Company names are typed inconsistently across bills (e.g. "ADP" vs "adp",
+  // "X (Y)" vs "X(Y)"); merge by the same normalized key as b2bContracts.ts,
+  // re-summing per month rather than concatenating, so two variants billing the
+  // same month sum instead of double-listing.
   const normalizeCompanyKey = (name: string) =>
     name.trim().toUpperCase().replace(/\./g, "").replace(/\s*\(/g, " (").replace(/\s+/g, " ");
 
-  const byCompany = new Map<string, { display: string; months: Map<string, { monthLabel: string; revenue: number; nights: number }> }>();
+  const byCompany = new Map<string, { display: string; displayRevenue: number; months: Map<string, { monthLabel: string; revenue: number; nights: number }> }>();
   for (const r of zoneARows) {
     const key = normalizeCompanyKey(r.company);
     let entry = byCompany.get(key);
     if (!entry) {
-      entry = { display: r.company, months: new Map() };
+      entry = { display: r.company, displayRevenue: r.revenue ?? 0, months: new Map() };
       byCompany.set(key, entry);
+    } else if ((r.revenue ?? 0) > entry.displayRevenue) {
+      entry.display = r.company; // display the highest-revenue spelling of the company
+      entry.displayRevenue = r.revenue ?? 0;
     }
-    const monthKey = monthSortKey(fy, r.month);
+    const monthKey = monthSortKeyFromStart(fy, r.month_start);
+    const d = new Date(`${r.month_start}T00:00:00`);
+    const monthLabel = `${MONTH_ABBR[d.getMonth()]} ${String(d.getFullYear()).slice(-2)}`;
     const existingMonth = entry.months.get(monthKey);
     if (existingMonth) {
       existingMonth.revenue += r.revenue ?? 0;
       existingMonth.nights += r.nights ?? 0;
     } else {
-      entry.months.set(monthKey, { monthLabel: r.month, revenue: r.revenue ?? 0, nights: r.nights ?? 0 });
+      entry.months.set(monthKey, { monthLabel, revenue: r.revenue ?? 0, nights: r.nights ?? 0 });
     }
   }
 
@@ -704,8 +824,8 @@ export async function getB2bDetailReport(selectedProperties: string[] | undefine
       const byMonth = [...months.entries()]
         .map(([monthKey, m]) => ({ monthKey, monthLabel: m.monthLabel, revenue: m.revenue, nights: m.nights, adr: safeDivide(m.revenue, m.nights) }))
         .sort((a, b) => a.monthKey.localeCompare(b.monthKey));
-      const totalRevenue = byMonth.reduce((s, m) => s + m.revenue, 0);
-      const totalNights = byMonth.reduce((s, m) => s + m.nights, 0);
+      const totalRevenue = byMonth.reduce((sum, m) => sum + m.revenue, 0);
+      const totalNights = byMonth.reduce((sum, m) => sum + m.nights, 0);
       return { company: display, totalRevenue, totalNights, totalAdr: safeDivide(totalRevenue, totalNights), byMonth };
     })
     .sort((a, b) => b.totalRevenue - a.totalRevenue);

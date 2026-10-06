@@ -67,11 +67,8 @@ const ROWS: Row[] = [
   { kind: "metric", label: "B2B Nights", value: (m) => count(m.b2bNights) },
   { kind: "metric", label: "B2B Revenue", value: (m) => money(m.b2bRevenue) },
   { kind: "metric", label: "B2B ADR", value: (m) => rupee(m.b2bAdr) },
-  // 2026-09-21: this ratio's own type (FolioReportMetrics.b2bRevenueSharePct)
-  // already documents why it can legitimately exceed 100% (all-time
-  // b2b_bills revenue ÷ this block's period Room Revenue, PRD §1.2) — that
-  // was a confirmed, by-design decision, not an open question, so no more
-  // warning-triangle here either (same treatment as the B2C/OTA rows above).
+  // 2026-10-06: PMS B2B revenue ÷ this block's PMS Room Revenue — a plain share,
+  // same as the B2C/OTA rows below (it used to be all-time b2b_bills revenue).
   { kind: "metric", label: "B2B Revenue Share", value: (m) => pct(m.b2bRevenueSharePct) },
 
   { kind: "section", label: "B2C" },

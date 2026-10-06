@@ -44,7 +44,7 @@ export async function getLastSyncTime(): Promise<SyncStatus> {
 // column silently retyped STRING -> DATE/INT64, which turns a query into a
 // hard BigQuery error, not a soft NULL) can only mark THAT source as
 // erroring, never take down freshness reporting for every other tab too.
-export type FreshnessSourceKey = "pms" | "leads" | "b2bBills" | "fnb";
+export type FreshnessSourceKey = "pms" | "leads" | "b2bBills" | "fnb" | "transactions" | "companyBills";
 
 interface FreshnessSourceDef {
   label: string;
@@ -85,6 +85,20 @@ const SOURCES: Record<FreshnessSourceKey, FreshnessSourceDef> = {
       return rows[0]?.d ?? null;
     },
   },
+  transactions: {
+    label: "PMS Extra Charges",
+    fetchMaxDate: async () => {
+      const rows = await runQuery<{ d: string | null }>(`SELECT CAST(MAX(line_dt) AS STRING) AS d FROM ${table("sales_transaction_classified")}`);
+      return rows[0]?.d ?? null;
+    },
+  },
+  companyBills: {
+    label: "PMS Company Bills",
+    fetchMaxDate: async () => {
+      const rows = await runQuery<{ d: string | null }>(`SELECT CAST(MAX(CAST(BillDate AS DATE)) AS STRING) AS d FROM ${table("sales_company_bills")}`);
+      return rows[0]?.d ?? null;
+    },
+  },
   fnb: {
     label: "F&B Sales",
     fetchMaxDate: async () => {
@@ -104,7 +118,7 @@ export const TAB_FRESHNESS_SOURCES: Record<string, FreshnessSourceKey[]> = {
   bookings: ["pms", "b2bBills"],
   leads: ["leads"],
   performance: ["pms"],
-  reports: ["pms", "b2bBills", "fnb"],
+  reports: ["pms", "transactions", "companyBills", "fnb"], // b2b_bills dropped 2026-10-06 — Reports is fully PMS-sourced now
 };
 
 export interface DataFreshness {
